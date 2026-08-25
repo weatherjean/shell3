@@ -8,7 +8,7 @@ import (
 )
 
 // The completion outbox makes background-work delivery restart-durable
-// (runs.Store's outbox table, schema v7). Two row kinds:
+// (runs.Store's outbox table). Two row kinds:
 //
 //   - "event": a finished job's CompletionEvent, written by dispatchCompletion
 //     before routing and deleted after the front-end hand-off returns.
@@ -20,13 +20,11 @@ import (
 //     job whose result was lost in flight; recovery reports it as such.
 //
 // RecoverCompletions is the boot-time pass, run by the long-lived front-ends
-// (telegram) after their CompletionHost is installed — never by ask,
-// which matches the janitors' start-time-only shape. Rows written by a
-// CONCURRENT process (an ask running alongside the bot) are protected by the
-// marker's PID: a live PID is skipped, and ask deletes its own rows as its
-// jobs finish. An ask killed mid-job does leave rows a later bot start will
-// report — deliberate: a completion is never silently lost, whoever spawned
-// it.
+// after their CompletionHost is installed, never by ask. A concurrent
+// process's rows are protected by the marker's PID: a live PID is skipped, and
+// ask deletes its own rows as jobs finish. An ask killed mid-job does leave
+// rows a later bot start reports — deliberate, since a completion is never
+// silently lost whoever spawned it.
 
 // runningMarker is the JSON body of a "running" outbox row.
 type runningMarker struct {
@@ -42,9 +40,8 @@ type runningMarker struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
-// persistEvent writes ev's outbox row, returning 0 when no store is wired or
-// the write fails — durability is best-effort on top of normal delivery, and
-// a store hiccup must not block the completion itself.
+// persistEvent writes ev's row, 0 when there is no store or the write fails:
+// durability rides on top of normal delivery and must not block it.
 func (m *jobManager) persistEvent(ev CompletionEvent) int64 {
 	if m.rt == nil || m.rt.store == nil {
 		return 0
@@ -68,8 +65,8 @@ func (m *jobManager) deleteOutboxRow(id int64) {
 	_ = m.rt.store.OutboxDelete(id)
 }
 
-// shutdownCancelled reports whether jobID was cancelled by cancelAll (as
-// opposed to finishing on its own while the runtime closes).
+// shutdownCancelled distinguishes a job cancelAll killed from one that
+// finished on its own while the runtime closed.
 func (m *jobManager) shutdownCancelled(jobID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -77,14 +74,14 @@ func (m *jobManager) shutdownCancelled(jobID string) bool {
 	return j != nil && j.shutdownCancel
 }
 
-// putRunningMarker persists j's "running" row and records the row id on the
-// job. Call without holding m.mu (SQLite write); the id store takes the lock.
-func (m *jobManager) putRunningMarker(j *bgJob, kind, ownerID string) {
+// putRunningMarker persists j's "running" row and records its id. Call
+// without m.mu — this writes to SQLite; the id store takes the lock.
+func (m *jobManager) putRunningMarker(j *bgJob, ownerID string) {
 	if m.rt == nil || m.rt.store == nil {
 		return
 	}
 	mk := runningMarker{
-		PID: os.Getpid(), Kind: kind, JobID: j.id, Title: j.title,
+		PID: os.Getpid(), Kind: j.kind.String(), JobID: j.id, Title: j.title,
 		Agent: j.agent, CronJob: j.cronJob, OwnerID: ownerID,
 		LogPath: j.logPath, ChildID: j.childID, StartedAt: j.startedAt,
 	}
@@ -101,9 +98,8 @@ func (m *jobManager) putRunningMarker(j *bgJob, kind, ownerID string) {
 	m.mu.Unlock()
 }
 
-// clearRunningMarker deletes j's "running" row when the job finishes — unless
-// shutdown cancelled it, in which case the marker is the boot-time record
-// that the job's result was lost.
+// clearRunningMarker deletes j's row on finish, unless shutdown cancelled it —
+// then the marker is the boot-time record that its result was lost.
 func (m *jobManager) clearRunningMarker(j *bgJob) {
 	m.mu.Lock()
 	id := j.markerID
@@ -116,9 +112,8 @@ func (m *jobManager) clearRunningMarker(j *bgJob) {
 	m.deleteOutboxRow(id)
 }
 
-// rememberUndelivered records an event row whose user-facing post failed to
-// send, for RedeliverUndelivered to retry. rowID 0 (nothing persisted — no
-// store) has nothing to retry from and is skipped.
+// rememberUndelivered queues a row whose post failed for retry. rowID 0 means
+// nothing was persisted, so there is nothing to retry from.
 func (m *jobManager) rememberUndelivered(rowID int64) {
 	if rowID == 0 {
 		return
@@ -131,8 +126,8 @@ func (m *jobManager) rememberUndelivered(rowID int64) {
 	m.mu.Unlock()
 }
 
-// takeUndelivered snapshots and clears the undelivered set. A row whose retry
-// fails again re-enters the set via dispatchCompletion's own bookkeeping.
+// takeUndelivered snapshots and clears the set; a row whose retry fails again
+// re-enters it through dispatchCompletion.
 func (m *jobManager) takeUndelivered() map[int64]struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -141,12 +136,11 @@ func (m *jobManager) takeUndelivered() map[int64]struct{} {
 	return ids
 }
 
-// RedeliverUndelivered retries completion events whose user-facing post
-// failed to send while this process was running (a Telegram outage riding out
-// a night, say). Same ordering contract as RecoverCompletions: re-dispatch
-// first — which persists a fresh row and, on another send failure, re-enters
-// the retry set — then delete the stale row. Call it periodically from the
-// front-end host (wireHost's ticker); it is a no-op when nothing failed.
+// RedeliverUndelivered retries events whose post failed while this process
+// was running — a Telegram outage riding out a night. Same ordering as
+// RecoverCompletions: re-dispatch first, which persists a fresh row and
+// re-enters the retry set on another failure, then delete the stale one.
+// Called periodically by the front-end host; a no-op when nothing failed.
 func (rt *Runtime) RedeliverUndelivered() int {
 	if rt.store == nil {
 		return 0
@@ -180,9 +174,8 @@ func (rt *Runtime) RedeliverUndelivered() int {
 	return redelivered
 }
 
-// pidAlive reports whether pid names a live process (signal 0 probe). An
-// unsupported platform errs toward "dead", which at worst redelivers a row
-// its owner was about to delete.
+// pidAlive probes with signal 0. An unsupported platform errs toward "dead",
+// which at worst redelivers a row its owner was about to delete.
 func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -194,10 +187,10 @@ func pidAlive(pid int) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
-// RecoverCompletions redelivers what a previous process left in the outbox:
-// undelivered completion events, and running markers of jobs a dead process
-// never finished (reported as a failure so the loss is visible). Call once at
-// startup, after SetCompletionHost. Returns the number of rows recovered.
+// RecoverCompletions redelivers what a previous process left: undelivered
+// events, and running markers of jobs a dead process never finished, reported
+// as failures so the loss is visible. Call once at startup, after
+// SetCompletionHost.
 func (rt *Runtime) RecoverCompletions() int {
 	if rt.store == nil {
 		return 0
@@ -215,10 +208,9 @@ func (rt *Runtime) RecoverCompletions() int {
 				_ = rt.store.OutboxDelete(r.ID)
 				continue
 			}
-			// Redeliver FIRST, delete the stale row after: dispatchCompletion
-			// persists its own fresh row, so a crash anywhere in between leaves
-			// at least one row for the next boot — a duplicate report at worst,
-			// never a lost one. Deleting first would open a loss window.
+			// Redeliver FIRST, delete after: dispatchCompletion persists its
+			// own fresh row, so a crash in between leaves at least one row for
+			// the next boot. Deleting first opens a loss window.
 			ev.Note = joinNote(ev.Note, "recovered after a shell3 restart — this completion was never delivered")
 			rt.jobs.dispatchCompletion(ev)
 			_ = rt.store.OutboxDelete(r.ID)
@@ -244,8 +236,8 @@ func (rt *Runtime) RecoverCompletions() int {
 					ev.Kind = EvCron
 				}
 			}
-			// Same ordering as the event branch: report first, delete after,
-			// so a crash mid-recovery re-reports rather than losing the loss.
+			// Same ordering: a crash mid-recovery re-reports rather than
+			// losing the loss.
 			rt.jobs.dispatchCompletion(ev)
 			_ = rt.store.OutboxDelete(r.ID)
 			recovered++

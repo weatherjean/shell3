@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // A command's function must exist, but health must NOT run it: unlike a gate
@@ -34,12 +36,12 @@ cmd_publish() {
   touch "` + marker + `"
 }
 `
-	writeTree(t, dir, map[string]string{KitFileName: src})
+	writeTree(t, dir, map[string]string{kit.FileName: src})
 	c, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main",
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main",
 		KitHooks{Commands: map[string]string{"publish": "cmd_publish"}})
 
 	if problems := c.VerifyHooks(context.Background()); len(problems) != 0 {
@@ -60,7 +62,7 @@ func TestVerifyHooksReportsMissingFunction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main",
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main",
 		KitHooks{Commands: map[string]string{"ghost": "cmd_ghost_not_defined"}})
 
 	problems := c.VerifyHooks(context.Background())
@@ -77,7 +79,7 @@ func TestVerifyHooksChecksEventSubscribers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main",
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main",
 		KitHooks{Events: map[string]EventSub{"main": {Func: "ev_missing", On: []string{"turn_done"}}}})
 
 	problems := c.VerifyHooks(context.Background())

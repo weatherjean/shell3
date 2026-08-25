@@ -71,7 +71,8 @@ func (ti *ThreadIndex) Current() (string, bool) {
 
 // TelegramSurface is the thread-index surface key for one Telegram chat.
 // Rooms are namespaced per chat so every room's current conversation survives
-// a restart independently; the old single "telegram" key is not read.
+// a restart independently; the old single "telegram" key is not read. Exported
+// for tests that assert what a room persisted under.
 func TelegramSurface(chatID int64) string {
 	return roomSurface("telegram", chatID)
 }

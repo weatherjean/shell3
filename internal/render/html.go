@@ -177,7 +177,7 @@ white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;margin:.3rem 0}
 // because "what was in the prompt when it did that" is otherwise unanswerable
 // once the turn has ended.
 func writePrompt(b *strings.Builder, p runs.PromptRecord) {
-	b.WriteString("<details class=\"msg system\">\n<summary>system prompt")
+	b.WriteString("<details class=\"m system\">\n<summary>system prompt")
 	if !p.TS.IsZero() {
 		fmt.Fprintf(b, " <span class=\"meta\">from message %d · %s · %s</span>",
 			p.Seq+1, p.TS.Format("15:04:05"), esc(p.Hash[:8]))

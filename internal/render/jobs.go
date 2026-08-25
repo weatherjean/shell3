@@ -7,13 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-func kindOf(j shell3.JobInfo) string {
-	if j.Kind == shell3.JobSubagent {
-		return "subagent"
-	}
-	return "command"
-}
-
 // jobLabel names the work: a subagent's agent + description, or the command text.
 func jobLabel(j shell3.JobInfo) string {
 	if j.Agent != "" {

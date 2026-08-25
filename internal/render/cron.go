@@ -12,11 +12,11 @@ import (
 
 // CronRollupWindow is how far back the dash Cron table's cost column looks —
 // the window Store.CronRollup is called with at the render call site, and the
-// "7d" label cronCostSuffix prints. Kept as one named constant, not two
+// "7d" label cronCost prints. Kept as one named constant, not two
 // numbers in two packages, so the call site and the label can never drift apart.
 const CronRollupWindow = 7 * 24 * time.Hour
 
-// cronCostSuffix renders " · <tok> tok/<N>d run" for a job with cost data, or
+// cronCost renders "<tok> tok/<N>d run" for a job with cost data, or
 // "" when none is available and unknowable (no store wired, the rollup
 // errored, or an AGENT job that hasn't run in the window) — a missing cost
 // must never look like a zero cost. The day count is derived from
@@ -25,7 +25,7 @@ const CronRollupWindow = 7 * 24 * time.Hour
 //
 // A TOOL job is the one exception: it dispatches no subagent and so creates
 // no session, meaning it NEVER has a CronRollup row — that absence is not
-// missing data, it is a knowably-zero cost, so it renders " · 0 tok/Nd run"
+// missing data, it is a knowably-zero cost, so it renders "0 tok/Nd run"
 // rather than vanishing like a genuinely unknown figure would.
 //
 // For a job with cost data, the figure is the job's DISPATCHED-RUN spend
@@ -38,16 +38,16 @@ const CronRollupWindow = 7 * 24 * time.Hour
 // qualifier or fold report-turn cost into this number without also giving
 // the rollup a real per-job split — see TestCronRollup_ReportTurnExcluded in
 // internal/runs.
-func cronCostSuffix(st cron.JobStatus, costs map[string]runs.JobCost) string {
+func cronCost(st cron.JobStatus, costs map[string]runs.JobCost) string {
 	days := int(CronRollupWindow.Hours() / 24)
 	c, ok := costs[st.Name]
 	if !ok || c.Runs == 0 {
 		if st.Tool == "" {
 			return "" // agent job: absence is genuinely unknown, not zero
 		}
-		return fmt.Sprintf(" · 0 tok/%dd run", days) // tool job: knowably zero
+		return fmt.Sprintf("0 tok/%dd run", days) // tool job: knowably zero
 	}
-	return fmt.Sprintf(" · %s tok/%dd run", formatTokCount(c.PromptTokens+c.CompletionTokens), days)
+	return fmt.Sprintf("%s tok/%dd run", formatTokCount(c.PromptTokens+c.CompletionTokens), days)
 }
 
 // formatTokCount renders a token count compactly (2100000 -> "2.1M") so a

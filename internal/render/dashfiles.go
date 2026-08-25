@@ -10,15 +10,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // This file renders the dash's read-only config-file explorer: a directory
 // listing (FilesListHTML) and a single-file view (FileViewHTML), both rooted
 // at the config dir and reachable only behind the dash token gate.
 //
-// The security model is ported verbatim from the old Telegram Mini App
-// dashboard's files.go, because it was the piece an adversarial review
-// hardened: path traversal is clamped by a leading-slash Clean AND an
+// The security model must not be "simplified" — it is what an adversarial
+// review hardened: path traversal is clamped by a leading-slash Clean AND an
 // EvalSymlinks + root-prefix check (a symlink cannot point out of the root),
 // and credential files are reported as redacted WITHOUT their contents ever
 // being read from disk. Do not "simplify" either guard.
@@ -26,16 +27,6 @@ import (
 // maxFileBytes caps how much of a file the viewer shows; larger files are
 // truncated (the explorer is for glancing at config, not dumping blobs).
 const maxFileBytes = 256 * 1024
-
-// isCredentialFile reports whether a base name is a secrets file whose
-// contents must never be sent to the browser — the `.env` beside shell3.sh and
-// any legacy ai-do-not-read.* file. Mirrors the guard in the send-media host
-// tool: these are listed but never read.
-func isCredentialFile(base string) bool {
-	lower := strings.ToLower(base)
-	return lower == ".env" || strings.HasPrefix(lower, ".env.") ||
-		strings.HasPrefix(lower, "ai-do-not-read")
-}
 
 // resolveInConfig maps a browser-supplied relative path to an absolute path
 // guaranteed to live inside the config root, with symlinks resolved. The
@@ -101,7 +92,7 @@ func FilesListHTML(configDir, rel, tok string) (frag string, ok bool) {
 		if fi, err := e.Info(); err == nil {
 			r.size = fi.Size()
 		}
-		if !r.isDir && isCredentialFile(e.Name()) {
+		if !r.isDir && paths.IsCredentialFile(e.Name()) {
 			r.redacted = true
 		}
 		rows = append(rows, r)
@@ -174,7 +165,7 @@ func FileViewHTML(configDir, rel, tok string) (frag string, ok bool) {
 		urlq(parent), esc(tok), esc("/"+rel))
 
 	// Never read a secrets file: report it redacted without touching disk.
-	if isCredentialFile(filepath.Base(full)) {
+	if paths.IsCredentialFile(filepath.Base(full)) {
 		b.WriteString("<p>🔒 redacted — credential file (contents withheld).</p>\n</section>\n")
 		return b.String(), true
 	}

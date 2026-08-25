@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // hookCfg writes a kit declaring main + explorer plus the given gate/note
@@ -22,7 +24,7 @@ func hookCfg(t *testing.T, gates, notes map[string]string) *LoadedConfig {
 		nd = append(nd, hookDecl{fn: agent + "_note", body: body, forAg: []string{agent}})
 	}
 	dir := t.TempDir()
-	writeTree(t, dir, map[string]string{KitFileName: kitWith(gd, nd)})
+	writeTree(t, dir, map[string]string{kit.FileName: kitWith(gd, nd)})
 	c, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +37,7 @@ func hookCfg(t *testing.T, gates, notes map[string]string) *LoadedConfig {
 	for agent := range notes {
 		n[agent] = agent + "_note"
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main", KitHooks{Gates: g, Notes: n})
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main", KitHooks{Gates: g, Notes: n})
 	return c
 }
 

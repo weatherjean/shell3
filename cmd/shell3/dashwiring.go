@@ -99,7 +99,6 @@ func dashMintURL(urlFile string, srv *dash.Server) string {
 	return base + "/?t=" + srv.Mint()
 }
 
-// isHTTPURL reports whether s parses as an absolute http(s) URL with a host.
 func isHTTPURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""

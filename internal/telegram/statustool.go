@@ -100,11 +100,7 @@ func (b *Bot) roomsStatus() string {
 		meta := b.chatMetaFor(c.chatID)
 		r.title = meta.title
 		r.brief = briefState(meta, c.isGroupRoom(), b.settingsFor(c.chatID).useDescription())
-		for _, j := range sess.Jobs() {
-			if j.ParentID == sess.Name() && !j.Done {
-				r.jobs++
-			}
-		}
+		r.jobs = runningJobs(sess)
 		rows = append(rows, r)
 	}
 	if len(rows) == 0 {

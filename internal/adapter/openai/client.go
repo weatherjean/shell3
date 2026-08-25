@@ -17,17 +17,10 @@ import (
 )
 
 // bodyTap is an http.RoundTripper that records the last request/response so a
-// failed turn can dump both to last_error.json.
-//
-// It used to do more: it tee'd the response body through an io.Pipe into a
-// second, independent SSE scanner running on its own goroutine, purely to
-// recover the non-standard "reasoning"/"reasoning_content" delta fields — with
-// a done-channel barrier and a mutex-guarded fragment queue to get those
-// fragments back onto the Stream goroutine. None of that was necessary:
-// openai-go parses unknown delta keys into Delta.JSON.ExtraFields, so the
-// fields are readable inline in the normal loop (see deltaReasoning). Parsing
-// the same stream twice also meant two sources of truth for one wire format,
-// which is how reasoning ended up interleaved into answers.
+// failed turn can dump both to last_error.json. It does NOT re-parse the SSE
+// stream: unknown delta keys are readable inline via Delta.JSON.ExtraFields
+// (see deltaReasoning), and a second parse of the same wire format is how
+// reasoning once ended up interleaved into answers.
 type bodyTap struct {
 	mu      sync.Mutex
 	reqBody []byte
@@ -152,6 +145,18 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
 	defer func() { _ = stream.Close() }()
 
+	// emitParts forwards a partitioner's split (one delta, or the final flush):
+	// answer text and thought are separate events, and an empty half emits
+	// nothing.
+	emitParts := func(text, thought string) {
+		if text != "" {
+			onEvent(llm.StreamEvent{TextDelta: text})
+		}
+		if thought != "" {
+			onEvent(llm.StreamEvent{ReasoningDelta: thought})
+		}
+	}
+
 	toolCalls := map[int64]*llm.ToolCall{}
 	var toolCallOrder []int64
 	var part tagPartitioner
@@ -185,14 +190,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		if reasoning != "" {
 			onEvent(llm.StreamEvent{ReasoningDelta: reasoning})
 		}
-		if text, thought := part.pushDelta(delta.Content, reasoning); text != "" || thought != "" {
-			if text != "" {
-				onEvent(llm.StreamEvent{TextDelta: text})
-			}
-			if thought != "" {
-				onEvent(llm.StreamEvent{ReasoningDelta: thought})
-			}
-		}
+		emitParts(part.pushDelta(delta.Content, reasoning))
 
 		for _, tc := range delta.ToolCalls {
 			idx := tc.Index
@@ -213,14 +211,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 
 	_ = stream.Close()
-	if out, thought := part.flush(); out != "" || thought != "" {
-		if out != "" {
-			onEvent(llm.StreamEvent{TextDelta: out})
-		}
-		if thought != "" {
-			onEvent(llm.StreamEvent{ReasoningDelta: thought})
-		}
-	}
+	emitParts(part.flush())
 
 	seen := map[string]int{}
 	for i, idx := range toolCallOrder {

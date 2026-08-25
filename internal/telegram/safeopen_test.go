@@ -64,23 +64,23 @@ func TestSafeOpenRefusesHardlinkToDotenv(t *testing.T) {
 	}
 }
 
-// Any other config-tree file (shell3.yaml, a hook script) is refused too —
-// by path for a direct/symlinked reference, by inode for a hardlink.
+// Any other config-tree file is refused too — by path for a direct or
+// symlinked reference, by inode for a hardlink.
 func TestSafeOpenRefusesConfigTreeFiles(t *testing.T) {
 	cfg, work := safeSendTree(t)
-	yaml := filepath.Join(cfg, "shell3.yaml")
-	if err := os.WriteFile(yaml, []byte("models: {}\n"), 0o600); err != nil {
+	kitPath := filepath.Join(cfg, "notes.md")
+	if err := os.WriteFile(kitPath, []byte("private\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := safeOpen(yaml, work, cfg); err == nil {
+	if _, _, err := safeOpen(kitPath, work, cfg); err == nil {
 		t.Error("a direct config-dir path was accepted")
 	}
-	hard := filepath.Join(work, "innocent.yaml")
-	if err := os.Link(yaml, hard); err != nil {
+	hard := filepath.Join(work, "innocent.md")
+	if err := os.Link(kitPath, hard); err != nil {
 		t.Skipf("hardlink across temp dirs unavailable: %v", err)
 	}
 	if _, _, err := safeOpen(hard, work, cfg); err == nil {
-		t.Error("a hardlink to shell3.yaml was accepted")
+		t.Error("a hardlink to a config-dir file was accepted")
 	}
 }
 

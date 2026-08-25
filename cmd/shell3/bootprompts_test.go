@@ -101,6 +101,6 @@ func TestPromptRefreshNonVisionVariant(t *testing.T) {
 
 func TestPromptRefreshRefusesFreshDir(t *testing.T) {
 	if err := runPromptRefresh(t.TempDir(), time.Now()); err == nil {
-		t.Fatal("an install with no agent.md must be refused (run plain boot instead)")
+		t.Fatal("an install with no kit must be refused (run plain boot instead)")
 	}
 }

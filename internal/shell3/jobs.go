@@ -39,9 +39,8 @@ func (k JobKind) String() string {
 
 const defaultMaxConcurrent = 8
 
-// bgWaitDelay bounds how long cmd.Wait blocks on the stdio pipes after a
-// command job is cancelled (same role as internal/chat's bashWaitDelay, kept
-// slightly longer since background jobs are not on the turn's critical path).
+// bgWaitDelay bounds cmd.Wait on the stdio pipes after a cancel. Longer than
+// chat's bashWaitDelay — background jobs are off the turn's critical path.
 const bgWaitDelay = 3 * time.Second
 
 // maxDoneJobs caps how many finished jobs are retained in memory.
@@ -72,15 +71,14 @@ func (r *ringBuffer) String() string {
 	return string(r.buf)
 }
 
-// jobLogMaxBytes caps a command job's on-disk output log (see cappedFileWriter):
-// enough to hold a full build/fetch result for a later read without
-// letting a runaway job fill the disk. The in-memory ring keeps the TAIL; the
-// log keeps the HEAD up to the cap.
+// jobLogMaxBytes caps a command job's on-disk log: enough for a full build or
+// fetch result, not enough for a runaway job to fill the disk. The in-memory
+// ring keeps the TAIL, the log the HEAD.
 const jobLogMaxBytes = 1 << 20 // 1 MiB
 
-// cappedFileWriter appends to a file until the byte cap, then swallows writes
-// (recording that it truncated). Write errors disable further writes silently —
-// the on-disk log is best-effort; the ring buffer stays authoritative.
+// cappedFileWriter appends until the cap, then swallows writes, recording
+// that it truncated. A write error silently disables it — the log is
+// best-effort, the ring buffer stays authoritative.
 type cappedFileWriter struct {
 	mu      sync.Mutex
 	f       *os.File
@@ -122,11 +120,10 @@ func (w *cappedFileWriter) Close() {
 	_ = w.f.Close()
 }
 
-// jobSink is an io.Writer that tees each write to a ring buffer AND calls an
-// emit callback with the chunk string. It is used as cmd.Stdout/cmd.Stderr for
-// command jobs and as the subagent event stream sink, so both the Jobs view
-// and the JobEvents bus receive live output. file, when non-nil,
-// additionally persists the (capped) output to the job's on-disk log.
+// jobSink tees each write to a ring buffer and to an emit callback, so both
+// the Jobs view and the JobEvents bus see live output. It is cmd.Stdout for
+// command jobs and the event sink for subagents; a non-nil file also persists
+// the capped output to the job's log.
 type jobSink struct {
 	ring *ringBuffer
 	emit func(chunk string)
@@ -142,8 +139,8 @@ func (s *jobSink) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// String returns the accumulated ring-buffer content, preserving the same
-// interface that bgJob.out.String() callers (e.g. output()) rely on.
+// String is the accumulated ring-buffer content, the interface bgJob.out
+// callers rely on.
 func (s *jobSink) String() string { return s.ring.String() }
 
 type bgJob struct {
@@ -153,33 +150,28 @@ type bgJob struct {
 	agent    string // subagent jobs: the spawned agent's name ("" for commands)
 	parent   *Session
 	parentID string
-	// parentSession is the parent's RUNS session id — the directory a job log
-	// is written under. Distinct from parentID, which is the in-process session
-	// HANDLE ("s1"): a front-end linking to the log needs the runs id, and the
-	// two are not interchangeable.
+	// parentSession is the parent's RUNS session id, the directory a job log
+	// lives under — not parentID, the in-process handle ("s1"). A front-end
+	// linking to the log needs this one; they are not interchangeable.
 	parentSession string
 	startedAt     time.Time
 	cancel        context.CancelFunc
 	out           *jobSink // live output: command stdout/stderr, or subagent event stream
 	childID       string   // subagent: child runs id (transcript source)
-	// direct posts the raw result straight to the user on completion — no
-	// agent turn (the notice still queues on the owner, unwoken). Set from
-	// the bash_bg/task tool's direct:true arg or a cron job's direct:
-	// frontmatter.
+	// direct posts the raw result to the user with no agent turn; the notice
+	// still queues on the owner, unwoken.
 	direct   bool
 	detached bool
-	// note is the spawner's optional intent hint, carried into the
-	// completion mail ("the user is waiting on this").
+	// note is the spawner's intent hint, carried into the completion mail.
 	note string
-	// cronJob is the cron job name for cron-dispatched subagents ("" for
-	// everything else). Routes the ⏰ post prefix and the ownerless wake path.
+	// cronJob names the cron job for a cron dispatch, "" otherwise. Routes
+	// the ⏰ prefix and the ownerless wake path.
 	cronJob string
 
-	// Subagent keep-open lifecycle (all guarded by jobManager.mu). A subagent
-	// that ends its main turn with bash_bg jobs still running is reported done
-	// to the parent, but its child session is kept open ("lingering") so each
-	// later job completion can resume it for a follow-up turn whose summary
-	// reaches the root as an agent_update notice.
+	// Subagent keep-open lifecycle (guarded by jobManager.mu). A subagent
+	// ending its main turn with bash_bg jobs still running reports done, but
+	// its child session LINGERS so each later completion can resume it for a
+	// follow-up turn whose summary reaches the root as an agent_update.
 	child       *Session // subagent: the child session handle (nil for commands)
 	childClosed bool     // child.Close() has run; follow-ups degrade to raw notices
 	statusPolls int      // task_status checks while running — repeats get told to stop polling
@@ -188,30 +180,22 @@ type bgJob struct {
 	followUps   int      // follow-up turns run so far (capped at maxFollowUps)
 	noFollowUps bool     // poisoned (cancelled/failed): no further follow-up turns
 
-	// logPath is the command job's on-disk output log
-	// (runs/<parent-session>/jobs/<id>.log), "" when no store/parent was
-	// available at start. Written once in startCommand; the completion mail
-	// and task_status point at it.
+	// logPath is runs/<parent-session>/jobs/<id>.log, "" when no store or
+	// parent existed at start. The completion mail and task_status point here.
 	logPath string
 
-	// suppress (guarded by jobManager.mu) marks a job killed by superstop:
-	// its completion event is dropped by dispatchCompletion instead of
-	// routed — the superstop summary is the single record, not one ⚠️ post
-	// and one owner mail per killed job.
+	// suppress marks a job killed by superstop: dispatchCompletion drops its
+	// event, so the one summary is the record rather than N ⚠️ posts.
 	suppress bool
 
-	// shutdownCancel (guarded by jobManager.mu) marks a job cancelAll killed
-	// on runtime teardown: its completion is a "context canceled" failure the
-	// shutdown itself manufactured, so dispatchCompletion drops its outbox
-	// event row — the job's RUNNING marker survives instead, and the next
-	// boot's recovery reports it honestly as "was running when shell3
-	// stopped" (see completion.go's persist/recover pair).
+	// shutdownCancel marks a job cancelAll killed on teardown: its "context
+	// canceled" failure was manufactured by the shutdown, so its outbox event
+	// is dropped and the RUNNING marker survives instead — the next boot then
+	// reports it honestly as "was running when shell3 stopped".
 	shutdownCancel bool
 
-	// markerID is the job's outbox "running" row (0 = none): written at
-	// start, deleted when the job finishes — unless shutdownCancel is set, in
-	// which case it is left for boot-time recovery to report. Guarded by
-	// jobManager.mu.
+	// markerID is the job's outbox "running" row (0 = none), deleted when the
+	// job finishes unless shutdownCancel left it for boot-time recovery.
 	markerID int64
 
 	// set on completion; read under jobManager.mu
@@ -230,20 +214,17 @@ type jobManager struct {
 	max  int
 	seq  int
 
-	// closing (guarded by mu) is set by cancelAll: no new follow-up drivers
-	// start, and in-flight completions take the degrade path. driverCtx bounds
-	// every follow-up turn so Close can abort
-	// them promptly.
+	// closing is set by cancelAll: no new follow-up drivers start and
+	// in-flight completions degrade. driverCtx bounds every follow-up turn so
+	// Close can abort them promptly.
 	closing      bool
 	driverCtx    context.Context
 	driverCancel context.CancelFunc
 
-	// undelivered (guarded by mu) holds outbox row ids of completion events
-	// whose user-facing post failed to send (transport outage): the rows were
-	// kept instead of deleted, and Runtime.RedeliverUndelivered retries them.
-	// Boot-time RecoverCompletions covers the same rows if the process dies
-	// first — this set only exists so a LIVE process retries without a
-	// restart.
+	// undelivered holds outbox rows whose user-facing post failed to send:
+	// they were kept rather than deleted, and RedeliverUndelivered retries
+	// them. Boot-time recovery covers the same rows if the process dies
+	// first — this set exists so a LIVE process retries without a restart.
 	undelivered map[int64]struct{}
 }
 
@@ -259,11 +240,9 @@ func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {
 	}
 }
 
-// maxFollowUps caps how many follow-up turns one subagent job may run after
-// its main turn ended — a runaway guard: a follow-up turn can itself start
-// another bash_bg job, and without a cap that loop would chain unattended LLM
-// turns forever. Past the cap, job completions degrade to raw bg_done notices
-// delivered to the root session.
+// maxFollowUps caps a subagent's follow-up turns. A follow-up can start
+// another bash_bg job, so without a cap the loop chains unattended LLM turns
+// forever. Past it, completions degrade to raw bg_done notices at the root.
 const maxFollowUps = 5
 
 // nextID must be called under m.mu.
@@ -277,7 +256,7 @@ func (m *jobManager) capError() error {
 	return fmt.Errorf("background-job cap %d reached; wait for a job to finish", m.max)
 }
 
-// runningCount returns the number of non-finished jobs. Must be called under m.mu.
+// runningCount counts non-finished jobs. Under m.mu.
 func (m *jobManager) runningCount() int {
 	n := 0
 	for _, j := range m.jobs {
@@ -288,8 +267,8 @@ func (m *jobManager) runningCount() int {
 	return n
 }
 
-// evictOldestDoneIfNeeded drops the oldest finished job when the done-job count
-// exceeds maxDoneJobs. Must be called under m.mu.
+// evictOldestDoneIfNeeded drops the oldest finished job past maxDoneJobs.
+// Under m.mu.
 func (m *jobManager) evictOldestDoneIfNeeded() {
 	var (
 		oldest    *bgJob
@@ -299,10 +278,9 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 		if !j.finished {
 			continue
 		}
-		// A "done" subagent whose child session is still open (lingering for
-		// live bg jobs) is not evictable: finishCommand resolves job→subagent
-		// ownership through this map, and dropping the entry would orphan the
-		// child's remaining completions.
+		// A lingering subagent is not evictable: finishCommand resolves
+		// job→subagent ownership through this map, and dropping the entry
+		// would orphan the child's remaining completions.
 		if j.kind == JobSubagent && j.child != nil && !j.childClosed {
 			continue
 		}
@@ -316,11 +294,9 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 	}
 }
 
-// startCommand launches argv as a managed background job. env holds extra
-// "K=V" entries appended to the inherited environment (bash_bg jobs
-// inject their params this way); nil inherits the environment unchanged.
-// direct posts the raw result straight to the user on completion; note is
-// context carried into the completion mail (see finishCommand).
+// startCommand launches argv as a managed background job. env appends "K=V"
+// entries to the inherited environment; nil inherits it unchanged. direct
+// posts the raw result to the user; note is carried into the completion mail.
 func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, direct bool, note string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")
@@ -334,8 +310,8 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &jobSink{
 		ring: newRingBuffer(64 * 1024),
-		// Guard m.rt != nil: command tests use newJobManager(nil, 8); see
-		// finishCommand for the full asymmetry explanation.
+		// Guard m.rt != nil: command tests use newJobManager(nil, 8). See
+		// finishCommand for why only the command paths do this.
 		emit: func(c string) {
 			if m.rt != nil {
 				m.rt.emitJob(JobProgress{
@@ -345,9 +321,8 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 			}
 		},
 	}
-	// Best-effort on-disk log beside the parent session's transcript, so the
-	// full output (up to the cap) survives the in-memory ring for the
-	// completion mail and task_status.
+	// Best-effort log beside the parent's transcript, so output up to the cap
+	// outlives the in-memory ring for the completion mail and task_status.
 	var logPath string
 	if parent != nil && m.rt != nil && m.rt.store != nil {
 		if sid := parent.sess.ID(); sid != "" {
@@ -377,13 +352,13 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	m.jobs[id] = j
 	m.mu.Unlock()
 
-	// Marker before Start: the finish goroutine (which clears it) cannot run
-	// before the process exists, so the write can never race the delete.
+	// Marker before Start: the goroutine that clears it cannot run before the
+	// process exists, so the write never races the delete.
 	var ownerID string
 	if parent != nil {
 		ownerID = parent.ID()
 	}
-	m.putRunningMarker(j, "command", ownerID)
+	m.putRunningMarker(j, ownerID)
 
 	if err := cmd.Start(); err != nil {
 		m.mu.Lock()
@@ -403,8 +378,8 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	go func() {
 		var exit int
 		defer func() {
-			// A panic here is a runtime bug, not a command failure — surface it in
-			// the job output and a nonzero exit instead of reporting a clean done.
+			// A panic is a runtime bug, not a command failure: surface it in the
+			// output with a nonzero exit rather than reporting a clean done.
 			if r := recover(); r != nil {
 				exit = -1
 				fmt.Fprintf(j.out, "\npanic in job runtime: %v\n", r)
@@ -424,6 +399,10 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	return id, nil
 }
 
+// bgNoticeTailCap bounds the output tail a bg_done notice carries: enough for
+// a typical result to be usable, with task_status <id> for the rest.
+const bgNoticeTailCap = 1500
+
 // finishCommand delivers a command job's completion, marks the job done, and
 // retains it for post-completion inspection.
 //
@@ -436,12 +415,6 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 //     are unavailable (child closed, cap reached, poisoned, runtime closing),
 //     in which case the job is an ORPHAN: a plain completion event labeled
 //     with its origin, threaded at the subagent's root session.
-//
-// bgNoticeTailCap bounds (in bytes) the output tail carried by a bg_done
-// completion notice. Large enough that a typical fetch/build result is usable
-// directly; the notice points at `task_status <id>` for the rest.
-const bgNoticeTailCap = 1500
-
 func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	// Flush+close the on-disk log before any notice points a reader at it.
 	if j.out != nil && j.out.file != nil {
@@ -486,14 +459,12 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		ev.Note = joinNote(ev.Note, "started by subagent "+owner.id)
 		deliver = func() { m.dispatchCompletion(ev) }
 	}
-	// Deliver BEFORE markDone (mirroring finishSubagent's ordering): while the
-	// notice is in flight the job still counts as running, so a caller gating on
-	// runningJobIDs still sees it; once the job leaves that set the notice is
-	// guaranteed queued, and a subsequent DropInbox discards it. Delivering
-	// after markDone opens the reverse window — the gate passes, then the stale
-	// notice lands in the freshly cleared session. deliver() runs
-	// outside m.mu because injectNotification takes the session mutex (lock
-	// order: session → jobs, never the reverse).
+	// Deliver BEFORE markDone, as finishSubagent does: while the notice is in
+	// flight the job still counts as running, so a caller gating on
+	// runningJobIDs sees it, and once it leaves that set the notice is
+	// already queued. The reverse order lets the gate pass and then drops a
+	// stale notice into a freshly cleared session. deliver() runs outside
+	// m.mu — lock order is session → jobs, never the reverse.
 	m.mu.Unlock()
 	deliver()
 	m.clearRunningMarker(j)
@@ -504,17 +475,16 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	m.maybeCloseChild(owner)
 	j.cancel() // always set before the job is published; release the ctx
 	// Command paths guard m.rt != nil because command-only tests construct
-	// newJobManager(nil, 8) to avoid a full Runtime. Subagent paths (startSubagent,
-	// finishSubagent) call m.rt unconditionally because a subagent cannot be
-	// created without a non-nil rt (startSubagent calls m.rt.Session first and
-	// returns an error if rt is nil). Do not "fix" this asymmetry.
+	// newJobManager(nil, 8). Subagent paths do not, because startSubagent
+	// errors out on a nil rt before a subagent can exist. Do not "fix" this
+	// asymmetry.
 	if m.rt != nil {
 		m.rt.emitJob(JobProgress{
 			JobID: j.id, Parent: j.parentID,
 			Kind: JobCommand, Title: j.title, Done: true,
 		})
-		// This completion may have brought the running-task count to zero; let
-		// any old-generation Parts a Reload deferred close now.
+		// This may have brought the running-task count to zero; let any Parts
+		// a Reload parked close now.
 		m.rt.drainParkedClosers()
 	}
 }
@@ -558,8 +528,7 @@ func (m *jobManager) output(id string) string {
 }
 
 func (m *jobManager) cancel(id string) error {
-	// Copy the fields we need under the lock: finishers write j.finished under
-	// m.mu, so reading it after Unlock would race them.
+	// Copy under the lock: finishers write j.finished under m.mu.
 	m.mu.Lock()
 	j := m.jobs[id]
 	var finished bool
@@ -567,11 +536,10 @@ func (m *jobManager) cancel(id string) error {
 	var cascades []context.CancelFunc
 	if j != nil {
 		finished, cancelFn = j.finished, j.cancel
-		// Cancelling a subagent cascades: poison its follow-ups and cancel any
-		// bash_bg jobs its child session started, so "task_cancel sub1" tears
-		// the whole delegation down instead of leaving orphan jobs running. The
-		// child session itself closes via the normal paths (endSubagentTurn for
-		// a live turn; maybeCloseChild once the cancelled jobs finish).
+		// Cancelling a subagent cascades: poison follow-ups and cancel the
+		// bash_bg jobs its child started, so task_cancel tears the whole
+		// delegation down instead of orphaning jobs. The child closes through
+		// the normal paths.
 		if j.kind == JobSubagent && j.child != nil {
 			j.noFollowUps = true
 			for _, cj := range m.jobs {
@@ -599,15 +567,14 @@ func (m *jobManager) cancel(id string) error {
 
 func (m *jobManager) cancelAll() {
 	m.mu.Lock()
-	// No new follow-up drivers may start, and in-flight completions take the
-	// degrade path (quiet inject) — the runtime is going away.
+	// The runtime is going away: no new drivers, and in-flight completions
+	// take the degrade path.
 	m.closing = true
 	jobs := make([]*bgJob, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		if !j.finished {
-			// Mark before cancelling: the finish site must be able to tell a
-			// shutdown-manufactured "context canceled" failure from a real
-			// completion that raced SIGTERM (see bgJob.shutdownCancel).
+			// Mark before cancelling, so the finish site can tell a
+			// shutdown-manufactured failure from one that raced SIGTERM.
 			j.shutdownCancel = true
 			jobs = append(jobs, j)
 		}
@@ -621,44 +588,36 @@ func (m *jobManager) cancelAll() {
 	}
 }
 
-// killAllForStop kills every live job — commands, subagents, in-flight cron
-// dispatches alike (the job runtime is one pool) — with completion routing
-// suppressed, and reports what it killed. Follow-ups are poisoned like a
-// task_cancel cascade; unlike cancelAll it does NOT mark the manager closing,
-// so new work can start immediately after.
+// killAllForStop kills every live job — the runtime is one pool — with
+// completion routing suppressed, and reports what it killed. Follow-ups are
+// poisoned as in a task_cancel cascade, but unlike cancelAll the manager is
+// NOT marked closing, so new work can start immediately.
 func (m *jobManager) killAllForStop() []KilledJob {
 	m.mu.Lock()
 	var killed []KilledJob
 	var cancels []context.CancelFunc
 	for _, j := range m.jobs {
-		// A subagent whose main turn already ended but whose child session is
-		// still open ("lingering") is NOT `finished`-then-idle: its child keeps
-		// running follow-up turns for every bash_bg job it owns, and single-job
-		// cancel poisons exactly this case. Skipping it here would let a
-		// follow-up turn fire (and its completion route normally) minutes after
-		// the user was told everything stopped. So poison every live job AND
-		// every lingering subagent — mirroring runningJobIDs' own predicate.
+		// A lingering subagent is not idle: its child keeps running follow-up
+		// turns for every bash_bg job it owns. Skipping it would let one fire,
+		// and route normally, minutes after the user was told everything
+		// stopped. Poison every live job AND every lingerer, as runningJobIDs
+		// counts them.
 		lingering := j.kind == JobSubagent && j.child != nil && !j.childClosed
 		if j.finished && !lingering {
 			continue
 		}
-		// suppress drops any completion this job still emits (including a
-		// lingerer's in-flight follow-up event, which carries this id);
-		// noFollowUps stops a new driver from starting.
+		// suppress drops any completion this job still emits, including a
+		// lingerer's in-flight follow-up; noFollowUps stops a new driver.
 		j.suppress = true
 		j.noFollowUps = true
 		if j.finished {
 			continue // lingerer: poisoned, but no live context to cancel or report
 		}
-		kind := "command"
-		if j.kind == JobSubagent {
-			kind = "subagent"
-		}
 		var ran time.Duration
 		if !j.startedAt.IsZero() {
 			ran = time.Since(j.startedAt).Round(time.Second)
 		}
-		killed = append(killed, KilledJob{ID: j.id, Title: j.title, Kind: kind, Runtime: ran})
+		killed = append(killed, KilledJob{ID: j.id, Title: j.title, Kind: j.kind.String(), Runtime: ran})
 		if j.cancel != nil {
 			cancels = append(cancels, j.cancel)
 		}
@@ -679,16 +638,13 @@ func (m *jobManager) suppressed(jobID string) bool {
 	return j != nil && j.suppress
 }
 
-// wait blocks until all active job goroutines have finished. Call after
-// cancelAll to ensure goroutines have fully unwound before the store closes.
+// wait blocks until every job goroutine has unwound. Call after cancelAll,
+// before the store closes.
 func (m *jobManager) wait() { m.wg.Wait() }
 
-// runningJobIDs returns the ids of jobs that still have live work attached:
-// unfinished jobs of either kind, plus "done" subagents whose child session is
-// still open (lingering for bg jobs / running a follow-up turn). Sorted for
-// stable output. Used by drainParkedClosers to keep an old config generation
-// alive until every job (and lingering child) that might still touch it has
-// drained.
+// runningJobIDs lists jobs with live work attached: unfinished ones of either
+// kind, plus lingering subagents. Sorted. drainParkedClosers uses it to keep
+// an old config generation alive until everything that might touch it drains.
 func (m *jobManager) runningJobIDs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -711,10 +667,9 @@ type subagentOpts struct {
 	detached bool   // deliver to the user only; the owning session is told nothing
 }
 
-// resolveChildWorkDir picks a subagent job's workdir: the override when set (a
-// relative override joins onto the parent's effective base), else the parent's
-// own workdir. base "" means the parent runs at the runtime root, so root
-// substitutes as the join anchor.
+// resolveChildWorkDir picks a subagent's workdir: the override when set (a
+// relative one joins onto the parent's base), else the parent's own. An empty
+// base means the parent runs at the runtime root, which anchors the join.
 func resolveChildWorkDir(parentWD, override, root string) string {
 	base := parentWD
 	if base == "" {
@@ -729,10 +684,8 @@ func resolveChildWorkDir(parentWD, override, root string) string {
 	return filepath.Join(base, override)
 }
 
-// startSubagent creates an in-process child session and runs prompt inside it
-// asynchronously. When the child finishes, finishSubagent routes the result:
-// direct jobs wake the parent with a KindAgentDone notice; everything else
-// routes as completion mail.
+// startSubagent runs prompt in a new in-process child session,
+// asynchronously; finishSubagent then routes the result as completion mail.
 func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, o subagentOpts) (string, error) {
 	if m.rt == nil {
 		return "", fmt.Errorf("subagents require a runtime")
@@ -743,13 +696,12 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		return "", m.capError()
 	}
 	id := m.nextID("sub")
-	// Create the cancel func BEFORE publishing the job so j.cancel is
-	// immutable-once-visible: cancelAll() (and the finishers) invoke j.cancel
-	// without holding the lock, which is safe only when it is written once
-	// before the job appears in m.jobs.
+	// Create cancel BEFORE publishing the job: cancelAll and the finishers
+	// invoke j.cancel without the lock, which is safe only if it is written
+	// once before the job appears in m.jobs.
 	ctx, cancel := context.WithCancel(context.Background())
-	// Reserve the slot atomically before releasing the lock so that two
-	// concurrent spawns at max-1 cannot both pass the cap check (TOCTOU).
+	// Reserve the slot before releasing the lock, or two spawns at max-1 both
+	// pass the cap check.
 	pname := parentName(parent)
 	out := &jobSink{
 		ring: newRingBuffer(64 * 1024),
@@ -769,27 +721,23 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	m.jobs[id] = j
 	m.mu.Unlock()
 
-	// A project manager declares its own workdir (the project repo); an
-	// explicit spawn-time workdir (cron WorkDir) still wins.
+	// An agent may declare its own workdir; an explicit spawn-time one wins.
 	if o.workDir == "" {
 		if parts := m.rt.Parts(); parts != nil {
 			o.workDir = parts.SubagentWorkdir(agent)
 		}
 	}
 
-	// Completion is handled entirely in-process: when the child's event stream
-	// drains, the goroutine below calls finishSubagent, which injects the
-	// KindAgentDone notice into the parent and wakes it. The child session
-	// carries no back-reference to the parent — it is an ordinary headless
-	// runtime session whose only tie to the job is j.childID (its runs id).
+	// Entirely in-process: when the child's event stream drains, the goroutine
+	// below calls finishSubagent. The child holds no back-reference — it is an
+	// ordinary headless session whose only tie to the job is j.childID.
 	child, err := m.rt.Session(SessionOpts{
 		Agent:    agent,
 		WorkDir:  resolveChildWorkDir(parent.opts.WorkDir, o.workDir, m.rt.workDir),
 		Headless: true,
-		// Record the parent so the child's runs row is attributable as a
-		// subagent transcript rather than a conversation of its own — the dash
-		// groups by it, and the janitor's empty-trash rule spares a
-		// message-less session that other rows still name as their parent.
+		// Record the parent so the child's row reads as a subagent transcript
+		// rather than a conversation: the dash groups by it, and the janitor
+		// spares a message-less session other rows name as parent.
 		ParentID: parent.sess.ID(),
 		CronJob:  o.cronJob,
 	})
@@ -805,24 +753,21 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	j.child = child
 	m.mu.Unlock()
 
-	// Marker before the run goroutine starts, so the finish path (which
-	// clears it) can never race the write.
-	m.putRunningMarker(j, "subagent", parent.ID())
+	// Marker before the goroutine starts, so the finish path cannot race it.
+	m.putRunningMarker(j, parent.ID())
 
 	m.wg.Add(1)
 	go func() {
 		var summary string
 		var runErr error
 		defer func() {
-			// A panic escaping the event loop must mark the job failed, not let it
-			// finish as a clean "done" with partial output.
+			// A panic escaping the event loop marks the job failed, never a
+			// clean done with partial output.
 			if r := recover(); r != nil {
 				runErr = fmt.Errorf("panic in subagent runtime: %v", r)
 			}
-			// A cancelled job (task_cancel, Runtime.Close) may never see a
-			// terminal Error event — route drops it when the channel is being
-			// abandoned — so consult the job ctx directly: a cancelled run must
-			// report as failed, never as a clean "done" with partial output.
+			// A cancelled job may never see a terminal Error event — route
+			// drops it on an abandoned channel — so consult the ctx directly.
 			if runErr == nil && ctx.Err() != nil {
 				runErr = ctx.Err()
 			}
@@ -830,8 +775,8 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 			if runErr != nil {
 				errText = runErr.Error()
 			}
-			// Report done to the parent first, then decide whether the child
-			// session closes or lingers for its still-running bash_bg jobs.
+			// Report done first, then decide whether the child closes or
+			// lingers for its still-running bash_bg jobs.
 			m.finishSubagent(j, summary, errText)
 			m.endSubagentTurn(j, child, errText)
 			m.wg.Done()
@@ -841,11 +786,10 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	return id, nil
 }
 
-// consumeChildEvents drains one child-session turn's event stream, mirroring
-// it into j.out so the Jobs view can show live progress (the child's stored
-// transcript is not readable until the run ends). It returns the
-// turn's final assistant text and the last error seen (nil for a clean turn).
-// Shared by the subagent's main turn and its follow-up turns.
+// consumeChildEvents drains one child turn's events into j.out, so the Jobs
+// view shows live progress before the stored transcript is readable. Returns
+// the final assistant text and the last error. Shared by main and follow-up
+// turns.
 func consumeChildEvents(j *bgJob, events <-chan Event) (summary string, runErr error) {
 	var last strings.Builder
 	for ev := range events {
@@ -863,9 +807,8 @@ func consumeChildEvents(j *bgJob, events <-chan Event) (summary string, runErr e
 			}
 			fmt.Fprintf(j.out, "%s\n", res)
 		case Error:
-			// The turn failed (provider error, cancellation, …). Remember the
-			// last error so the caller can report the run as failed instead of
-			// announcing a clean "done" with partial output.
+			// Remember the last error so the caller reports a failed run
+			// rather than a clean done with partial output.
 			if ev.Err != nil {
 				runErr = ev.Err
 				fmt.Fprintf(j.out, "\nerror: %v\n", ev.Err)
@@ -875,8 +818,8 @@ func consumeChildEvents(j *bgJob, events <-chan Event) (summary string, runErr e
 	return strings.TrimSpace(last.String()), runErr
 }
 
-// endSubagentTurn decides what happens to the child session once the
-// subagent's main turn has ended and agent_done has been delivered:
+// endSubagentTurn decides the child session's fate once the main turn ended
+// and agent_done was delivered:
 //
 //   - failed/cancelled turn (errText != ""): follow-ups are poisoned and any
 //     still-running bash_bg jobs the child started are cascade-cancelled; the
@@ -902,8 +845,7 @@ func (m *jobManager) endSubagentTurn(j *bgJob, child *Session, errText string) {
 	}
 	running := m.childRunningJobsLocked(child)
 	if canFollow && !j.driver && child.HasQueuedInput() {
-		// A job finished while the main turn was still in flight; its notice is
-		// queued. Resume the child now.
+		// A job finished mid-turn and its notice is queued: resume now.
 		j.driver = true
 		m.wg.Add(1)
 		go m.runFollowUps(j)
@@ -918,24 +860,21 @@ func (m *jobManager) endSubagentTurn(j *bgJob, child *Session, errText string) {
 	}
 	if closeNow {
 		_ = child.Close()
-		// The child leaving the running set may have drained the last live work
-		// on an old generation a Reload deferred.
+		// The child may have been the last live work on a parked generation.
 		if m.rt != nil {
 			m.rt.drainParkedClosers()
 		}
 	}
 }
 
-// canFollowUpLocked reports whether subagent job sub may still run follow-up
-// turns. Must be called under m.mu.
+// canFollowUpLocked reports whether sub may still run follow-ups. Under m.mu.
 func (m *jobManager) canFollowUpLocked(sub *bgJob) bool {
 	return sub != nil && sub.child != nil && !sub.childClosed && !sub.noFollowUps &&
 		!m.closing && sub.followUps < maxFollowUps
 }
 
-// owningSubagentLocked resolves a command job's parent session to the subagent
-// job whose child session it is, or nil when the parent is a root session (or
-// nil). Must be called under m.mu.
+// owningSubagentLocked resolves a parent session to the subagent job whose
+// child it is, nil for a root session. Under m.mu.
 func (m *jobManager) owningSubagentLocked(sess *Session) *bgJob {
 	if sess == nil {
 		return nil
@@ -948,8 +887,7 @@ func (m *jobManager) owningSubagentLocked(sess *Session) *bgJob {
 	return nil
 }
 
-// childRunningJobsLocked counts the unfinished command jobs whose parent is
-// sess. Must be called under m.mu.
+// childRunningJobsLocked counts unfinished command jobs under sess. Under m.mu.
 func (m *jobManager) childRunningJobsLocked(sess *Session) int {
 	n := 0
 	for _, j := range m.jobs {
@@ -960,16 +898,12 @@ func (m *jobManager) childRunningJobsLocked(sess *Session) int {
 	return n
 }
 
-// runFollowUps is the single follow-up driver for one lingering subagent job:
-// it repeatedly resumes the child session over its queued completion notices
-// (RunQueued) and routes each turn's summary like any completion — direct
-// jobs wake the root with an agent_update notice; everything else goes to the
-// mail router as an EvFollowUp event.
-// At most one driver runs per job (sub.driver, set by the spawner under m.mu);
-// the exit re-check happens under the same lock as notice injection in
-// finishCommand, so a completion can never slip between "inbox empty" and
-// "driver gone". A turn error poisons further follow-ups (the error still
-// reaches the root in the update's status).
+// runFollowUps is the one driver for a lingering subagent: it resumes the
+// child over its queued notices and routes each summary like any completion.
+// At most one driver per job (sub.driver); its exit re-check holds the same
+// lock finishCommand injects under, so a completion cannot slip between
+// "inbox empty" and "driver gone". A turn error poisons further follow-ups,
+// and still reaches the root in the update's status.
 func (m *jobManager) runFollowUps(sub *bgJob) {
 	defer m.wg.Done()
 	for {
@@ -1068,16 +1002,14 @@ func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 		JobID: j.id, Parent: j.parentID,
 		Kind: JobSubagent, Title: j.title, Done: true, Summary: summary,
 	})
-	// A lingering child keeps this subagent in the running set (see
-	// runningJobIDs), so this drain is a no-op until the child finally closes;
-	// the close paths (endSubagentTurn, maybeCloseChild) drain again then.
+	// A lingering child keeps this subagent in the running set, so the drain
+	// no-ops until the close paths run it again.
 	m.rt.drainParkedClosers()
 }
 
-// markDoneLocked is the completion bookkeeping shared by finishCommand and
-// finishSubagent: mark the job finished, apply the kind-specific result fields
-// via set, stamp endedAt, and evict the oldest retained done-job if over the
-// cap. Must be called under m.mu.
+// markDoneLocked is the bookkeeping both finishers share: mark finished,
+// apply the kind-specific fields via set, stamp endedAt, evict past the cap.
+// Under m.mu.
 func (m *jobManager) markDoneLocked(j *bgJob, set func(*bgJob)) {
 	j.finished = true
 	set(j)
@@ -1085,10 +1017,8 @@ func (m *jobManager) markDoneLocked(j *bgJob, set func(*bgJob)) {
 	m.evictOldestDoneIfNeeded()
 }
 
-// notifyAgentDone builds an agent_done completion notification for a subagent
-// job (the counterpart of transport.go's notifyBg). A non-empty errText marks
-// the run as failed; the (truncated) error rides in Status so the parent's
-// notice reads "finished (error: …)".
+// notifyAgentDone builds a subagent's agent_done notification. A non-empty
+// errText rides truncated in Status, so the notice reads "finished (error: …)".
 func notifyAgentDone(id, summary, errText string) notify.Notification {
 	n := notify.Notification{
 		Kind:    notify.KindAgentDone,
@@ -1102,9 +1032,8 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 	return n
 }
 
-// transcript returns the child session's stored messages from the runs store,
-// or nil when unavailable. Works both while the job is active and after it
-// finishes (the job is retained in m.jobs with its childID intact).
+// transcript reads the child session's stored messages, nil when
+// unavailable. Works during the run and after, since the job is retained.
 func (m *jobManager) transcript(id string) []llm.Message {
 	m.mu.Lock()
 	var childID string
@@ -1130,8 +1059,8 @@ func parentName(s *Session) string {
 	return s.name
 }
 
-// parentSessionID is the parent's runs session id ("" with no parent or no
-// store), the directory name its jobs' logs live under.
+// parentSessionID is the parent's runs session id, the directory its jobs'
+// logs live under; "" with no parent or store.
 func parentSessionID(s *Session) string {
 	if s == nil {
 		return ""
@@ -1139,8 +1068,7 @@ func parentSessionID(s *Session) string {
 	return s.sess.ID()
 }
 
-// formatJobList renders all jobs as a compact listing for the task_list tool.
-// Format: one line per job with id, type, and status; running first.
+// formatJobList lists every job for task_list: one line each, running first.
 func (m *jobManager) formatJobList() string {
 	jobs := m.list() // already sorted: running first, then most-recently-done first
 	if len(jobs) == 0 {
@@ -1149,12 +1077,9 @@ func (m *jobManager) formatJobList() string {
 	var b strings.Builder
 	b.WriteString("background tasks:\n")
 	for _, j := range jobs {
-		kind := "command"
-		if j.Kind == JobSubagent {
+		kind := j.Kind.String()
+		if j.Kind == JobSubagent && j.Agent != "" {
 			kind = "@" + j.Agent
-			if j.Agent == "" {
-				kind = "subagent"
-			}
 		}
 		fmt.Fprintf(&b, "  %s  %s  %s", j.ID, kind, jobStatusLabel(j.Done, j.Exit, j.Error))
 		if j.Kind == JobSubagent && j.Cmd != "" {
@@ -1165,11 +1090,9 @@ func (m *jobManager) formatJobList() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderTranscriptText converts a child session's stored messages into
-// human-readable plain text for the task_status tool. System messages are
-// skipped. Tool-call messages list the called tool name; tool-result messages
-// show a one-line label so the model knows a result arrived without the full
-// output; assistant and user text is emitted as "role: content".
+// renderTranscriptText flattens a child's stored messages for task_status.
+// System messages are skipped; a tool call lists its name and a tool result a
+// one-line label, so the model sees that one arrived without the full output.
 func renderTranscriptText(msgs []llm.Message) string {
 	var b strings.Builder
 	for _, msg := range msgs {
@@ -1194,15 +1117,12 @@ func renderTranscriptText(msgs []llm.Message) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// jobStatusCap caps formatJobStatus's total output (bytes) so a huge job
-// result can't flood the model's context.
+// jobStatusCap bounds formatJobStatus so a huge result cannot flood context.
 const jobStatusCap = 4000
 
-// formatJobStatus renders one job's full status and a truncated result for the
-// task_status tool.
+// formatJobStatus renders one job's status and truncated result.
 func (m *jobManager) formatJobStatus(id string) string {
-	// Copy the completion fields under the lock: finishers write them under
-	// m.mu, so reading them off j after Unlock would race.
+	// Copy under the lock: the finishers write these fields under m.mu.
 	m.mu.Lock()
 	j := m.jobs[id]
 	var (
@@ -1229,16 +1149,12 @@ func (m *jobManager) formatJobStatus(id string) string {
 		return fmt.Sprintf("no such task %q", id)
 	}
 
-	kind := "command"
-	if jKind == JobSubagent {
-		kind = "subagent"
-	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "task %s: %s (%s)\n", id, jobStatusLabel(finished, exit, errText), kind)
+	fmt.Fprintf(&b, "task %s: %s (%s)\n", id, jobStatusLabel(finished, exit, errText), jKind)
 	// The child's runs id, so the caller can read what the subagent actually
-	// did (history {session: <id>}) rather than judging it by its summary.
-	// Reviewing an employee's transcript is how you find out it took a
-	// shortcut; without this the transcript is unreachable by name.
+	// did rather than judge it by its summary — reviewing the transcript is
+	// how you find out it took a shortcut, and it is unreachable by name
+	// without this.
 	if childID != "" {
 		fmt.Fprintf(&b, "transcript: %s  (read it with the history tool: {\"session\": \"%s\"})\n", childID, childID)
 	}
@@ -1250,10 +1166,8 @@ func (m *jobManager) formatJobStatus(id string) string {
 		if summary != "" {
 			fmt.Fprintf(&b, "summary: %s\n", strutil.Truncate(summary, 2000))
 		}
-		// Prefer the on-disk transcript once the run ends; while it's still
-		// running that file doesn't exist yet, so fall back to the live in-memory
-		// buffer so the model sees progress (matching the Jobs view).
-		// Render the transcript as readable text; the live buffer is already readable.
+		// Prefer the stored transcript once the run ends; while it runs that
+		// does not exist, so fall back to the live buffer for progress.
 		msgs := m.transcript(id)
 		body, label := renderTranscriptText(msgs), "transcript"
 		if len(msgs) == 0 {
@@ -1269,10 +1183,9 @@ func (m *jobManager) formatJobStatus(id string) string {
 			fmt.Fprintf(&b, "\nfull output: %s", logPath)
 		}
 	}
-	// A second status check on the same still-running job is a poll loop
-	// forming: checking cannot finish the work, and the loop burns the turn
-	// the wake mechanism exists to free. Deterministic host text, because the
-	// start message's "do not poll" alone demonstrably does not hold.
+	// A second check on the same running job is a poll loop forming: checking
+	// cannot finish the work, and the loop burns the turn the wake mechanism
+	// exists to free. Host text, because "do not poll" alone does not hold.
 	if !finished && polls >= 2 {
 		fmt.Fprintf(&b, "\nStill running, and you have now checked %d times — polling cannot finish it. "+
 			"Stop checking and end your turn (reply to the user; say the job is running). "+
@@ -1282,9 +1195,8 @@ func (m *jobManager) formatJobStatus(id string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// jobStatusLabel renders a job's one-word status for task_list/task_status:
-// "running", "done", "error" (a failed subagent), or "error(exit N)" (a
-// command that exited non-zero).
+// jobStatusLabel is a job's one-word status: running, done, error, or
+// error(exit N) for a command.
 func jobStatusLabel(finished bool, exit *int, errText string) string {
 	switch {
 	case !finished:
@@ -1298,16 +1210,14 @@ func jobStatusLabel(finished bool, exit *int, errText string) string {
 	}
 }
 
-// appendCappedTail appends body under a "label:" header, spending at most the
-// budget left before jobStatusCap. When body doesn't fit it keeps a rune-safe
-// tail and adds a truncation marker; when the header lines alone have already
-// used the budget it appends nothing.
+// appendCappedTail appends body under a "label:" header within what is left of
+// jobStatusCap, keeping a rune-safe tail with a marker when it does not fit
+// and appending nothing when the headers alone spent the budget.
 func appendCappedTail(b *strings.Builder, label, body string) {
 	if body == "" {
 		return
 	}
-	// Reserve room for the header + truncation-marker lines so the tail budget
-	// can never go negative (strutil.Tail returns "" for a non-positive budget).
+	// Reserve room for the header and marker so the tail budget stays positive.
 	const overhead = 20
 	remaining := jobStatusCap - b.Len() - overhead
 	if remaining <= 0 {

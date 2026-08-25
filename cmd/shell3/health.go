@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,11 +18,10 @@ import (
 	"github.com/weatherjean/shell3/internal/mcp"
 )
 
-// newHealthCommand builds `shell3 health` — a strict, read-only config check.
-// It loads the config directory exactly like the bot would and reports every problem the
-// running bot tolerates leniently: warnings such as a skipped skill file
-// (bad/missing frontmatter) fail the check here, so `shell3 health` is the
-// place to look when something silently didn't take effect.
+// newHealthCommand builds `shell3 health`, a strict read-only config check.
+// It loads the config directory exactly as the bot would and fails on every
+// problem the bot tolerates — a skipped skill file, say — so this is where to
+// look when something silently did not take effect.
 func newHealthCommand() *cobra.Command {
 	var configDir string
 	cmd := &cobra.Command{
@@ -40,8 +40,8 @@ func newHealthCommand() *cobra.Command {
 	return cmd
 }
 
-// runHealth loads the config at path and prints a verdict (SilenceUsage: a
-// failure means the config is broken, not the invocation).
+// runHealth loads the config at path and prints a verdict. SilenceUsage: a
+// failure means the config is broken, not the invocation.
 func runHealth(cmd *cobra.Command, path string) error {
 	cmd.SilenceUsage = true
 	ctx := cmd.Context()
@@ -50,9 +50,6 @@ func runHealth(cmd *cobra.Command, path string) error {
 	}
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "config: %s\n", path)
-	// agentNames is every kit-declared agent, filled by the kit block below;
-	// the hook dry-run at the end walks it.
-	var agentNames []string
 	lc, err := config.Load(path)
 	if err != nil {
 		return fmt.Errorf("health: %w", err)
@@ -64,117 +61,16 @@ func runHealth(cmd *cobra.Command, path string) error {
 	if len(warns) > 0 {
 		return fmt.Errorf("health: config loaded with %d warning(s)", len(warns))
 	}
-	// The kit IS the config: report its agents and validate every declared
-	// tool, so a broken manifest fails here rather than at 3am.
-	kitPath := filepath.Join(path, config.KitFileName)
-	{
-		res, cerr := kit.Check(ctx, kitPath)
-		if cerr != nil {
-			return fmt.Errorf("health: %w", cerr)
-		}
-		for _, prob := range res.Problems {
-			fmt.Fprintln(out, "kit: "+prob)
-		}
-		if !res.OK() {
-			return fmt.Errorf("health: %s has %d problem(s)", config.KitFileName, len(res.Problems))
-		}
-		src, rerr := os.ReadFile(kitPath)
-		if rerr != nil {
-			return fmt.Errorf("health: %w", rerr)
-		}
-		k, perr := kit.Parse(src)
-		if perr != nil {
-			return fmt.Errorf("health: %w", perr)
-		}
-		agentNames = make([]string, 0, len(k.Agents))
-		for _, ka := range k.Agents {
-			agentNames = append(agentNames, ka.Name)
-		}
-		// Install the kit's gate/note exactly as agentsetup.LoadKit does, so
-		// the dry-run below actually exercises them. config.Load alone does
-		// not: it lifts the wiring and nothing else.
-		if h := agentsetup.KitHooksOf(k); !h.Empty() {
-			main := ""
-			if len(k.Agents) > 0 {
-				main = k.Agents[0].Name
-			}
-			lc.SetKitHooks(kitPath, main, h)
-		}
-		fatCtx, badSkills := 0, 0
-		for i, ka := range k.Agents {
-			role := "employee"
-			if i == 0 {
-				role = "main"
-			}
-			r, rrerr := k.Resolve(ka, i == 0)
-			if rrerr != nil {
-				return fmt.Errorf("health: %w", rrerr)
-			}
-			skillDir := filepath.Join(path, "skills")
-			if i > 0 {
-				skillDir = filepath.Join(path, "projects", ka.Name, "skills")
-			}
-			skills, skillWarns := config.ScanSkillsChecked(skillDir)
-			for _, w := range skillWarns {
-				badSkills++
-				fmt.Fprintln(out, "skills: "+w)
-			}
-			fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
-				ka.Name, role, ka.Model, len(r.Tools), len(skills), len(ka.Tests))
-			// The kit load path never validated `context:` at all, which is
-			// how a 90 KB brain file ran for weeks unnoticed. Resolve against
-			// the agent's OWN workdir, exactly as kitagent.go does.
-			//
-			// Only an OVER-CAP file fails: that one is losing content from the
-			// prompt, which is a defect. A merely large file is reported and
-			// tolerated — it is working, just expensive, and health going red
-			// on a legitimately big brain file would train the operator to
-			// ignore this whole check.
-			for _, w := range config.ContextSizeWarnings(agentContextBase(path, ka.Workdir), ka.Context) {
-				if w.OverCap {
-					fatCtx++
-				}
-				fmt.Fprintf(out, "agent %s: %s\n", ka.Name, w)
-			}
-		}
-		// Cron jobs are `cron:` blocks in the kit, so every check health used
-		// to run here — unknown agent, unknown tool, ambiguous tool scope, a
-		// tool needing an argument no job can pass — is now a kit.Parse load
-		// error, and the Parse above already returned it. What is left is
-		// reporting, plus one thing Parse cannot see: a leftover cron/ dir.
-		for _, j := range k.Crons {
-			target := "agent " + j.Agent
-			if j.Tool != "" {
-				target = "tool " + j.Tool
-			}
-			fmt.Fprintf(out, "cron: %s (%s, %s)\n", j.Name, j.Schedule, target)
-		}
-		// cron/<name>.md was removed in favour of `cron:` blocks. A leftover
-		// dir is now inert, which means jobs that used to fire silently do
-		// not — worth one warning, without reading a byte of it.
-		if ents, derr := os.ReadDir(filepath.Join(path, "cron")); derr == nil {
-			stale := 0
-			for _, e := range ents {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-					stale++
-				}
-			}
-			if stale > 0 {
-				fmt.Fprintf(out, "cron: %d leftover cron/*.md file(s) — that format was removed; jobs are `cron:` blocks in %s and these no longer fire\n", stale, kit.FileName)
-			}
-		}
-		if badSkills > 0 {
-			return fmt.Errorf("health: %d unusable skill file(s) — they are silently absent from the prompt", badSkills)
-		}
-		if fatCtx > 0 {
-			return fmt.Errorf("health: %d oversized context file(s) — every turn re-reads them into the prompt", fatCtx)
-		}
+	// Report the kit's agents and validate every declared tool, so a broken
+	// manifest fails here rather than at 3am. agentNames feeds the dry-run.
+	agentNames, err := checkKit(ctx, out, path, lc)
+	if err != nil {
+		return err
 	}
-	// Dry-run every discovered hook with a probe payload. A script failure
-	// (nonzero exit, bad verdict JSON, timeout) surfaces as a fail-closed
-	// verdict whose reason carries "hook error:"/"hook failed:" — that's a
-	// broken script and fails health. A deliberate block on the probe is
-	// fine: the gate is just strict.
+	// Dry-run every hook with a probe. A script failure surfaces as a
+	// fail-closed verdict whose reason carries "hook error:" — a broken
+	// script, which fails health. A deliberate block is fine: the gate is
+	// just strict.
 	brokenHooks := 0
 	for _, name := range agentNames {
 		if lc.ToolCallHookFor(name) == "" {
@@ -192,10 +88,9 @@ func runHealth(cmd *cobra.Command, path string) error {
 			fmt.Fprintf(out, "hook (%s tool-result): %s\n", name, outp)
 		}
 	}
-	// Commands and event subscribers are ACTION hooks, so health checks that
-	// their functions are defined rather than running them: dry-running a
-	// command would post the message it exists to post, every time someone
-	// typed `shell3 health`.
+	// Commands and event subscribers are ACTION hooks, so health checks only
+	// that they are defined: dry-running a command would post the message it
+	// exists to post, every time.
 	for _, p := range lc.VerifyHooks(ctx) {
 		brokenHooks++
 		fmt.Fprintf(out, "hook (%s)\n", p)
@@ -203,9 +98,8 @@ func runHealth(cmd *cobra.Command, path string) error {
 	if brokenHooks > 0 {
 		return fmt.Errorf("health: %d broken hook script(s)", brokenHooks)
 	}
-	// Connect every declared MCP server, exactly like the bot would at
-	// startup. The running bot tolerates a down server (warning, tools
-	// absent); health is the strict view, so any down server fails here.
+	// Connect every declared server as the bot would. The bot tolerates a
+	// down one; health is the strict view, so it fails here.
 	if servers := lc.MCPServers(); len(servers) > 0 {
 		m := mcp.New(servers, nil)
 		defer m.Close()
@@ -223,13 +117,11 @@ func runHealth(cmd *cobra.Command, path string) error {
 			return fmt.Errorf("health: %d MCP server(s) down", down)
 		}
 	}
-	// The telegram front-end's own start-up check, run here rather than found
-	// out at `shell3 telegram`: health is documented as THE config check, and a
-	// block boot wrote with blank fields loads cleanly but refuses to start. An
-	// ABSENT block is not an error — an `shell3 ask`-only config is legitimate —
-	// but say so. Deliberately LAST: a
-	// blank chat id is a state boot itself writes ("fill it in later"), and it
-	// must never hide the hook and MCP diagnostics above.
+	// The front-end's own start-up check, run here rather than discovered at
+	// `shell3 telegram`: a block boot wrote with blank fields loads cleanly
+	// and refuses to start. An ABSENT block is reported, not failed — an
+	// ask-only config is legitimate. LAST on purpose: a blank chat id is a
+	// state boot itself writes, and must not hide the diagnostics above.
 	if tg := lc.Telegram(); !tg.Present {
 		fmt.Fprintln(out, "telegram: absent — the bot front-end is unwired (add a telegram: block to run `shell3 telegram`)")
 	} else if chatID, err := telegramHomeChat(tg); err != nil {
@@ -238,10 +130,9 @@ func runHealth(cmd *cobra.Command, path string) error {
 	} else {
 		fmt.Fprintf(out, "telegram: home chat %d\n", chatID)
 		if tg.ChatID == "" {
-			// The home chat fell back to a user id. Telegram forbids a bot
-			// from opening a DM, so this only delivers once that person has
-			// written to the bot — a warning, not a failure, because it is
-			// true today and false tomorrow with no config change.
+			// Fell back to a user id, and a bot cannot open a DM, so this
+			// delivers only once that person has written. A warning, not a
+			// failure: true today and false tomorrow with no config change.
 			fmt.Fprintf(out, "telegram: no chat_id set — cron results will DM user %d, "+
 				"which only works once they have messaged the bot\n", chatID)
 		}
@@ -251,22 +142,100 @@ func runHealth(cmd *cobra.Command, path string) error {
 	return nil
 }
 
-// agentContextBase resolves the directory a kit agent's `context:` entries are
-// read against — its own workdir when it declares one, the config dir
-// otherwise. Mirrors agentsetup/kitagent.go's ctxBase so health inspects the
-// same files the running agent loads; a divergence here would make health
-// pass on a file the agent never reads.
-func agentContextBase(configDir, workdir string) string {
-	if workdir == "" {
-		return configDir
+// homeDir is what a ~/-prefixed workdir expands against, "" if the OS will
+// not say, which leaves the path unexpanded rather than guessed.
+func homeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
 	}
-	if strings.HasPrefix(workdir, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, workdir[2:])
+	return home
+}
+
+// checkKit reports the kit's agents, cron jobs, skills and context files, and
+// returns the agent names for the dry-run. Anything that makes the install
+// untrustworthy — a kit that does not lint, an unusable skill, an over-cap
+// context file — is an error.
+func checkKit(ctx context.Context, out io.Writer, path string, lc *config.LoadedConfig) ([]string, error) {
+	kitPath := filepath.Join(path, kit.FileName)
+	res, cerr := kit.Check(ctx, kitPath)
+	if cerr != nil {
+		return nil, fmt.Errorf("health: %w", cerr)
+	}
+	for _, prob := range res.Problems {
+		fmt.Fprintln(out, "kit: "+prob)
+	}
+	if !res.OK() {
+		return nil, fmt.Errorf("health: %s has %d problem(s)", kit.FileName, len(res.Problems))
+	}
+	// The kit config.Load already parsed, not a second read that could
+	// disagree with the config being reported on.
+	k := lc.Kit()
+	agentNames := make([]string, 0, len(k.Agents))
+	for _, ka := range k.Agents {
+		agentNames = append(agentNames, ka.Name)
+	}
+	// Install the gate and note as agentsetup.LoadKit does, so the dry-run
+	// exercises them; config.Load lifts the wiring and nothing else.
+	if h := agentsetup.KitHooksOf(k); !h.Empty() {
+		main := ""
+		if len(k.Agents) > 0 {
+			main = k.Agents[0].Name
+		}
+		lc.SetKitHooks(kitPath, main, h)
+	}
+	fatCtx, badSkills := 0, 0
+	for i, ka := range k.Agents {
+		role := "employee"
+		if i == 0 {
+			role = "main"
+		}
+		r, rrerr := k.Resolve(ka, i == 0)
+		if rrerr != nil {
+			return nil, fmt.Errorf("health: %w", rrerr)
+		}
+		skillDir := filepath.Join(path, "skills")
+		if i > 0 {
+			skillDir = filepath.Join(path, "projects", ka.Name, "skills")
+		}
+		skills, skillWarns := config.ScanSkillsChecked(skillDir)
+		for _, w := range skillWarns {
+			badSkills++
+			fmt.Fprintln(out, "skills: "+w)
+		}
+		fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
+			ka.Name, role, ka.Model, len(r.Tools), len(skills), len(ka.Tests))
+		// The load path validates context: not at all, which is how a 90 KB
+		// brain file ran for weeks unnoticed. Resolved against the agent's
+		// OWN workdir, as kitagent.go does.
+		//
+		// Only an OVER-CAP file fails — that one is losing content from the
+		// prompt. A merely large file is reported and tolerated: it works,
+		// just expensively, and going red on a legitimately big brain file
+		// would train the operator to ignore this check.
+		for _, w := range config.ContextSizeWarnings(agentsetup.AgentContextBase(path, homeDir(), ka.Workdir), ka.Context) {
+			if w.OverCap {
+				fatCtx++
+			}
+			fmt.Fprintf(out, "agent %s: %s\n", ka.Name, w)
 		}
 	}
-	if filepath.IsAbs(workdir) {
-		return workdir
+	// Cron jobs are `cron:` blocks in the kit, so every check health used
+	// to run here — unknown agent, unknown tool, ambiguous tool scope, a
+	// tool needing an argument no job can pass — is a kit.Parse load error,
+	// which the Parse above already returned. All that is left is reporting.
+	for _, j := range k.Crons {
+		target := "agent " + j.Agent
+		if j.Tool != "" {
+			target = "tool " + j.Tool
+		}
+		fmt.Fprintf(out, "cron: %s (%s, %s)\n", j.Name, j.Schedule, target)
 	}
-	return filepath.Join(configDir, workdir)
+	if badSkills > 0 {
+		return nil, fmt.Errorf("health: %d unusable skill file(s) — they are silently absent from the prompt", badSkills)
+	}
+	if fatCtx > 0 {
+		return nil, fmt.Errorf("health: %d oversized context file(s) — every turn re-reads them into the prompt", fatCtx)
+	}
+	return agentNames, nil
 }

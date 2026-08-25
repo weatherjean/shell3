@@ -5,7 +5,7 @@
 `lib/...` file mirrors the base config's layout.
 
 A recipe here is **a kit section you paste into `shell3.sh`** — a `tool:`
-block with its shell body, a `skill:` block, or a whole `agent:`. Paste it,
+block with its shell body, a skill file, or a whole `agent:`. Paste it,
 run `shell3 tool check ~/.shell3/shell3.sh`, reload. See
 [kits.md](../kits.md) and [tools.md](../tools.md).
 

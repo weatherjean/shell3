@@ -2,6 +2,7 @@ package paths
 
 import (
 	"path/filepath"
+	"strings"
 )
 
 // ProjectDirName is the per-project runtime directory created under a workdir
@@ -44,4 +45,13 @@ func NewLocal(cwd string) Local {
 // LastErrorPath is where a failed turn dumps its request/response for debugging.
 func LastErrorPath(workdir string) string {
 	return filepath.Join(workdir, ProjectDirName, "last_error.json")
+}
+
+// IsCredentialFile reports whether a base file name is one shell3 treats as
+// secret: the `.env` beside the kit and its dotenv siblings (.env.local, …).
+// One definition, so the dash's file explorer (lists without reading) and
+// send_media_telegram (refuses to send) can never drift apart.
+func IsCredentialFile(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == ".env" || strings.HasPrefix(lower, ".env.")
 }

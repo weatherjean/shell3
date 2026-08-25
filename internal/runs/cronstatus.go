@@ -1,6 +1,6 @@
 package runs
 
-// cron_status is cron's own table (see schemaVersion's v5 note in db.go): one
+// cron_status is cron's own table (see schemaVersion in db.go): one
 // row per job name, holding an opaque JSON blob the cron package encodes and
 // decodes. This package stores bytes and does not parse them — cron.JobStatus
 // lives in internal/cron, and this package must not import it back.

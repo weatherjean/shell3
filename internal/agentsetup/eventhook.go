@@ -165,7 +165,7 @@ func (d *eventDispatcher) countDropped(n int) {
 }
 
 // Dropped reports how many events were discarded because the subscriber could
-// not keep up. Surfaced so a gap in an audit log has a visible cause.
+// not keep up. Read by tests; operators see the count in the app log warning.
 func (d *eventDispatcher) Dropped() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()

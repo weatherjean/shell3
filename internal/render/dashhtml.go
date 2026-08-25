@@ -115,7 +115,7 @@ func DashIndexHTML(sess *shell3.Session, rt *shell3.Runtime, version string,
 					urlq(j.ParentSession), urlq(j.ID), esc(tok), esc(j.ID))
 			}
 			fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-				idCell, esc(kindOf(j)), esc(jobLabel(j)), esc(state))
+				idCell, esc(j.Kind.String()), esc(jobLabel(j)), esc(state))
 		}
 		b.WriteString("</table>\n")
 	}
@@ -131,7 +131,7 @@ func DashIndexHTML(sess *shell3.Session, rt *shell3.Runtime, version string,
 			if st.Tool != "" {
 				target = "tool:" + st.Tool
 			}
-			cost := strings.TrimPrefix(cronCostSuffix(st, costs), " · ")
+			cost := cronCost(st, costs)
 			fmt.Fprintf(&b, "<tr><td><a href=\"/cron?name=%s&amp;t=%s\"><code>%s</code></a></td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 				urlq(st.Name), esc(tok), esc(st.Name), esc(st.Schedule), esc(target), esc(cronLastRun(st)), esc(cronOutcome(st)), esc(cost))
 		}

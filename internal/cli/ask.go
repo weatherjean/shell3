@@ -24,46 +24,36 @@ var (
 // errAskTurnFailed is returned when any turn event carried an error.
 var errAskTurnFailed = errors.New("turn ended with error")
 
-// errJobBusClosed is waitForJobChange's internal sentinel for a closed Wake or
-// job-progress bus: neither can report any future change, so the caller should
-// treat the wait as over rather than looping back in (which would return
-// immediately again and busy-spin).
+// errJobBusClosed marks a closed Wake or job-progress bus: neither can report
+// a future change, so the caller ends the wait rather than busy-spinning.
 var errJobBusClosed = errors.New("job event bus closed")
 
-// RunAskTurn drives one turn on sess and renders every public event verbosely to
-// w: reasoning, streamed reply, each tool call with its args, full (untruncated)
-// tool results, retries, per-roundtrip token usage, and the final totals. It is
-// `shell3 ask`'s window into exactly what the agent does — nothing is hidden or
-// capped the way a chat front-end would. Returns errAskTurnFailed if the turn
-// ended in an error event.
+// RunAskTurn drives one turn and renders every public event verbosely:
+// reasoning, streamed reply, each tool call with its args, untruncated
+// results, retries, per-round usage, final totals. Nothing is hidden or capped
+// the way a chat front-end would. errAskTurnFailed if the turn ended in error.
 func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt string) error {
 	return renderAskEvents(w, sess.Send(ctx, prompt))
 }
 
-// FollowAskJobs mirrors the bot's wake loop for a one-shot `shell3 ask`
-// run: after the turn ends, while the session has a running background
-// job (a spawned subagent or bash_bg) or a queued completion notice, it renders
-// the wake turn the host would run to narrate each result. It KEEPS THE PROCESS
-// ALIVE until every job completes and its wake turn has run — a one-shot run
-// must never exit at turn end and silently kill in-flight in-process work.
+// FollowAskJobs mirrors the bot's wake loop for a one-shot run: while the
+// session has a running job or a queued notice, it renders the wake turn the
+// host would run. It KEEPS THE PROCESS ALIVE until every job completes — a
+// one-shot run must never exit at turn end and kill in-flight work.
 //
-// There is no timeout: only ctx cancellation (SIGINT) cuts the wait short (then
-// it returns ctx.Err()). It returns nil once the session is idle with no running
-// jobs. It blocks on BOTH the Wake bus and the job-progress bus so a job whose
-// completion queues without an immediate wake is still noticed and its queued
-// notice narrated, rather than parking the run forever.
+// No timeout; only ctx cancellation cuts it short. It blocks on BOTH the Wake
+// bus and the job-progress bus, so a completion that queues without an
+// immediate wake is still noticed rather than parking the run forever.
 //
-// ask deliberately installs NO CompletionHost: with the host absent the
-// runtime's library fallback delivers every completion's raw notice straight
-// to the owning session, so this loop sees and narrates everything — the
-// verbose debugging view. Mail routing is exercised on the
-// real bot loop (`shell3 telegram`), not here.
+// ask installs NO CompletionHost, so the runtime's library fallback delivers
+// every raw notice straight to the owning session and this loop narrates
+// everything — the verbose debugging view. Mail routing is exercised on the
+// real bot loop.
 func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *shell3.Session) error {
 	announced := 0 // running count last printed, so the waiting note isn't repeated per progress event
 	for {
-		// Narrate any queued completion notice first: it is already in the inbox
-		// (a wake may never fire for a quiet job), and a one-shot run has no later
-		// turn to defer it to.
+		// Queued notices first: a wake may never fire for a quiet job, and a
+		// one-shot run has no later turn to defer to.
 		if sess.HasQueuedInput() {
 			fmt.Fprintln(w, askLabel.Render("· background task finished, narrating:"))
 			if err := renderAskEvents(w, sess.RunQueued(ctx)); err != nil {
@@ -74,10 +64,9 @@ func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *s
 		}
 		running := 0
 		for _, j := range sess.Jobs() {
-			// A subagent job can report Done=true at main-turn end while its
-			// child session lingers to run a follow-up turn for a bash_bg that
-			// outlived the turn (see JobInfo.ChildOpen). Treat that as still
-			// running: exiting here would drop the follow-up's narration.
+			// A subagent reports Done at main-turn end while its child lingers
+			// for a bash_bg that outlived the turn. Still running: exiting
+			// would drop the follow-up's narration.
 			if !j.Done || j.ChildOpen {
 				running++
 			}
@@ -91,9 +80,9 @@ func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *s
 		}
 		if err := waitForJobChangeFn(ctx, rt, sess); err != nil {
 			if errors.Is(err, errJobBusClosed) {
-				// A closed bus can't report any future change; there is nothing
-				// left to wait for. Treat it as terminal rather than looping back
-				// into waitForJobChange, which would return immediately again on
+				// A closed bus reports no future change, so this is terminal
+				// rather than a loop back into waitForJobChange, which returns
+				// immediately again on
 				// the same closed channel and busy-spin.
 				return nil
 			}

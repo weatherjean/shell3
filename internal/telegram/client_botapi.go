@@ -22,8 +22,8 @@ import (
 
 const maxMediaBytes = 25 * 1024 * 1024 // 25 MB
 
-// mediaHTTPClient bounds attachment downloads. The per-request context still
-// applies; this timeout is the hard ceiling for a single hung connection.
+// mediaHTTPClient is the hard ceiling for one hung connection; the
+// per-request context still applies.
 var mediaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 type BotAPIClient struct {
@@ -32,16 +32,16 @@ type BotAPIClient struct {
 	log    applog.Logger
 	health *pollHealth
 
-	// identity caches getMe's answer: the bot's own @username, needed on
-	// every group message to spot an @mention. One lookup per process.
+	// identity caches getMe: the bot's own @username, needed on every group
+	// message. One lookup per process.
 	identityMu   sync.Mutex
 	username     string
 	selfID       int64
 	usernameSeen bool
 }
 
-// selfIdentity returns this bot's user id, resolving it once. Zero when the
-// lookup has not succeeded yet, which only costs a reply-trigger miss.
+// selfIdentity resolves this bot's user id once. Zero before it succeeds,
+// which costs only a reply-trigger miss.
 func (c *BotAPIClient) selfIdentity() int64 {
 	c.identityMu.Lock()
 	defer c.identityMu.Unlock()
@@ -68,10 +68,9 @@ func (c *BotAPIClient) Username(ctx context.Context) (string, error) {
 	return me.Username, nil
 }
 
-// ChatInfo reports a chat's title and description — the raw material of a
-// room's prompt brief. A private chat has neither in the sense meant here:
-// its "title" is the other party's name and it has no description, so the
-// caller gets what Telegram returns and decides what to use.
+// ChatInfo is a chat's title and description, the room brief's raw material.
+// A private chat has neither in the sense meant here — its title is the other
+// party's name — so the caller decides what to use.
 func (c *BotAPIClient) ChatInfo(ctx context.Context, chatID int64) (string, string, error) {
 	ch, err := c.b.GetChat(ctx, &bot.GetChatParams{ChatID: chatID})
 	if err != nil {
@@ -80,10 +79,8 @@ func (c *BotAPIClient) ChatInfo(ctx context.Context, chatID int64) (string, stri
 	return ch.Title, ch.Description, nil
 }
 
-// NewBotAPIClient builds the real Telegram transport. token comes from config
-// (rt.Telegram().Token) — never print it. lg records transport errors
-// (getUpdates failures during a network outage) in the app log; nil is
-// allowed and logs nowhere.
+// NewBotAPIClient builds the real transport. Never print token. lg records
+// transport errors in the app log; nil logs nowhere.
 func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotAPIClient, error) {
 	if lg == nil {
 		lg = applog.Noop{}
@@ -94,9 +91,8 @@ func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotA
 	}
 	b, err := bot.New(token,
 		bot.WithDefaultHandler(c.onUpdate),
-		// The library retries failed polls forever on its own; this handler
-		// only makes outages visible. Throttled so a long network drop is a
-		// handful of log lines, not thousands.
+		// The library retries failed polls itself; this only makes outages
+		// visible, throttled so a long drop is a handful of lines.
 		bot.WithErrorsHandler(func(err error) {
 			if errors.Is(err, context.Canceled) {
 				return // clean shutdown aborting the pending poll, not an outage
@@ -115,11 +111,10 @@ func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotA
 	return c, nil
 }
 
-// watchHealth closes out an outage the chat itself never proves is over. The
-// library only calls onUpdate when someone SENDS something, so in a quiet
-// chat a recovered transport looks identical to a dead one; this ticker
-// notices the errors stopped. It is observability only — nothing here retries
-// or reconnects.
+// watchHealth closes out an outage a quiet chat never proves is over: the
+// library calls onUpdate only when someone sends something, so a recovered
+// transport looks identical to a dead one until this ticker notices the
+// errors stopped. Observability only — nothing here reconnects.
 func (c *BotAPIClient) watchHealth(ctx context.Context) {
 	t := time.NewTicker(pollQuietRecovery / 5)
 	defer t.Stop()
@@ -136,8 +131,7 @@ func (c *BotAPIClient) watchHealth(ctx context.Context) {
 }
 
 func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
-	// An update arriving proves the poll loop is healthy again; close out any
-	// outage the errors handler recorded.
+	// An update proves the poll loop is healthy again.
 	if recovered, outage, fails := c.health.ok(); recovered {
 		c.log.Warn("telegram transport recovered", "outage", outage.Round(time.Second).String(), "errors", fails)
 	}
@@ -146,18 +140,16 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	}
 	m := u.Message
 	msg := normalizeMessage(m)
-	// Whether the replied-to message is ours is decided from Telegram's own
-	// author field, not from what this process remembers sending — the
-	// remembered set is empty after a restart.
+	// From Telegram's own author field, not what this process remembers
+	// sending — that set is empty after a restart.
 	if r := m.ReplyToMessage; r != nil && r.From != nil {
 		if self := c.selfIdentity(); self != 0 && r.From.ID == self {
 			msg.ReplyToBot = true
 		}
 	}
-	// Attachments are NOT downloaded here: the bot fetches them once the
-	// message has cleared authorization (see Msg.FetchMedia). Under privacy
-	// mode off this is the difference between fetching what was sent to the
-	// agent and fetching every photo in every group it can see.
+	// NOT downloaded here: the bot fetches once the message clears
+	// authorization. With privacy mode off that is the difference between
+	// fetching what was sent to the agent and every photo it can see.
 	msg.HasMedia = hasAttachment(m)
 	if msg.HasMedia {
 		msg.FetchMedia = func(fctx context.Context) []Media { return resolveMedia(fctx, c, m) }
@@ -165,16 +157,15 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	c.out <- msg
 }
 
-// normalizeMessage projects a Telegram message onto the transport-agnostic Msg,
-// minus its attachments (resolveMedia fills those in — it needs the network).
-// Telegram puts the words of a MEDIA message in Caption, not Text, so a photo
-// sent with "translate this" has an empty Text; the caption is the message.
+// normalizeMessage projects a Telegram message onto Msg, minus attachments —
+// resolveMedia needs the network. A MEDIA message's words are in Caption, not
+// Text, so a photo sent with "translate this" has an empty Text.
 func normalizeMessage(m *models.Message) Msg {
 	msg := Msg{ChatID: m.Chat.ID, ChatType: string(m.Chat.Type), ID: strconv.Itoa(m.ID),
 		Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
 	if m.From != nil {
-		// From is set by Telegram, not the client. A channel post has no
-		// From at all, which leaves SenderID 0 and therefore unauthorized.
+		// Set by Telegram, not the client. A channel post has no From, which
+		// leaves SenderID 0 and therefore unauthorized.
 		msg.SenderID = m.From.ID
 	}
 	if r := m.ReplyToMessage; r != nil {
@@ -184,9 +175,8 @@ func normalizeMessage(m *models.Message) Msg {
 	return msg
 }
 
-// replyContext returns the text the message is replying to, for model context.
-// Prefers the user's highlighted Quote (the specific portion they selected);
-// otherwise falls back to the full replied-to message's text (or caption).
+// replyContext is the text being replied to: the user's highlighted Quote if
+// they selected one, else the whole replied-to message.
 func replyContext(m *models.Message) string {
 	if m.Quote != nil && m.Quote.Text != "" {
 		return m.Quote.Text
@@ -197,9 +187,8 @@ func replyContext(m *models.Message) string {
 	return ""
 }
 
-// hasAttachment reports whether m carries any attachment kind resolveMedia
-// knows how to fetch. It is what the routing gates test before the bytes
-// exist.
+// hasAttachment reports an attachment resolveMedia can fetch — what the
+// routing gates test before the bytes exist.
 func hasAttachment(m *models.Message) bool {
 	return len(m.Photo) > 0 || m.Voice != nil || m.Audio != nil ||
 		m.Video != nil || m.Animation != nil || m.Document != nil
@@ -251,16 +240,15 @@ func (c *BotAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 	if err != nil {
 		return Media{}, false
 	}
-	// Bound the body fetch so a hung file-CDN connection can't park this
-	// goroutine (and, since onUpdate downloads media inline, stall the whole
-	// update loop) indefinitely.
+	// Bound the body fetch: onUpdate downloads media inline, so a hung
+	// file-CDN connection would stall the whole update loop.
 	resp, err := mediaHTTPClient.Do(req)
 	if err != nil {
 		return Media{}, false
 	}
 	defer resp.Body.Close()
 
-	// Cap the read at maxMediaBytes+1 so we can detect an over-limit body.
+	// +1 so an over-limit body is detectable.
 	lr := io.LimitReader(resp.Body, maxMediaBytes+1)
 	data, err := io.ReadAll(lr)
 	if err != nil {
@@ -275,9 +263,9 @@ func (c *BotAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 // Updates delivers normalized inbound messages until ctx is cancelled.
 func (c *BotAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
-// transientSendErr reports whether a send failure is worth retrying: network
-// interruptions and server-side hiccups, never Telegram API rejections (a 400
-// retried is a 400 again). 429s retry too — the throttle asks for patience.
+// transientSendErr: network interruptions and server-side hiccups are worth
+// retrying, API rejections are not — a 400 retried is a 400 again. A 429 does
+// retry; the throttle is asking for patience.
 func transientSendErr(err error) bool {
 	if err == nil {
 		return false
@@ -297,8 +285,7 @@ func transientSendErr(err error) bool {
 	return false
 }
 
-// sendBackoff is the retry schedule for transient outbound failures: a chat
-// message is worth ~4.5s of patience before it is reported lost.
+// sendBackoff: a chat message is worth ~4.5s before it is reported lost.
 var sendBackoff = []time.Duration{300 * time.Millisecond, 1200 * time.Millisecond, 3 * time.Second}
 
 // withSendRetry runs send, retrying transient failures on the backoff
@@ -319,90 +306,59 @@ func withSendRetry[T any](ctx context.Context, send func() (T, error)) (T, error
 	return out, err
 }
 
-// Send posts a plain-text message. ParseMode is omitted; this is the safe
-// fallback path when SendHTML is rejected.
+// Send posts plain text with no ParseMode — the fallback when SendHTML is
+// rejected.
 func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
-	m, err := withSendRetry(ctx, func() (*models.Message, error) {
-		return c.b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              chatID,
-			Text:                text,
-			DisableNotification: sendSilent(opts),
-		})
-	})
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(m.ID), nil
+	return c.sendText(ctx, chatID, text, false, "", opts)
 }
 
-// SendHTML posts a message with parse_mode=HTML so the agent's formatting
-// (bold, italics, code, links) renders. Telegram rejects malformed HTML with a
-// 400, so callers fall back to Send on error.
+// SendHTML posts with parse_mode=HTML so the agent's formatting renders.
+// Malformed HTML is a 400, so callers fall back to Send.
 func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
-	m, err := withSendRetry(ctx, func() (*models.Message, error) {
-		return c.b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              chatID,
-			Text:                html,
-			ParseMode:           models.ParseModeHTML,
-			DisableNotification: sendSilent(opts),
-		})
-	})
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(m.ID), nil
+	return c.sendText(ctx, chatID, html, true, "", opts)
+}
+
+// SendReply threads plain text onto replyTo, retrying as a plain Send if that
+// message is gone.
+func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
+	return c.sendText(ctx, chatID, text, false, replyTo, opts)
+}
+
+// SendHTMLReply is SendReply with parse_mode=HTML; callers fall back to
+// SendReply on an HTML rejection.
+func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
+	return c.sendText(ctx, chatID, html, true, replyTo, opts)
 }
 
 // replyNotFound reports whether err is Telegram's "message to be replied not
-// found" — the reply target (a thread's anchor message) was deleted. The reply
-// sends treat it as a signal to fall back to a plain send, never a turn failure.
+// found" — the reply target (a thread's anchor message) was deleted. sendText
+// treats it as a signal to re-send unthreaded, never a turn failure.
 func replyNotFound(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "message to be replied not found")
 }
 
-// SendReply posts plain text as a reply to replyTo. On a deleted reply target
-// it retries as a plain Send so a thread whose anchor vanished never fails.
-func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
-	rid, err := strconv.Atoi(replyTo)
-	if err != nil {
-		return c.Send(ctx, chatID, text, opts...) // non-numeric anchor (foreign transport): plain send
+// sendText is the one outbound text path: plain or HTML, threaded or not.
+// A non-numeric replyTo is a foreign transport's id (the console client
+// numbers its own), and a vanished anchor answers replyNotFound — both send
+// unthreaded rather than failing the turn.
+func (c *BotAPIClient) sendText(ctx context.Context, chatID int64, text string, asHTML bool, replyTo string, opts []SendOpt) (string, error) {
+	p := &bot.SendMessageParams{
+		ChatID:              chatID,
+		Text:                text,
+		DisableNotification: sendSilent(opts),
 	}
-	m, err := withSendRetry(ctx, func() (*models.Message, error) {
-		return c.b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              chatID,
-			Text:                text,
-			ReplyParameters:     &models.ReplyParameters{MessageID: rid},
-			DisableNotification: sendSilent(opts),
-		})
-	})
+	if asHTML {
+		p.ParseMode = models.ParseModeHTML
+	}
+	if replyTo != "" {
+		if rid, err := strconv.Atoi(replyTo); err == nil {
+			p.ReplyParameters = &models.ReplyParameters{MessageID: rid}
+		}
+	}
+	m, err := withSendRetry(ctx, func() (*models.Message, error) { return c.b.SendMessage(ctx, p) })
 	if replyNotFound(err) {
-		return c.Send(ctx, chatID, text, opts...)
-	}
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(m.ID), nil
-}
-
-// SendHTMLReply is SendReply with parse_mode=HTML. On a deleted reply target it
-// falls back to a plain (HTML) Send; callers fall back to SendReply on an HTML
-// rejection.
-func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
-	rid, err := strconv.Atoi(replyTo)
-	if err != nil {
-		return c.SendHTML(ctx, chatID, html, opts...)
-	}
-	m, err := withSendRetry(ctx, func() (*models.Message, error) {
-		return c.b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              chatID,
-			Text:                html,
-			ParseMode:           models.ParseModeHTML,
-			ReplyParameters:     &models.ReplyParameters{MessageID: rid},
-			DisableNotification: sendSilent(opts),
-		})
-	})
-	if replyNotFound(err) {
-		return c.SendHTML(ctx, chatID, html, opts...)
+		p.ReplyParameters = nil
+		m, err = withSendRetry(ctx, func() (*models.Message, error) { return c.b.SendMessage(ctx, p) })
 	}
 	if err != nil {
 		return "", err

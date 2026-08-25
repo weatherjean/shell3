@@ -11,11 +11,6 @@ import (
 // writes in `use:`) to the schema the model receives. It is ordered, so
 // ToolDefs emits a stable list regardless of the order the names arrive in —
 // a tool list that reshuffles per turn would invalidate the prompt cache.
-//
-// This used to be spelled four times: kit.Builtins, a ToolGates struct of
-// seven bools, an if-chain here, and a name→bool switch in agentsetup. Adding
-// a built-in meant editing all four and silently getting a tool the model
-// could see but not call if you missed one.
 var builtins = []struct {
 	Name string
 	Def  llm.ToolDefinition
@@ -81,7 +76,7 @@ var bashBgTool = llm.ToolDefinition{
 }
 
 // SubagentRef is one allowed subagent for TaskToolFor: its name plus the
-// model-facing "when to use" description from its agents/<name>.md declaration.
+// model-facing "when to use" description from its kit `agent:` block.
 type SubagentRef struct{ Name, Description string }
 
 // TaskToolFor returns the llm.ToolDefinition for the `task` tool with the
@@ -154,36 +149,30 @@ var TaskListTool = llm.ToolDefinition{
 
 // TaskStatusTool is the llm.ToolDefinition for task_status: returns one task's
 // status and a truncated result (transcript tail for subagents, output for commands).
-var TaskStatusTool = llm.ToolDefinition{
-	Name:        "task_status",
-	Description: "Get the status and result of a single background task by id (e.g. sub1, bg1). Returns status, type, and a truncated result.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"id": map[string]any{
-				"type":        "string",
-				"description": "The task id returned by the task or bash_bg tool (e.g. sub1, bg1)",
-			},
-		},
-		"required": []string{"id"},
-	},
-}
+var TaskStatusTool = taskByIDTool("task_status",
+	"Get the status and result of a single background task by id (e.g. sub1, bg1). Returns status, type, and a truncated result.",
+	"The task id returned by the task or bash_bg tool (e.g. sub1, bg1)")
 
 // TaskCancelTool is the llm.ToolDefinition for task_cancel: cancels a running
 // background task.
-var TaskCancelTool = llm.ToolDefinition{
-	Name:        "task_cancel",
-	Description: "Cancel a running background task by id. No-op if the task is already done.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"id": map[string]any{
-				"type":        "string",
-				"description": "The task id to cancel (e.g. sub1, bg1)",
+var TaskCancelTool = taskByIDTool("task_cancel",
+	"Cancel a running background task by id. No-op if the task is already done.",
+	"The task id to cancel (e.g. sub1, bg1)")
+
+// taskByIDTool is the schema shared by the task tools that take one required
+// {id} — the shape chat.taskByIDHandler answers.
+func taskByIDTool(name, desc, idDesc string) llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Name:        name,
+		Description: desc,
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string", "description": idDesc},
 			},
+			"required": []string{"id"},
 		},
-		"required": []string{"id"},
-	},
+	}
 }
 
 var bashTool = llm.ToolDefinition{

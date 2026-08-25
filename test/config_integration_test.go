@@ -12,6 +12,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/persona"
@@ -60,12 +61,12 @@ SHELL3_EOF
 // the kit's gate/note the way agentsetup.LoadKit does on the real path.
 func loadKitConfig(t *testing.T, dir, body string, gates, notes map[string]string) *config.LoadedConfig {
 	t.Helper()
-	writeConfigTree(t, dir, map[string]string{config.KitFileName: body})
+	writeConfigTree(t, dir, map[string]string{kit.FileName: body})
 	lc, err := config.Load(dir)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	lc.SetKitHooks(filepath.Join(dir, config.KitFileName), "main", config.KitHooks{Gates: gates, Notes: notes})
+	lc.SetKitHooks(filepath.Join(dir, kit.FileName), "main", config.KitHooks{Gates: gates, Notes: notes})
 	return lc
 }
 

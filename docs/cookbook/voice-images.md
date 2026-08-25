@@ -93,20 +93,20 @@ main_image() {
 
 ## Telling the agent when to use them
 
-Put the policy in a skill rather than in each tool's description:
+Put the policy in a skill rather than in each tool's description — a skill is a
+file, so this is `~/.shell3/skills/media-policy.md`:
 
-```sh
-#---
-# skill: media-policy
-#---
-main_media_policy() { cat <<'EOF'
+```markdown
+---
+name: media-policy
+description: When to transcribe a voice note, speak a reply, or generate an image
+---
+
 A voice note arrives as a file path. Transcribe it before answering — never
 guess at audio you have not read.
 
 Reply with speech only when I sent speech. Generate an image only when I ask
 for one; describe it in words first if the request is ambiguous.
-EOF
-}
 ```
 
 ## Housekeeping

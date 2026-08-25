@@ -23,9 +23,8 @@ func TestParseBookmarksFixture(t *testing.T) {
 	if bm.Name != "bookmarks" || bm.Model != "sonnet" {
 		t.Fatalf("agent[1] = %+v", bm)
 	}
-	if len(bm.Tools) != 1 || len(bm.Tests) != 1 || len(bm.Skills) != 1 {
-		t.Fatalf("bm tools/tests/skills = %d/%d/%d, want 1/1/1",
-			len(bm.Tools), len(bm.Tests), len(bm.Skills))
+	if len(bm.Tools) != 1 || len(bm.Tests) != 1 {
+		t.Fatalf("bm tools/tests = %d/%d, want 1/1", len(bm.Tools), len(bm.Tests))
 	}
 	if bm.Tools[0].Func != "bm_page_kind" {
 		t.Fatalf("page-kind binds %q", bm.Tools[0].Func)

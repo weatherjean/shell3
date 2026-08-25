@@ -82,11 +82,8 @@ func runAskAgent(ctx context.Context, out, diag io.Writer, sess *shell3.Session,
 
 // waitForDispatch blocks until job id has finished and its child session has
 // closed, returning that job's final JobInfo. Job events only shorten the wait;
-// the jobs snapshot is the authority, because the event bus can drop.
-//
-// It takes the snapshot as a function rather than a *shell3.Session so tests
-// can drive it with plain channels and a canned job list, the same seam
-// internal/cli uses for waitForChange.
+// the jobs snapshot is the authority, because the event bus can drop. The
+// snapshot arrives as a function so tests can drive it with a canned job list.
 func waitForDispatch(ctx context.Context, events <-chan shell3.JobProgress, jobs func() []shell3.JobInfo, id string) (shell3.JobInfo, error) {
 	tick := time.NewTicker(dispatchPollInterval)
 	defer tick.Stop()
@@ -104,7 +101,6 @@ func waitForDispatch(ctx context.Context, events <-chan shell3.JobProgress, jobs
 	}
 }
 
-// findJob picks one job out of a Jobs() snapshot by id.
 func findJob(jobs []shell3.JobInfo, id string) (shell3.JobInfo, bool) {
 	for _, j := range jobs {
 		if j.ID == id {

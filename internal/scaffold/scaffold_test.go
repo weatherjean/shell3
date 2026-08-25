@@ -282,12 +282,12 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
 	}
-	// The gate ships in the kit now, not as hooks/*.sh — a scaffolded config
+	// The gate ships in the kit — a scaffolded config
 	// has no hooks dir at all, so LoadedConfig alone discovers nothing. The
 	// gate's own wiring is covered where the kit is loaded (kitagent) and its
 	// rules in hooks_test.go.
 	if c.HasToolCall() {
-		t.Error("a scaffolded config should have no hooks/*.sh — the gate is declared in the kit")
+		t.Error("a scaffolded config should have no hooks/ dir — the gate is declared in the kit")
 	}
 }
 

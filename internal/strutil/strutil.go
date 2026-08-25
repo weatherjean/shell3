@@ -59,3 +59,13 @@ func CutRunes(s string, n int) (string, bool) {
 	}
 	return string(r[:n]), true
 }
+
+// Ellipsize clamps s to at most n runes, marking a cut with an ellipsis. For
+// display budgets counted in columns rather than bytes.
+func Ellipsize(s string, n int) string {
+	cut, trimmed := CutRunes(s, n)
+	if trimmed {
+		return cut + ellipsis
+	}
+	return cut
+}

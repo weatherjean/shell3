@@ -10,11 +10,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/kit"
 	"gopkg.in/yaml.v3"
 )
 
-// yamlFile is the wire schema of the kit's `shell3:` block. Decoding is strict
-// (KnownFields): an unknown key anywhere is a load error.
+// yamlFile is the wire schema of the kit's shell3: block, decoded strictly —
+// an unknown key anywhere is a load error.
 type yamlFile struct {
 	Models        map[string]yamlModel `yaml:"models"`
 	Telegram      *yamlTelegram        `yaml:"telegram"`
@@ -42,33 +43,27 @@ type yamlModel struct {
 	RunProxy      string         `yaml:"run_proxy"`
 }
 
-// yamlTelegram is the `telegram:` block: the front-end's bot credentials and
-// where the agent's shell runs. Token is a secret resolved from .env via an
-// env:KEY reference.
+// yamlTelegram is the telegram: block — bot credentials and where the shell
+// runs. Token resolves from .env through an env:KEY reference.
 type yamlTelegram struct {
 	Token     string   `yaml:"token"`
 	ChatID    string   `yaml:"chat_id"`
 	WorkDir   string   `yaml:"workdir"`
 	AllowFrom []string `yaml:"allow_from"`
-	// MaxConcurrentTurns bounds how many chats may run a turn at once. Rooms
-	// are independent conversations, so without a cap N rooms speaking at
-	// once fan out N concurrent agents against one provider account.
+	// MaxConcurrentTurns caps concurrent chats: rooms are independent, so
+	// without it N rooms speaking fan out N agents on one provider account.
 	MaxConcurrentTurns int `yaml:"max_concurrent_turns"`
-	// Chats is per-ROOM configuration. Declaring a chat here does not
-	// authorize it and is not required to use it — rooms are enrolled by an
-	// allowlisted person speaking in them. This block only tunes rooms that
-	// need something other than the defaults.
+	// Chats tunes individual rooms. Declaring one neither authorizes nor
+	// enrols it — that happens when an allowlisted person speaks there.
 	Chats []yamlChat `yaml:"chats"`
 }
 
-// yamlChat is one entry of the `chats:` block: per-room configuration for a
-// Telegram chat. A room with no entry takes the defaults, which is the normal
-// case — rooms are enrolled by being used, never by being declared here.
+// yamlChat is one chats: entry. A room with no entry takes the defaults,
+// which is the normal case.
 type yamlChat struct {
 	ID string `yaml:"id"`
-	// UseDescription is a pointer so "unset" is distinguishable from
-	// "false": unset means the default (ON), and only an explicit false
-	// suppresses the group-description brief.
+	// A pointer so unset, meaning the default ON, is distinguishable from an
+	// explicit false, which suppresses the description brief.
 	UseDescription *bool    `yaml:"use_description"`
 	Context        []string `yaml:"context"`
 }
@@ -89,10 +84,10 @@ type yamlBackground struct {
 
 var mcpNameRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-// wiringLabel prefixes every wiring error: the YAML being decoded is the kit's
-// `shell3:` declaration block, so naming a file the operator does not have
-// would send them looking for the wrong thing.
-const wiringLabel = KitFileName + " shell3: block"
+// wiringLabel prefixes every wiring error. What is being decoded is the kit's
+// shell3: block, so naming a file the operator does not have would send them
+// looking for the wrong thing.
+const wiringLabel = kit.FileName + " shell3: block"
 
 // yamlTypeNames maps the wire structs onto the wiring blocks they decode, so a
 // strict-decode failure reads as config rather than as Go.
@@ -107,9 +102,8 @@ var yamlTypeNames = map[string]string{
 
 var yamlTypeRE = regexp.MustCompile(`type config\.(\w+)`)
 
-// humanizeYAMLTypes rewrites go-yaml's "field foo not found in type
-// config.yamlFile" into the block name the user actually wrote:
-// "config.yamlFile" means nothing to whoever typed the key.
+// humanizeYAMLTypes rewrites go-yaml's "not found in type config.yamlFile"
+// into the block name the user actually wrote.
 func humanizeYAMLTypes(msg string) string {
 	return yamlTypeRE.ReplaceAllStringFunc(msg, func(m string) string {
 		if label, ok := yamlTypeNames[strings.TrimPrefix(m, "type config.")]; ok {
@@ -139,11 +133,10 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		if m.BaseURL == "" || m.Model == "" {
 			return fmt.Errorf(wiringLabel+": model %q needs base_url and model", name)
 		}
-		// prune_at defaults to compact_at*0.6 so the cheap-prune tier is on by
-		// default wherever compaction is; an explicit value at or above
-		// compact_at is clamped to 0 (disabled) rather than firing after it.
-		// Both tiers key off compact_at at runtime, so an explicit prune_at
-		// without compact_at would be silently dead — reject it instead.
+		// Defaults to compact_at*0.6, so the cheap tier is on wherever
+		// compaction is; at or above compact_at it clamps to 0 rather than
+		// firing after it. Both tiers key off compact_at, so a prune_at
+		// without one would be silently dead — rejected instead.
 		if m.PruneAt != nil && *m.PruneAt > 0 && m.CompactAt <= 0 {
 			return fmt.Errorf(wiringLabel+": model %q sets prune_at without compact_at (pruning only runs while compaction is armed)", name)
 		}
@@ -154,9 +147,9 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		case m.PruneAt != nil && *m.PruneAt < m.CompactAt:
 			pruneAt = *m.PruneAt
 		}
-		// A keep_recent at or above compact_at would preserve a verbatim tail
-		// bigger than the trigger, so compaction could never get back under the
-		// threshold and would re-fire every turn; clamp it to half.
+		// At or above compact_at the verbatim tail exceeds the trigger, so
+		// compaction could never get back under it and would re-fire every
+		// turn. Clamp to half.
 		keepRecent := m.KeepRecent
 		if m.CompactAt > 0 && keepRecent >= m.CompactAt {
 			keepRecent = m.CompactAt / 2
@@ -205,8 +198,8 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if b := f.Background; b != nil {
 		c.BackgroundMaxConcurrent = b.MaxConcurrent
 	}
-	// runs_keep_days defaults to 30 (unset); an explicit 0 means keep
-	// forever, so the default can't be expressed as a bare int default.
+	// Defaults to 30; an explicit 0 means keep forever, so the default cannot
+	// be a bare int zero value.
 	c.RunsKeepDays = 30
 	if f.RunsKeepDays != nil {
 		c.RunsKeepDays = *f.RunsKeepDays
@@ -214,8 +207,8 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if err := validateKeepDays("runs_keep_days", c.RunsKeepDays); err != nil {
 		return err
 	}
-	// media_keep_days defaults to 0 = keep forever: delivered files and
-	// uploads are user data, so deletion is opt-in rather than assumed.
+	// Defaults to 0, keep forever: uploads are user data, so deletion is
+	// opt-in.
 	c.MediaKeepDays = 0
 	if f.MediaKeepDays != nil {
 		c.MediaKeepDays = *f.MediaKeepDays
@@ -223,9 +216,8 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if err := validateKeepDays("media_keep_days", c.MediaKeepDays); err != nil {
 		return err
 	}
-	// dash_port defaults to 7333 (unset); an explicit 0 disables the dash
-	// listener entirely, so — like the keep-days keys — the default can't be
-	// a bare int zero value.
+	// Defaults to 7333; an explicit 0 disables the listener, so as with the
+	// keep-days keys the default cannot be a bare zero value.
 	c.DashPort = DefaultDashPort
 	if f.DashPort != nil {
 		c.DashPort = *f.DashPort
@@ -233,8 +225,8 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if c.DashPort < 0 || c.DashPort > 65535 {
 		return fmt.Errorf(wiringLabel+": dash_port must be 0 (disabled) or a port 1-65535; got %d", c.DashPort)
 	}
-	// review_model must name a declared model — a config that loads is a
-	// config whose {review} reviewer can actually run. "" = main model.
+	// Must name a declared model, so a config that loads is one whose
+	// reviewer can run. "" = the main model.
 	c.ReviewModel = strings.TrimSpace(f.ReviewModel)
 	c.ReviewPolicy = strings.TrimSpace(f.ReviewPolicy)
 	if c.ReviewModel != "" {
@@ -245,13 +237,12 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	return nil
 }
 
-// maxKeepDays bounds runs_keep_days/media_keep_days at load time. Both
-// values eventually feed `time.Duration(days) * 24 * time.Hour`, which
-// overflows int64 nanoseconds past ~106751 days and can wrap around to a
-// small POSITIVE duration — silently inverting "keep basically forever"
-// into "delete almost everything" the next time the janitor runs. 100 years
-// is nowhere near that wraparound and is already an absurd retention
-// window, so anything above it is almost certainly a fat-finger, not intent.
+// maxKeepDays bounds the keep-days keys at load. Both feed
+// `time.Duration(days) * 24 * time.Hour`, which overflows int64 nanoseconds
+// past ~106751 days and can wrap to a small POSITIVE duration — inverting
+// "keep forever" into "delete almost everything" on the next janitor run.
+// 100 years is nowhere near that and already absurd, so anything above it is
+// a fat-finger rather than intent.
 const maxKeepDays = 36500
 
 // validateKeepDays rejects a keep-days value that is negative (silently

@@ -10,47 +10,37 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// LLMClient is the streaming interface the turn loop calls into — an alias of
-// llm.Streamer, which owns the contract (onEvent invoked synchronously per
-// delta from one goroutine; nil with no events is a no-op turn).
-// Implementations may also satisfy llm.TrafficInspector to expose the last
-// request/response bytes for error dumps.
+// LLMClient is the turn loop's streaming interface, an alias of llm.Streamer,
+// which owns the contract. Implementations may also satisfy
+// llm.TrafficInspector, exposing the last bytes for error dumps.
 type LLMClient = llm.Streamer
 
-// AgentKnobs are the agent-scoped runtime knobs that follow every agent
-// switch as one unit: ActiveAgent carries them, ApplyActiveAgent copies them
-// into Config wholesale, and NewTurnConfig forwards them into TurnConfig.
-// Adding a knob here flows through all three automatically — no per-field
-// copy lines to forget.
+// AgentKnobs follow every agent switch as one unit: ActiveAgent carries them,
+// ApplyActiveAgent copies them into Config, NewTurnConfig forwards them. A
+// knob added here flows through all three with no per-field copy to forget.
 type AgentKnobs struct {
-	// HostToolNames is the set of tool names routed to the host-tool
-	// dispatcher (HostTool). Entries must match the names registered in the
-	// LLM tool schema.
+	// HostToolNames routes to the HostTool dispatcher. Entries must match the
+	// names in the LLM tool schema.
 	HostToolNames map[string]bool
-	// Subagents is the active agent's allowlist of registered subagent names
-	// (the agents/ registry). internal/shell3 validates task-tool spawns
-	// against it; the schema-side listing lives in the task tool itself
-	// (config.TaskToolFor).
+	// Subagents is the allowlist internal/shell3 validates task spawns
+	// against; the schema-side listing lives in the task tool itself.
 	Subagents []string
-	// Environment is the active agent's host-reminder toggle (set by
-	// agentsetup). internal/shell3 gates the standing Environment reminder
-	// on it.
+	// Environment gates the standing Environment reminder.
 	Environment bool
-	// ContextWindow is the active model's context window in tokens, used by
-	// the reminder tracker to emit context-usage warnings. Zero means unknown.
+	// ContextWindow feeds the reminder tracker's usage warnings; 0 = unknown.
 	ContextWindow int
 	// CompactAt is the model's auto-compaction prompt-token threshold (0 = off).
 	CompactAt int
-	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
-	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
+	// KeepRecent is the verbatim tail across a compaction; 0 derives it from
+	// CompactAt.
 	KeepRecent int
 	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
 	// 0 disables. Must be below CompactAt.
 	PruneAt int
 }
 
-// ActiveAgent is the full runtime bundle produced when switching agents:
-// everything the chat loop needs to run the next turn under a different agent.
+// ActiveAgent is everything the chat loop needs to run the next turn under a
+// different agent.
 type ActiveAgent struct {
 	AgentKnobs
 	Personality  persona.Persona
@@ -62,65 +52,52 @@ type ActiveAgent struct {
 	ModelID      string
 }
 
-// Config holds all dependencies for a chat session: callers populate it once at
-// startup and reuse it across turns. TurnConfig is derived from Config per turn.
+// Config is a chat session's dependencies, populated once and reused across
+// turns; TurnConfig derives from it per turn.
 type Config struct {
 	// LLM is the active streaming client.
 	LLM LLMClient
-	// Store persists conversation history. Optional; nil keeps the session
-	// purely in-memory.
+	// Store persists history; nil keeps the session in-memory.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, shown in
-	// the system prompt's Environment section (job logs live under it; past
-	// conversations are recalled with the history tool, backed by the store).
+	// RunsDir is where job logs live, named in the Environment reminder.
 	RunsDir string
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
-	// RefreshPrompt rebuilds the system prompt with current runtime data —
-	// context files re-read from disk, a fresh timestamp. Called at the start
-	// of EVERY turn (assembleTurnContext) so a long-lived conversation tracks
-	// current file contents instead of a session-creation snapshot. Nil
-	// leaves the prompt frozen at construction.
+	// RefreshPrompt rebuilds the system prompt at the start of EVERY turn, so
+	// a long-lived conversation tracks current context files rather than a
+	// session-creation snapshot. Nil freezes the prompt at construction.
 	RefreshPrompt func() string
-	// PromptSuffix appends per-SESSION text to the system prompt — a Telegram
-	// room's brief, say. It is a closure, not a string, for the same reason
-	// RefreshPrompt is: the prompt is re-rendered every turn, and a cached
-	// string would freeze the suffix at session creation, so an edit made
-	// mid-conversation would never take effect. Nil appends nothing.
+	// PromptSuffix appends per-SESSION text, such as a room's brief. A
+	// closure, not a string, for RefreshPrompt's reason: a cached string
+	// would freeze the suffix at session creation, and a mid-conversation
+	// edit would never take effect.
 	PromptSuffix func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
-	// StatusLine is the human-readable provider/model/effort line shown by
-	// front-ends and used by reminder tracking to detect model changes.
+	// StatusLine is the provider/model/effort line front-ends show, and how
+	// reminder tracking detects a model change.
 	StatusLine string
 	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
 	ModeLabel string
-	// ConfigDir is the resolved absolute config directory for this session; ''
-	// if unknown. Recorded per session so resume can reload the right
-	// config. Agent-independent: set once at assembly, survives agent switches.
+	// ConfigDir is recorded per session so a resume reloads the right config.
+	// Agent-independent: set once at assembly.
 	ConfigDir string
-	// Agent, ParentID and CronJob identify this session in runs.Meta terms:
-	// the agent that is running it, its dispatch parent (if any), and the
-	// cron job that started it ('' for a front-end or task-tool session).
-	// Set once at assembly (mirrors ConfigDir) and carried into every runs
-	// session this conversation rolls onto — notably the compaction rollover
-	// (compactInto), so a session that compacts mid-run keeps its cron
-	// attribution instead of losing it to an unattributed continuation row.
+	// Agent, ParentID and CronJob identify this session in runs.Meta terms.
+	// Set once at assembly and carried onto every runs session this
+	// conversation rolls onto — notably the compaction rollover, so a session
+	// that compacts mid-run keeps its cron attribution.
 	Agent    string
 	ParentID string
 	CronJob  string
-	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
-	// skill file). Already logged + printed to stderr at load; also carried
-	// here so a front-end can surface them in-band, since a browser user
-	// never sees the stderr line they were printed on.
+	// ConfigWarnings are non-fatal load issues, already logged and printed to
+	// stderr, carried here so a front-end can surface them in-band to someone
+	// who never sees that stderr line.
 	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
-	// AgentKnobs are the agent-scoped runtime knobs (context window,
-	// compaction thresholds, reminder toggles, host-tool routing), copied
-	// wholesale from the active agent by ApplyActiveAgent so they follow
+	// AgentKnobs are copied wholesale by ApplyActiveAgent, so they follow
 	// agent switches.
 	AgentKnobs
 	// Params are provider-level request parameters (temperature, top_p,
@@ -128,20 +105,17 @@ type Config struct {
 	Params llm.RequestParams
 	// Log is the application logger. Nil is allowed; LogOrNoop wraps it.
 	Log applog.Logger
-	// OnEvent, when set, observes every event this session emits — the kit
-	// `event:` subscriber seam. It runs inline on the emitting goroutine, so
-	// an implementation doing real work must hand off to its own worker.
+	// OnEvent is the kit event: seam, observing every event this session
+	// emits. It runs inline, so real work must hand off to its own worker.
 	OnEvent func(Event)
-	// Headless flips on subprocess-friendly behaviors: injects a
-	// system-reminder explaining the constraints (no human to answer
-	// questions) and signals hooks via SHELL3_HEADLESS=1.
+	// Headless injects the no-human-attached reminder and signals hooks via
+	// SHELL3_HEADLESS=1.
 	Headless bool
 	// HostTool dispatches a host-registered Go tool by name (see
 	// internal/shell3.RegisterHostTool). Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// MCPStatus reports the declared MCP servers' live health (nil when no
-	// mcp: block is declared). Agent-independent: set once at
-	// assembly, surfaced by Snapshot for the Status view.
+	// MCPStatus is the declared servers' live health, nil when none is
+	// declared. Set once at assembly, surfaced by Snapshot.
 	MCPStatus func() []MCPServerStatus
 	// RunToolCall runs the tool-call hook chain (config-global, nil = no hooks).
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
@@ -152,9 +126,8 @@ type Config struct {
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 }
 
-// MCPServerStatus is one declared MCP server's health, mirrored from
-// internal/mcp (chat stays independent of the MCP client; agentsetup
-// converts).
+// MCPServerStatus mirrors internal/mcp's health type, so chat stays
+// independent of the MCP client; agentsetup converts.
 type MCPServerStatus struct {
 	Name      string
 	Up        bool
@@ -162,21 +135,18 @@ type MCPServerStatus struct {
 	Err       string
 }
 
-// AgentStatusLine renders an agent's status line: the agent label and its
-// model id, joined by a box-drawing separator. The single source for this
-// format.
+// AgentStatusLine joins the agent label and model id — the single source for
+// this format.
 func AgentStatusLine(rt ActiveAgent) string {
 	return fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
 }
 
-// ApplyActiveAgent copies an agent's runtime bundle into the config: model
-// client, persona, params, tool/skill sets, context window, and the derived
-// status line. Config assembly in agentsetup routes through this method, so the
-// agent-derived field copy lives in exactly one place.
+// ApplyActiveAgent copies an agent's runtime bundle into the config — client,
+// persona, params, tool and skill sets, knobs, status line. Assembly routes
+// through it, so the agent-derived field copy lives in one place.
 //
-// It deliberately does NOT touch agent-independent fields (Store, WorkDir,
-// ConfigDir, OutPath, Headless, Log, RefreshPrompt, RunToolCall): those are set
-// once at assembly.
+// It deliberately does NOT touch the agent-independent fields (Store, WorkDir,
+// ConfigDir, Headless, Log, RefreshPrompt, RunToolCall), set once at assembly.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality
@@ -188,8 +158,8 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.StatusLine = AgentStatusLine(rt)
 }
 
-// NewHandlers constructs the built-in tool handler map. Handlers are injected
-// into TurnConfig and looked up by tool name during dispatch.
+// NewHandlers constructs the built-in tool handler map, looked up by name
+// during dispatch.
 func NewHandlers() map[string]ToolHandler {
 	handlers := []ToolHandler{
 		BashHandler{},
@@ -208,8 +178,7 @@ func NewHandlers() map[string]ToolHandler {
 	return m
 }
 
-// NewTurnConfig assembles a TurnConfig from a Config and the shared built-in
-// handler map. It is the single place the field copy from Config lives.
+// NewTurnConfig is the single place the Config→TurnConfig field copy lives.
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	return TurnConfig{
 		ToolConfig: ToolConfig{
@@ -236,9 +205,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	}
 }
 
-// LogOrNoop returns l if non-nil, otherwise an applog.Noop logger. Callers
-// that did not configure a logger get silent behaviour rather than a nil
-// pointer panic.
+// LogOrNoop gives a caller with no logger silence rather than a nil panic.
 func LogOrNoop(l applog.Logger) applog.Logger {
 	if l != nil {
 		return l

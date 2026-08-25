@@ -1,6 +1,5 @@
 /shell3
 /bin/
-ai-do-not-read.*
 # ./.shell3_project/ is runtime data — runs + subagent transcripts — never committed.
 /.shell3_project/
 
@@ -18,17 +17,6 @@ docs/dev/*
 *.pprof
 *.coverprofile
 coverage.txt
-
-# test coverage profile
-cover.out
-
-# stress-test scratch artifacts
-/.stress_scratch
-/tmp/
-
-# stray scratch dirs — never commit
-asfd/
-asdf/
 
 # subagent-driven-development scratch
 .superpowers/

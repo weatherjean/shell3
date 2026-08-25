@@ -24,14 +24,14 @@ Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
 `use:`, `context:`, and `description` which routes the task tool), `shared:`
 (a named group of tools an agent imports via `use:`), `tool:` (`description`,
 `params` — typed `string`/`int`/`bool`, reaching the shell function as
-ENVIRONMENT VARIABLES, never `$1`), `skill:`, `test:` (harness in
+ENVIRONMENT VARIABLES, never `$1`), `test:` (harness in
 `harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
 `$KIT_TMP`), `gate:`, `note:`, `command:`, `event:` and `cron:` (`schedule` +
 exactly one of `agent:`/`tool:`, `direct`/`workdir`), plus the `shell3:` wiring block (models,
 telegram, mcp, `runs_keep_days`, `media_keep_days`, `review_model`,
 `review_policy`; re-marshalled through the
 existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
-sibling `.env`). Scoping is POSITIONAL for `tool:`/`skill:`/`test:` — an
+sibling `.env`). Scoping is POSITIONAL for `tool:`/`test:` — an
 `agent:` or `shared:` block opens a scope — but `gate:`/`note:`/`event:` are
 NAMED (`gate: [main, assistant]`), because one function usually governs several
 agents and a copy per agent is how two rule sets drift apart. `command:` and
@@ -40,7 +40,7 @@ the front-end, not by a model, and a cron job names its own target agent, so
 there is no agent for either to belong to. `cron:` is also the ONE block where
 `agent:`/`tool:` are payload rather than a kind key (`decodeBlock` lifts those
 two out of the kind scan when `cron:` is set — only those two, so a cron block
-also naming `skill:`/`command:`/`gate:` is still refused as ambiguous), and
+also naming `command:`/`gate:` is still refused as ambiguous), and
 `schedule:`/`direct:` outside a `cron:` block are a load error rather than a
 silently ignored key.
 
@@ -109,8 +109,7 @@ two judgment calls demoted to
 deletion. The gate does NOT protect itself, deliberately: it shares
 shell3.sh with every agent prompt, which the agent edits as ordinary work, so
 a write rule on that path would block the self-evolve loop and a narrower one
-is theatre. The old rule matching `hooks/*.sh`/`shell3.yaml` was deleted
-2026-08-21 — it matched nothing on a kit install. The "do not edit the gate"
+is theatre. The "do not edit the gate"
 refusal text is advice only, and `hooks_test.go` PINS this by asserting
 `echo x >> ./shell3.sh` is ALLOWED. It is a speed
 bump by construction — the agent can rewrite it in two lines of Python — so
@@ -160,37 +159,28 @@ prompt alone exceeds half of `compact_at`, naming the cause instead of leaving
 a context-length rejection to be diagnosed later. Skills are FILES, not blocks — `skills/*.md` for the main
 agent, `projects/<agent>/skills/*.md` for an employee — indexed into the prompt
 by name, description and absolute path, and `cat`'d on demand. Cron jobs are
-BLOCKS, not files — the `cron/<name>.md` format was deleted 2026-08-21 and a
-leftover dir is inert (`shell3 health` warns about one). `shell3 tool
-check|run|test <kit>` is the author's loop.
+BLOCKS, not files. `shell3 tool check|run|test <kit>` is the author's loop.
 
-The kit is the ONLY config format. The older markdown config (`shell3.yaml` +
-`agent.md` + `agents/<name>.md` + `hooks/*.sh`) was deleted 2026-08-20: a
-directory with no `shell3.sh` fails to load, naming the file to create, and a
-leftover `shell3.yaml` is not consulted. There are no migration shims and no
+The kit is the ONLY config format. A directory with no `shell3.sh` fails to
+load, naming the file to create. There are no migration shims and no
 fallback — `config.Load` lifts the kit's `shell3:` block through the strict
 YAML parser (`config.readWiring`) and reads `.env`; everything
 else — agents, tools, skills, cron — comes from `internal/kit` via
-`agentsetup`. Dropped with
-it: per-agent `prune:` (the model-level `prune_at` remains), `projects.md`
-and the Chain-of-Command brief, and load-time validation of `context:` paths
-(`shell3 health` does it, against each agent's own workdir).
+`agentsetup`. `context:` paths are validated by `shell3 health`, against each
+agent's own workdir, not at load time.
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
 `read_media` — attach an image, audio, or PDF file so a multimodal
 model can perceive it (PDF via an OpenAI-compatible `file` part) — when
-`media` is in the agent's `tools`. Video is NOT a model input: it was
-deleted with the hand-rolled `rawContentParts` bypass it forced on the
-OpenAI adapter, and `shell3.Part` could never carry it anyway). The main agent is bash-first
+`media` is in the agent's `tools`. Video is NOT a model input. `read_media` is
+the ONLY way media reaches a model: Telegram hands the agent a PATH and lets
+it decide). The main agent is bash-first
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
 `ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
-bash-first redirect back to bash/edit_file. The structured `read` and
-`list_files` tools were deleted 2026-08-24: they were in `mainDefaults`,
-so the doctrine and the tool list disagreed, and nothing in the scaffold
-or any live kit ever opted into them. Those names now hit the same
-redirect as `read_file`, and `use: [read]` is a load error like any other
-unknown built-in. `history` (opt-in via `use:`, on the scaffold's main agent by
+bash-first redirect back to bash/edit_file. `read`, `list_files` and
+`write_file` hit that same redirect, and `use: [read]` is a load error like
+any other unknown built-in. `history` (opt-in via `use:`, on the scaffold's main agent by
 default) recalls past conversations from the runs store: `{query}` is
 ranked FTS5 search over user+assistant text across ALL sessions (tool
 output is not indexed; a syntax-invalid query is retried as one quoted
@@ -234,8 +224,7 @@ threads the same needle: `cancelAll` marks the jobs it kills
 (`bgJob.shutdownCancel`), and the router's closing branch drops THOSE
 events (their "context canceled" failure is manufactured by the restart —
 the kept running marker is the honest boot-time report) while a real
-completion that raced SIGTERM keeps its event row for redelivery instead of
-being discarded as it used to be. Failed: the ⚠️ floor
+completion that raced SIGTERM keeps its event row for redelivery. Failed: the ⚠️ floor
 post always reaches the user, and a live owning session is additionally
 mailed (woken) so the agent can react — but an ownerless failure (cron)
 stops at the post, never burning a main-model turn per broken tick.
@@ -295,8 +284,8 @@ open ("lingering"), and each completion **resumes the subagent for a follow-up
 turn** whose summary routes like any task report (capped at 5 follow-up
 turns per subagent, after which — or after cancel/failure — the raw job
 event routes instead, so a completion is never lost). `task_cancel <sub>`
-cascades to the jobs the subagent started. `Runtime.Reload` no longer
-refuses while background work is running: it always proceeds — idle
+cascades to the jobs the subagent started. `Runtime.Reload` never refuses
+over running background work: it always proceeds — idle
 front-end sessions swap onto the new
 Parts in place, while a subagent child session or a still-running `bash_bg`
 job keeps the Parts (store/MCP handles) it was built with; the old
@@ -611,9 +600,9 @@ rides a variadic
 transport as a 🔕 tag).
 Beyond the built-ins, the kit's `command:` blocks are answered here too — the
 `default:` branch of `handleCommand` consults them, so a built-in always wins.
-The view commands are GONE — `/status`, `/jobs`, `/job`, `/cancel`, `/runs`
-and the `/run_N`/`/job_N`/`/cancel_N` taps answer "unknown command"; their
-content moved to the **web dash** (`internal/dash`): a read-only HTTP server
+There are NO view commands: `/status`, `/jobs`, `/job`, `/cancel`, `/runs`
+and the `/run_N`/`/job_N`/`/cancel_N` taps all answer "unknown command", and
+what they would show is the **web dash** (`internal/dash`): a read-only HTTP server
 on `127.0.0.1:<dash_port>` (top-level wiring key, default 7333, 0 = no
 listener; started by `wireHost` for telegram, Bot API AND --console, never
 `ask`). Seven GET routes behind a `?t=` token gate, each threading the
@@ -627,10 +616,10 @@ log, each cron row linked to its detail), `/runs`
 `/joblog` (`render.JobLogHTML`, `?session=&id=`, the tail of a bash_bg job's
 tee'd log), and `/cron` (`render.CronDetailHTML`, `?name=`) — everything
 escaped, non-GET 405, bad token bare 403. The files explorer's security model
-is ported verbatim from the old Telegram Mini App dashboard and must not be
-"simplified": path traversal is clamped by a leading-slash `Clean` AND an
+must not be "simplified": path traversal is clamped by a leading-slash
+`Clean` AND an
 `EvalSymlinks` + root-prefix check (a symlink cannot point out of the config
-dir), and credential files (`.env`, `.env.*`, `ai-do-not-read*`) are listed
+dir), and credential files (`.env`, `.env.*`) are listed
 but reported REDACTED without their contents ever being read from disk; binary
 and oversized (>256 KB) files are flagged, not dumped. Tokens:
 `dash.TokenStore`, 32-byte hex, 1h TTL, several live at once, memory-only,
@@ -709,11 +698,10 @@ on a NO_REPLY/empty result (the point of scheduling an idempotent sync every
 error, capped at the foreground bash timeout (120s). Every target resolves in
 `kit.Parse` alongside the `gate:` unknown-agent check — an undeclared tool, a
 tool requiring a param (a tool job passes none), a tool name declared in two
-scopes, an undeclared agent, a duplicate job name (filenames used to give
-uniqueness for free; `cron_status` keys on the name) — so all of them are
+scopes, an undeclared agent, a duplicate job name (`cron_status` keys on the
+name) — so all of them are
 LOAD errors rather than a failed dispatch on the first tick. `shell3 health`
-inherits every one of them by parsing the kit, and adds the one thing Parse
-cannot see: a warning that leftover `cron/*.md` files no longer fire.
+inherits every one of them by parsing the kit.
 
 Every session records `sessions.agent` (the agent that ran it) and
 `sessions.cron_job` (the cron job that started it, `''` for a front-end or
@@ -916,10 +904,9 @@ command tree. The one bound listener is the read-only web dash on
 `127.0.0.1:<dash_port>` (see the commands section); there is no command that
 EXPOSES it beyond loopback (a tunnel is the dash-exposing skill's job) or
 that supervises the process. There is NO bring-your-own front-end seam:
-`shell3 serve` and its stdio-JSONL transport were deleted 2026-08-24 —
-shell3 is Telegram-first and nothing else, and a second wire format was a
-second front-end contract to keep in lockstep for no user. The transports
-that remain are the Bot API and `--console` (`client_console.go`, the
+shell3 is Telegram-first and nothing else, and a second wire format would be
+a second front-end contract to keep in lockstep for no user. The transports
+are the Bot API and `--console` (`client_console.go`, the
 credential-free way to drive the same bot loop over stdin/stdout by hand).
 Message ids stay opaque strings end to end (the Telegram client stringifies
 the API's ints) because the console transport numbers its own.
@@ -982,7 +969,7 @@ credentials and no network — the way to exercise the front-end by hand.
 
 Design specs, implementation plans, and other AI-generated working notes are
 **gitignored, never committed** — `docs/dev/*` (except its `README.md`),
-`docs/superpowers/`, `docs/dev/superpowers/`, and `ai-do-not-read.*`. Keep them
+`docs/superpowers/` and `docs/dev/superpowers/`. Keep them
 local; the repo carries only shipped documentation (top-level `README.md`,
 `docs/`, `docs/cookbook/`). If you generate a design/plan doc, leave it in
 `docs/dev/` where the ignore rule keeps it out of commits.

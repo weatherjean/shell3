@@ -127,44 +127,13 @@ func toolLine(name, rawArgs string) string {
 	return line
 }
 
-// drainTurnProgress consumes a turn's event stream like drainTurn while
-// driving the progress bubble. Returns the reply text and whether the turn
-// surfaced an error (the bubble is kept as a breadcrumb then).
+// drainTurnProgress drains a POSTED turn: the shared drain with a progress
+// bubble, the narration fallback on, and any turn error appended to the reply
+// (a posted turn always answers, so the user learns what went wrong).
 func (c *conversation) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (reply string, sawError bool) {
-	p := &progressBubble{c: c}
-	var seg strings.Builder
-	var last string
-	var errs strings.Builder
-	for ev := range ch {
-		switch ev.Kind {
-		case shell3.Token:
-			seg.WriteString(ev.Text)
-		case shell3.ToolCall:
-			if s := strings.TrimSpace(seg.String()); s != "" {
-				last = s
-			}
-			seg.Reset()
-			p.add(ctx, toolLine(ev.ToolName, ev.ToolInput))
-		case shell3.ToolResult:
-			if ev.ToolError {
-				p.markError()
-				p.flush(ctx, false)
-			}
-		case shell3.Error:
-			if ev.Err != nil {
-				sawError = true
-				errs.WriteString("\n⚠️ " + ev.Err.Error())
-				if h := shell3.RecoveryHint(ev.Err); h != "" {
-					errs.WriteString("\n💡 " + h)
-				}
-			}
-		}
+	reply, errText, sawError := c.drainTurn(ctx, ch, &progressBubble{c: c}, true)
+	if errText != "" {
+		reply = strings.TrimSpace(reply + "\n" + errText)
 	}
-	reply = strings.TrimSpace(seg.String())
-	if reply == "" {
-		reply = last
-	}
-	reply += errs.String()
-	p.finish(ctx, sawError)
-	return strings.TrimSpace(reply), sawError
+	return reply, sawError
 }

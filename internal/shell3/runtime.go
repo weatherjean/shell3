@@ -20,8 +20,8 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
-	// Name keys the session on the runtime (e.g. "cron"). "" gets a unique
-	// generated name. Requesting an existing live name returns that session.
+	// Name keys the session on the runtime; "" generates one. An existing
+	// live name returns that session.
 	Name string
 	// Agent selects the initial agent ("" → first declared).
 	Agent string
@@ -29,25 +29,20 @@ type SessionOpts struct {
 	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
-	// ParentID marks this as a subagent child of the given runs session,
-	// recorded in the child's meta (see runs.Meta.ParentID): the dash groups a
-	// job's transcript under the conversation that spawned it, and the runs
+	// ParentID marks this a subagent child of that runs session: the dash
+	// groups the transcript under the conversation that spawned it, and the
 	// janitor never deletes a message-less session other rows name as parent.
 	ParentID string
-	// CronJob names the cron job that started this session ("" for a
-	// front-end or task-tool session). Recorded in the session's meta so a
-	// job's runs are findable without guessing from session duration (see
-	// runs.Meta.CronJob).
+	// CronJob names the cron job that started this session, recorded in its
+	// meta so a job's runs are findable without guessing from duration.
 	CronJob string
-	// PromptSuffix appends per-session text to the system prompt, re-rendered
-	// every turn (see chat.Config.PromptSuffix). A Telegram front-end uses it
-	// to give each chat its own standing brief; nil appends nothing.
+	// PromptSuffix appends per-session text to the system prompt every turn;
+	// the Telegram front-end gives each chat its own brief with it.
 	PromptSuffix func() string
-	// ResumeID reloads a stored session's messages when non-empty. A front-end
-	// that wants to rejoin its own conversation across restarts records the id
-	// under its own surface in the runs store's threads table and passes it
-	// back here — there is deliberately no "resume the newest session" option,
-	// because with two front-ends live that reattaches to whichever spoke last.
+	// ResumeID reloads a stored session's messages. A front-end records the
+	// id under its OWN surface and passes it back — there is deliberately no
+	// "resume the newest session", which with two front-ends live reattaches
+	// to whichever spoke last.
 	ResumeID string
 }
 
@@ -55,8 +50,8 @@ type SessionOpts struct {
 type HostEventKind int
 
 const (
-	// Wake signals a session's inbox gained an item while no turn was running.
-	// The host should call Session.RunQueued to react (runs a model turn).
+	// Wake: an idle session's inbox gained an item. The host answers with
+	// Session.RunQueued, which runs a model turn.
 	Wake HostEventKind = iota
 )
 
@@ -68,68 +63,55 @@ func (k HostEventKind) String() string {
 	return fmt.Sprintf("HostEventKind(%d)", int(k))
 }
 
-// HostEvent is one out-of-turn event for a session. Wake carries the
-// session's store id (Session.ID()) so a host can match it against the
-// session it is watching.
+// HostEvent is one out-of-turn event, carrying the session's store id so a
+// host can match it against what it is watching.
 type HostEvent struct {
 	Session string
 	Kind    HostEventKind
 }
 
-// Runtime hosts N sessions over one shared build. Create with NewRuntime,
-// release with Close. Safe for concurrent Session calls.
-//
-// Lifetime: NewRuntime → Session (×N) → Close. Close is idempotent; any
-// sessions still open at Close time are closed first. Sessions deregister
-// from the runtime automatically on their own Close.
+// Runtime hosts N sessions over one shared build, safe for concurrent Session
+// calls. Close is idempotent and closes any session still open; a session
+// deregisters itself on its own Close.
 type Runtime struct {
-	// sessionConfig derives a per-session chat.Config; production wires
-	// agentsetup.Parts.SessionConfig, tests inject fakes.
+	// sessionConfig derives a per-session chat.Config; tests inject fakes.
 	sessionConfig func(SessionOpts) (chat.Config, error)
 	cleanup       func()
 
 	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
 	events chan HostEvent
-	// jobEvents is the background-job progress bus. Buffered at 256; emitJob
-	// drops on full so a slow consumer never stalls a running job. Not closed
-	// at Close (a late emit from an unwinding job goroutine must not panic).
+	// jobEvents is the job-progress bus, buffered and dropping on full so a
+	// slow consumer never stalls a job. Never closed — a late emit from an
+	// unwinding job goroutine must not panic.
 	jobEvents chan JobProgress
 	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
-	// store is the shared SQLite runs store (nil if unavailable). Used by
-	// PastSessions/SessionMessages for front-end session lists/replay and by
-	// the job runtime's transcript reads (task_status / JobTranscript).
+	// store is the shared runs store, nil if unavailable: front-end session
+	// lists and replay, plus the job runtime's transcript reads.
 	store *runs.Store
-	// ctx is the runtime's base context, parented by the ctx given to
-	// NewRuntime. A watcher goroutine calls Close when it fires, so cancelling
-	// the parent tears the runtime down; cancel fires at Close so the watcher
-	// (and anything else scoped to the runtime's lifetime) unwinds with it.
+	// ctx is the runtime's base context under NewRuntime's. A watcher calls
+	// Close when the parent fires, and Close cancels ctx, so the watcher and
+	// everything scoped to the runtime unwind together.
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	configDir string // captured from RuntimeSpec for ConfigDir
 	homeDir   string // captured from construction for ConfigDir
 
-	// jobs manages in-process background jobs (command and subagent jobs).
-	// Owned by this Runtime; cancelled at Close.
+	// jobs owns the in-process background jobs, cancelled at Close.
 	jobs *jobManager
-	// telegram + cron mirror the parsed config blocks the runtime was built
-	// with (and re-derived on Reload). Read via Telegram()/Cron(). See config.go.
+	// telegram and cron mirror the parsed config blocks, re-derived on Reload.
 	telegram TelegramConfig
 	cron     []CronJob
 
-	// parts is the shared config assembly this Runtime was (re)built from.
-	// Swapped alongside the other fields at Reload; read via Parts() by host
-	// code that needs config-derived resources Runtime doesn't otherwise
-	// expose.
+	// parts is the config assembly this Runtime was built from, swapped at
+	// Reload, for host code needing resources Runtime does not expose.
 	parts *agentsetup.Parts
 
-	// parkedClosers holds old-generation Parts teardown funcs deferred past a
-	// Reload that happened while background work was live: a running job (or a
-	// lingering subagent child) may still hold the old generation's store/MCP
-	// handles, so closing them mid-flight would break it. Each is drained
-	// exactly once (drainParkedClosers) when the job manager reports zero
-	// running tasks — from a job completion or from Close. Guarded by mu.
+	// parkedClosers holds teardowns deferred past a Reload that happened with
+	// background work live: a running job may still hold the old generation's
+	// store and MCP handles. Each drains exactly once, when the job manager
+	// reports zero running tasks. Guarded by mu.
 	parkedClosers []func()
 
 	mu       sync.Mutex
@@ -137,26 +119,21 @@ type Runtime struct {
 	nextName int
 	closed   bool
 
-	// completionH is the front-end delivery surface for background
-	// completions (SetCompletionHost). nil = library fallback (raw notice to
-	// the owning session).
+	// completionH is the front-end completion surface; nil = the library
+	// fallback, a raw notice to the owning session.
 	completionH CompletionHost
 
-	// decorate, when set (SetSessionDecorator), runs for every session this
-	// runtime creates — main and subagent children alike — and again for every
-	// live session after a Reload (which rebuilds session configs, dropping
-	// previously registered host tools). Front-ends use it to register host
-	// tools (e.g. send_media_telegram) uniformly instead of decorating only their
-	// own main session. Always invoked OUTSIDE rt.mu: decorators call back
-	// into locked Runtime methods (rt.Parts()).
+	// decorate runs for every session this runtime creates, and again for
+	// every live one after a Reload, which rebuilds configs and drops
+	// registered host tools. Front-ends register their tools here rather than
+	// on their own main session alone. Always invoked OUTSIDE rt.mu:
+	// decorators call back into locked Runtime methods.
 	decorate func(*Session)
 }
 
-// NewRuntime loads the config and assembles the shared runtime parts. ctx
-// parents the runtime's base context: cancelling it tears down the runtime
-// (and any in-flight session/turn) just as Close does; pass
-// context.Background() for a lifetime bounded only by Close.
-// The Runtime must be Closed; sessions left open are closed by Close.
+// NewRuntime loads the config and assembles the shared parts. Cancelling ctx
+// tears the runtime down exactly as Close does; pass context.Background() for
+// a lifetime bounded only by Close. The Runtime must be Closed.
 func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	parent := ctx
 	if parent == nil {
@@ -201,9 +178,8 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		parts:         parts,
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
-	// Implement the documented cancellation contract: cancelling the parent ctx
-	// tears the runtime down just as Close does. Close itself cancels rt.ctx,
-	// so this watcher always unwinds — the second Close is an idempotent no-op.
+	// Close cancels rt.ctx, so this watcher always unwinds and its second
+	// Close is an idempotent no-op.
 	go func() {
 		<-rt.ctx.Done()
 		_ = rt.Close()
@@ -211,15 +187,13 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	return rt, nil
 }
 
-// Events returns the out-of-turn event bus. One receiver drives N sessions.
-// Buffered; if the host is not draining, Wake events coalesce (drop on full —
-// the host re-checks inboxes on its next turn anyway).
+// Events is the out-of-turn bus; one receiver drives N sessions. Buffered,
+// dropping on full — the host re-checks inboxes on its next turn anyway.
 func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 
-// JobEvents returns the background-job progress bus. Each write to a job's
-// output tee emits a Chunk event; job completion emits a Done event. The
-// channel is buffered at 256 and drops on full — a slow consumer never stalls
-// a running job. The channel is never closed.
+// JobEvents is the job-progress bus: a Chunk per write to a job's output tee,
+// a Done at completion. Buffered, dropping on full so a slow consumer never
+// stalls a job, and never closed.
 func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
 // ConfigDir returns the absolute path of the config directory this runtime was built
@@ -246,15 +220,11 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 	}
 }
 
-// SetSessionDecorator installs fn to run for every session this runtime
-// creates from now on (main and subagent children alike), for every session
-// already live (so boot order doesn't matter), and for every live session
-// after a Reload (which rebuilds session configs, dropping previously
-// registered host tools). Front-ends use it to register host tools —
-// send_media_telegram in particular — uniformly across all sessions. fn runs
-// outside rt.mu, so it may call locked Runtime methods (rt.Parts()); it must
-// only be installed while sessions are idle (same contract as
-// RegisterHostTool). Installing a new decorator replaces the previous one.
+// SetSessionDecorator installs fn for every session this runtime creates,
+// every one already live (so boot order does not matter), and every live one
+// after a Reload, which rebuilds configs and drops registered host tools. fn
+// runs outside rt.mu, so it may call locked Runtime methods, and must be
+// installed only while sessions are idle. A new decorator replaces the old.
 func (rt *Runtime) SetSessionDecorator(fn func(*Session)) {
 	rt.mu.Lock()
 	rt.decorate = fn
@@ -271,13 +241,12 @@ func (rt *Runtime) SetSessionDecorator(fn func(*Session)) {
 	}
 }
 
-// Session creates and returns a new session on this runtime (a front-end's root
-// session, or a subagent's child session). A closed runtime returns an error.
+// Session creates a session on this runtime, root or subagent child. A closed
+// runtime returns an error.
 func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
-	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock (LIFO):
-	// the decorator must run outside rt.mu (it calls locked Runtime methods),
-	// and only for a session this call actually created (not the early return
-	// of an existing live name, which was decorated when it was created).
+	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock: the
+	// decorator calls locked Runtime methods, and must fire only for a session
+	// this call created, never the early return of an existing live name.
 	var created *Session
 	defer func() {
 		if created == nil {
@@ -292,10 +261,9 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if rt.closed {
 		return nil, ErrRuntimeClosed
 	}
-	// A named session is keyed on the runtime: requesting an existing live name
-	// (e.g. the cron dispatch parent's "cron") returns that same session so its
-	// history persists across reattach. An empty name gets a unique generated
-	// label ("sN"), skipping any already taken by a live session.
+	// An existing live name returns that same session, so its history
+	// persists across reattach. An empty name gets a generated "sN", skipping
+	// any a live session already took.
 	if opts.Name == "" {
 		for {
 			rt.nextName++
@@ -316,24 +284,17 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s := newSession(cfg, opts) // shared parts are the runtime's to clean
 	s.opts = opts
 	s.runtime, s.name = rt, name
-	// Set the per-session host standing reminders now that runtime+name are set:
-	// the Environment context (gated by the active agent's toggle). No-op when
-	// the toggle is off.
+	// Standing reminders now that runtime and name are set.
 	s.applyHostReminders()
 	rt.sessions[name] = s
 	created = s // decorated by the deferred hook, after rt.mu releases
-	// Subagent completions are injected in-process by the runtime's jobManager
-	// (finishSubagent notifies the parent directly) — nothing to launch here.
 	return s, nil
 }
 
-// drainParkedClosers runs (once) any old-generation Parts teardown funcs a
-// Reload deferred, provided no background work remains that could still be
-// using an old generation. Called from every job completion / child-session
-// close and from Close. A benign no-op when nothing is parked or a job is
-// still live: the next completion re-checks. The running-jobs check happens
-// before rt.mu is taken (runningJobIDs locks the job manager) so the two locks
-// are never nested here.
+// drainParkedClosers runs the teardowns a Reload deferred, once, provided no
+// background work could still be using an old generation. A no-op when
+// nothing is parked or a job is live — the next completion re-checks. The
+// running-jobs check runs before rt.mu, so the two locks never nest.
 func (rt *Runtime) drainParkedClosers() {
 	if rt.jobs != nil && len(rt.jobs.runningJobIDs()) > 0 {
 		return
@@ -361,8 +322,7 @@ func (rt *Runtime) forget(name string) {
 	delete(rt.sessions, name)
 }
 
-// Close closes all live sessions, then the shared parts. Idempotent; a second
-// call is a no-op and returns nil.
+// Close closes every live session, then the shared parts. Idempotent.
 func (rt *Runtime) Close() error {
 	rt.mu.Lock()
 	if rt.closed {
@@ -383,15 +343,13 @@ func (rt *Runtime) Close() error {
 			firstErr = err
 		}
 	}
-	// Cancel and join all in-process background job goroutines BEFORE the store
-	// closes so no goroutine can write to a closed store.
+	// Join the job goroutines BEFORE the store closes, so none can write to it.
 	if rt.jobs != nil {
 		rt.jobs.cancelAll()
 		rt.jobs.wait()
 	}
-	// All jobs have unwound, so any old-generation closers a Reload parked can
-	// run now (before the current generation's cleanup). Drain directly rather
-	// than via drainParkedClosers: teardown is unconditional here.
+	// Jobs have unwound, so parked closers run now, before this generation's
+	// cleanup. Directly, not via drainParkedClosers: teardown is unconditional.
 	rt.mu.Lock()
 	parked := rt.parkedClosers
 	rt.parkedClosers = nil

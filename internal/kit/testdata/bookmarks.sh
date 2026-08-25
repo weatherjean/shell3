@@ -55,16 +55,6 @@ bm_test_page_kind() {
 }
 
 #---
-# skill: qualify
-#---
-bm_skill_qualify() { cat <<'EOF'
-Worth keeping: it says something specific, it names its author, and it still
-loads. Drop parked domains, link farms, anything that is only a signup wall,
-and anything whose newest post is older than the last time I looked.
-EOF
-}
-
-#---
 # shared: web
 #---
 #---

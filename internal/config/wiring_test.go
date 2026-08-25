@@ -23,7 +23,7 @@ EOF2
 `
 
 // A directory holding only shell3.sh is a complete config: the kit carries its
-// own wiring, so no shell3.yaml and no agent.md are needed.
+// own wiring.
 func TestLoadKitOnlyDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(wiringKit), 0o600); err != nil {
@@ -51,6 +51,6 @@ func TestLoadKitWithoutWiringFails(t *testing.T) {
 
 func TestLoadNoConfigAtAllFails(t *testing.T) {
 	if _, err := Load(t.TempDir()); err == nil {
-		t.Fatal("want error for a directory with neither shell3.sh nor shell3.yaml")
+		t.Fatal("want error for a directory with no shell3.sh")
 	}
 }

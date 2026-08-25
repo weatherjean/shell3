@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // evCfg writes a kit declaring main plus one event subscriber over the given
@@ -33,12 +35,12 @@ main_event() {
 ` + body + `
 }
 `
-	writeTree(t, dir, map[string]string{KitFileName: src})
+	writeTree(t, dir, map[string]string{kit.FileName: src})
 	c, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main",
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main",
 		KitHooks{Events: map[string]EventSub{"main": {Func: "main_event", On: on}}})
 	t.Setenv("SEEN", out)
 	return c, out

@@ -13,33 +13,28 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// Session is a live, multi-turn conversation. Obtain one via [Runtime.Session];
-// the zero value is not usable. It streams a per-Send channel of translated
-// Events. Drain a Send channel to completion before calling any between-turns
-// method (the full list is on [ErrBusy]).
+// Session is a live, multi-turn conversation from [Runtime.Session]; the zero
+// value is unusable. Each Send returns its own event channel — drain it to
+// completion before any between-turns method (listed on [ErrBusy]).
 //
-// The underlying chat.Session runs in synchronous-sink mode: each turn's events
-// are delivered inline on the turn goroutine, which translates them onto the
-// current Send channel and closes it when the turn returns. "turn finished" is
-// simply "the turn goroutine returned".
+// The underlying chat.Session uses a synchronous sink: events are translated
+// inline on the turn goroutine, which closes the channel when it returns, so
+// "turn finished" is exactly "the turn goroutine returned".
 type Session struct {
 	cfg      chat.Config
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
 
-	// runtime and name link a runtime-hosted session back to its registry so
-	// Close deregisters it. name is an internal auto-generated bookkeeping
-	// label (registry key + job-parent tracking), not a public identifier.
+	// runtime and name link back to the registry so Close deregisters. name is
+	// internal bookkeeping (registry key, job parent), not a public id.
 	runtime *Runtime
 	name    string
 
 	// opts is the SessionOpts this session was built from.
 	opts SessionOpts
 
-	// closeOnce makes Close safe under concurrent invocation: a spawned
-	// subagent goroutine calls child.Close() at the same time Runtime.Close may
-	// close the same child from its session map. The body runs exactly once;
-	// later callers return the recorded error.
+	// closeOnce makes Close concurrency-safe: a subagent goroutine may call
+	// child.Close() while Runtime.Close closes the same child from its map.
 	closeOnce sync.Once
 	closeErr  error
 
@@ -50,32 +45,25 @@ type Session struct {
 	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
 	sawError   bool               // any turn emitted an error event; drives the audit "end" status
-	// busy is true from Send until its turn goroutine finishes. It turns a
-	// contract violation (overlapping Send/Clear/Rollback/Compact,
-	// which would race on unsynchronized session state) into ErrBusy instead
-	// of a data race.
+	// busy spans Send until its turn goroutine finishes, turning an
+	// overlapping Send/Clear/Compact into ErrBusy instead of a data race.
 	busy bool
-	// closed is set by doClose so a late Send (e.g. a Wake-driven queued drain
-	// racing session teardown) is rejected with ErrClosed instead of running a
-	// turn against the ended store record.
+	// closed is set by doClose so a late Send — a Wake-driven drain racing
+	// teardown — is rejected rather than run against the ended store record.
 	closed bool
 }
 
-// newSession wires a Session around an already-built chat.Config. The
-// chat.Session runs in synchronous-sink mode: route translates each internal
-// event and forwards it to the current Send channel inline on the turn
-// goroutine. Split out from Start so tests can inject a fakellm-backed config.
+// newSession wires a Session around a built chat.Config. Split out from Start
+// so tests can inject a fakellm-backed config.
 func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	var storeID string
 	var seed []llm.Message
 	var seedTokens int     // persisted provider-reported prompt tokens for a resumed session
 	var resumedFrom string // non-empty when this session reattached to an existing run
 	if cfg.Store != nil {
-		// A front-end that wants to rejoin its conversation resolves the id
-		// itself, from its OWN thread marker in the runs store (see
-		// Store.CurrentSession): "newest session matching this workdir" is not
-		// a conversation identity — with two front-ends live it reattaches to
-		// whichever one spoke last.
+		// A front-end resolves the id from its OWN thread marker: "newest
+		// session matching this workdir" is not a conversation identity, and
+		// with two front-ends live it follows whichever spoke last.
 		resumeID := opts.ResumeID
 		switch {
 		case resumeID != "":
@@ -86,14 +74,12 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			} else {
 				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
 			}
-			// Restore the accurate context gauge persisted for this session so the
-			// first resumed turn's prune/compaction fires (0 = old session with no
-			// persisted count; chat.NewSession then falls back to the estimate).
+			// Restore the persisted gauge so the first resumed turn's
+			// prune/compaction fires; 0 falls back to the estimate.
 			seedTokens = cfg.Store.LastPromptTokens(resumeID)
 		default:
-			// Fresh run. Best-effort: a failed NewSession leaves storeID "" (no
-			// persistence), logged at Warn so the silent non-persistence is
-			// observable rather than vanishing.
+			// Best-effort: a failed NewSession leaves storeID "" and no
+			// persistence, logged so it is observable rather than silent.
 			_, metaModel := chat.SplitStatus(cfg.StatusLine)
 			if id, err := cfg.Store.NewSession(runs.Meta{
 				Workdir:   cfg.WorkDir,
@@ -109,10 +95,9 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			}
 		}
 	}
-	// Carry the dispatch identity into cfg so a later compaction rollover
-	// (chat.compactInto, run mid-turn from cfg alone) can stamp the same
-	// Agent/ParentID/CronJob onto the rolled session instead of losing
-	// attribution at the compaction boundary.
+	// Carry the dispatch identity into cfg so a compaction rollover, which
+	// runs mid-turn from cfg alone, stamps the rolled session with the same
+	// attribution instead of losing it at the boundary.
 	cfg.Agent = opts.Agent
 	cfg.ParentID = opts.ParentID
 	cfg.CronJob = opts.CronJob
@@ -137,18 +122,15 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	return s
 }
 
-// route is the chat.Session event sink. It runs synchronously on the in-flight
-// turn goroutine, so all forwarding to a given Send channel happens-before that
-// turn goroutine closes it — no separate drain, no close-ordering hazard. The
-// select on curDone lets Close cancel the turn unblock a send to a Send channel
-// the caller stopped reading. Events with no public equivalent are dropped.
+// route is the chat.Session sink, running on the turn goroutine, so every
+// forward to a Send channel happens-before that goroutine closes it. The
+// curDone select unblocks a send to a channel the caller stopped reading.
+// Events with no public equivalent are dropped.
 //
-// NOTE: curDone is the turn ctx's Done, which is also closed by an ordinary
-// turn cancel (Ctrl-C/ESC), not just Close. So once a turn is cancelled this
-// select MAY take the curDone branch and drop whatever it was delivering —
-// INCLUDING the turn's terminal Done/Error event. Consumers must therefore
-// treat channel close (see Send) as the authoritative end-of-turn
-// signal; the terminal event is best-effort and can be absent on a cancel.
+// NOTE: curDone is the turn ctx's Done, closed by an ordinary cancel as well
+// as by Close, so a cancelled turn MAY drop whatever this was delivering —
+// the terminal Done/Error included. Channel close is the authoritative
+// end-of-turn signal; the terminal event is best-effort.
 func (s *Session) route(ev chat.Event) {
 	if ev.Kind == chat.EventError {
 		s.mu.Lock()
@@ -159,8 +141,7 @@ func (s *Session) route(ev chat.Event) {
 	if !ok {
 		return
 	}
-	// IsHostTool can't be resolved in the pure translate (it has no config);
-	// resolve it here against the session-registered host-tool set.
+	// translate has no config, so IsHostTool resolves here.
 	if pub.Kind == ToolCall && s.cfg.HostToolNames[pub.ToolName] {
 		pub.IsHostTool = true
 	}
@@ -176,58 +157,33 @@ func (s *Session) route(ev chat.Event) {
 	}
 }
 
-// Interject delivers text to the session outside the Send contract: during a
-// running turn it is injected at the next round boundary as a system reminder
-// ("user interjected …"), letting the model course-correct mid-task; while
-// idle it queues and is drained at the start of the next turn. Interject never
-// fails, never blocks on a running turn, and is safe to call from any
-// goroutine — it is the chat-message path for front-ends (a bot's
-// incoming message), while Send remains the strict
-// turn-starting call.
-//
-// Optional parts attach media: each invalid part is dropped — Interject never
-// fails — and a bracketed "[attachment dropped: <error>]" note is appended to
-// the queued text so the drop is visible to both the model and the audit
-// reminder.
-func (s *Session) Interject(text string, parts ...Part) {
-	var cps []llm.ContentPart
-	for _, p := range parts {
-		cp, err := s.loadPart(p)
-		if err != nil {
-			text += "\n[attachment dropped: " + err.Error() + "]"
-			continue
-		}
-		cps = append(cps, cp)
-	}
-	s.sess.Interject(text, cps...)
-	// Idle steering must prod the host to run a turn; a busy session's running
-	// turn drains the inbox itself, so don't wake (avoids a redundant turn).
-	// Benign TOCTOU: isBusy() may flip between this check and the running turn
-	// ending — worst case a missed wake (the next Send drains the item anyway)
-	// or a spurious wake (RunQueued no-ops on an already-drained inbox). Same
-	// reasoning as subagent delivery.
+// Interject delivers text outside the Send contract: mid-turn it is injected
+// at the next round boundary as a system reminder, so the model can
+// course-correct; while idle it queues for the next turn. It never fails,
+// never blocks, and is safe from any goroutine — the front-end message path,
+// where Send is the strict turn-starting call. Text only: media arriving
+// mid-turn waits for the next turn rather than injecting mid-flight.
+func (s *Session) Interject(text string) {
+	s.sess.Interject(text)
+	// Idle steering must prod the host; a running turn drains the inbox
+	// itself. The TOCTOU is benign: worst case a missed wake (the next Send
+	// drains it anyway) or a spurious one (RunQueued no-ops when drained).
 	if !s.isBusy() {
 		s.wake()
 	}
 }
 
-// wake emits a Wake for this session on the runtime bus (no-op without a
-// runtime). Reachable from any goroutine via Interject, so it snapshots
-// s.runtime under s.mu — mirroring WakeEvents — to avoid racing doClose's nil
-// of s.runtime. The lock is not held across emit.
+// wake emits a Wake on the runtime bus, no-op without a runtime. Reachable
+// from any goroutine, so it snapshots s.runtime under s.mu to avoid racing
+// doClose's nil of it; the lock is not held across emit.
 func (s *Session) wake() {
 	if rt := s.runtimeHandle(); rt != nil {
 		rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 	}
 }
 
-// RunQueued runs one turn seeded from the session's queued inbox items — the
-// host's response to a Wake event. With an empty inbox (or a turn already in
-// flight, which will itself drain the inbox) it returns an already-closed
-// channel and starts no turn. Same ErrBusy contract as Send otherwise.
-// closedEvents returns an already-closed event channel, carrying a single
-// Error event when err is non-nil — the shape every rejected/no-op turn
-// request returns.
+// closedEvents is the shape every rejected or no-op turn request returns: a
+// closed channel, carrying one Error event when err is non-nil.
 func closedEvents(err error) <-chan Event {
 	ch := make(chan Event, 1)
 	if err != nil {
@@ -237,65 +193,41 @@ func closedEvents(err error) <-chan Event {
 	return ch
 }
 
+// RunQueued answers a Wake by running one turn over the queued inbox. An
+// empty inbox, or a turn already in flight (which drains it itself), starts
+// no turn and returns a closed channel. Otherwise Send's ErrBusy contract.
 func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 	if s.isBusy() || !s.sess.HasInbox() {
 		return closedEvents(nil)
 	}
-	// The turn loop drains the inbox at its top (the reminder + attachments
-	// injection point), so an empty-prompt turn consumes the queued items as its
-	// initiating input.
+	// The turn loop drains the inbox at its top, so an empty-prompt turn
+	// consumes the queued items as its initiating input.
 	return s.Send(ctx, "")
 }
 
-// HasQueuedInput reports whether interjected items are waiting (e.g. steering
-// that arrived during a turn's final round). A host can call RunQueued to run a
-// turn that consumes them.
+// HasQueuedInput reports interjected items waiting — steering that arrived
+// during a turn's final round. RunQueued consumes them.
 func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 
 // HasQueuedSteer reports whether queued USER steering (not host notices) is
 // waiting — see chat.Session.HasSteer.
 func (s *Session) HasQueuedSteer() bool { return s.sess.HasSteer() }
 
-// Headless reports whether this session runs without a human attached
-// (subagent children, cron jobs). Host-tool registrars use it to skip
-// registering a tool entirely — e.g. send_media_telegram is registered only
-// on non-headless sessions, since only a live chat session has somewhere to
-// send a file.
+// Headless reports no human attached (subagent children, cron jobs).
+// Registrars skip tools that need one: send_media_telegram has nowhere to
+// send a file without a live chat session.
 func (s *Session) Headless() bool { return s.opts.Headless }
 
-// Send runs one turn for prompt and returns a channel of that turn's events,
-// closed when the turn ends (the deferred close(out) below always runs).
-// Channel close is the authoritative end-of-turn signal: a terminal Done/Error
-// event is emitted before close on a best-effort basis but may be dropped on
-// cancel (see route), so consumers must bind end-of-turn UI/state transitions
-// to close, not to receiving Done/Error.
+// Send runs one turn and returns its event channel, closed when the turn
+// ends. Close is the authoritative end-of-turn signal — the terminal
+// Done/Error is best-effort and may be dropped on cancel (see route) — so
+// bind UI and state transitions to close, not to receiving it.
 //
-// Single-turn-at-a-time contract: the caller MUST drain the returned channel
-// to completion before calling Send again or any between-turns method (the
-// full list is on [ErrBusy]). Those methods read and mutate unsynchronized
-// session state (messages, cfg) and assume exactly one turn is active. The
-// contract is enforced: a Send while a turn is in flight does not start a
-// turn — it returns a channel that emits a single Error event carrying
-// ErrBusy and closes. A Send after Close is rejected the same way with
-// [ErrClosed].
-//
-// SendParts is the media-carrying variant; Send is SendParts with no parts.
+// One turn at a time: drain the channel before another Send or any
+// between-turns method (listed on [ErrBusy]), which read and mutate
+// unsynchronized session state. The contract is enforced, not assumed: a Send
+// mid-turn returns ErrBusy, one after Close returns [ErrClosed].
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
-	return s.SendParts(ctx, prompt, nil)
-}
-
-// SendParts runs one turn for prompt with media attachments. Same channel and
-// ErrBusy contract as Send. Invalid parts (see Part) reject the whole call:
-// the returned channel emits a single Error event carrying the first part's
-// error and closes, without starting a turn — the session stays usable.
-// Loading happens up front on the caller's goroutine (a Path part reads the
-// file here, not on the turn goroutine), and therefore happens even when the
-// call is subsequently rejected with ErrBusy.
-func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-chan Event {
-	cps, err := s.loadParts(parts)
-	if err != nil {
-		return closedEvents(err)
-	}
 	out := make(chan Event)
 	turnCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -314,23 +246,17 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	s.curDone = turnCtx.Done()
 	s.turnCancel = cancel
 	s.turnDone = done
-	// Capture the runtime here (under the busy gate, after the ErrBusy
-	// early-return) so the turn goroutine doesn't read s.runtime — doClose may
-	// nil it concurrently once `done` closes (see the big defer's wake below).
+	// Capture under the busy gate so the turn goroutine never reads s.runtime:
+	// doClose nils it once `done` closes.
 	rt := s.runtime
-	// Snapshot the turn config while still holding s.mu: the cfg-mutating
-	// methods (Clear, RegisterHostTool) hold s.mu, so
-	// taking the copy inside the busy-gated critical section makes "busy set"
-	// and "cfg read" atomic with respect to them — a mutator that slipped past
-	// its isBusy check either lands wholly before this copy or is serialized
-	// after it.
+	// Snapshot the turn config still holding s.mu, so "busy set" and "cfg
+	// read" are atomic against the cfg mutators (Clear, RegisterHostTool):
+	// one that slipped past its isBusy check lands wholly before or after.
 	tc := s.turnConfigLocked()
 	s.mu.Unlock()
 	go func() {
-		// route forwards events to out during the turn; once the turn returns no
-		// further forwarding can happen, so clearing cur, clearing busy, and
-		// closing out here is race-free (all run on this goroutine, strictly
-		// after the turn).
+		// No forwarding can happen once the turn returns, so clearing cur and
+		// busy and closing out here is race-free.
 		defer func() {
 			s.mu.Lock()
 			if s.cur == out {
@@ -339,26 +265,23 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 			s.busy = false
 			s.mu.Unlock()
 			close(out)
-			// Steering (or a subagent result) that arrived during the turn's final
-			// round was queued but never drained — there was no next round boundary.
-			// The session is now idle with a non-empty inbox, so Wake the host to run
-			// a follow-up turn (RunQueued). Uses the captured rt, not s.runtime, to
-			// avoid racing doClose's nil of s.runtime. Emitted after busy is cleared
-			// so a host's RunQueued isn't rejected as busy.
+			// Steering or a subagent result that arrived in the final round
+			// queued with no boundary left to drain it. The session is idle
+			// with a non-empty inbox, so Wake the host for a follow-up turn —
+			// after busy clears, or RunQueued would bounce off ErrBusy.
 			if rt != nil && s.sess.HasInbox() {
 				rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 			}
 			cancel() // release the child ctx
 		}()
 		defer close(done)
-		s.sess.RunParts(turnCtx, tc, prompt, cps)
+		s.sess.Run(turnCtx, tc, prompt)
 	}()
 	return out
 }
 
 // runtimeHandle snapshots s.runtime under s.mu. Every accessor reachable from
-// outside the turn goroutine must use this instead of reading s.runtime
-// directly: doClose nils the field concurrently (under the same mutex).
+// outside the turn goroutine must use it: doClose nils the field concurrently.
 func (s *Session) runtimeHandle() *Runtime {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -372,34 +295,25 @@ func (s *Session) isBusy() bool {
 	return s.busy
 }
 
-// ID returns the store session id (rolls when compaction starts a new one;
-// "" with no store).
+// ID is the store session id; it rolls when compaction starts a new one, and
+// is "" with no store.
 func (s *Session) ID() string {
 	return s.sess.ID()
 }
 
-// Close ends the conversation: cancels any in-flight turn, waits for it to
-// finish (so its deferred history persist runs against the still-open store),
-// then ends the store session and releases the config.
+// Close cancels any in-flight turn and waits for it, so its deferred history
+// persist runs against the still-open store, then ends the store session and
+// releases the config. A sequential second Close is a safe no-op; concurrent
+// Closes are not supported.
 //
-// Concurrency: Close must not be called concurrently with itself. A sequential
-// second Close is a safe no-op: the turn-cancel and join are idempotent and
-// the store, sink, and cleanup paths guard against double execution.
+// A Start-owned session also tears down the private Runtime Start created
+// (client, store, proxy spawner); a Runtime-hosted one only deregisters, and
+// the shared parts stay alive for the other sessions.
 //
-// For Start-owned sessions (the common single-session case), Close also tears
-// down the private Runtime that Start created — the LLM client, store, and
-// proxy spawner. For Runtime-hosted sessions created via
-// Runtime.Session, Close deregisters the session from its Runtime (the shared
-// parts remain alive for the other sessions).
-//
-// Close is robust to an abandoned Send channel: cancelling the turn ctx unblocks
-// route's send to an unread channel (its curDone select fires), so the turn
-// unwinds and the join below can't wedge. Draining the channel is still the
-// supported pattern, but Close does not require it.
-//
-// Returns the store's EndSession error if ending the persisted session fails;
-// the other best-effort teardown steps (turn cancel, cleanup) do not contribute
-// to the returned error.
+// An abandoned Send channel is fine: cancelling the turn ctx unblocks route's
+// send to it, so the join below cannot wedge. Draining is still the supported
+// pattern. Only EndSession's error is returned; the best-effort teardown
+// steps do not contribute to it.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() { s.closeErr = s.doClose() })
 	return s.closeErr
@@ -407,11 +321,9 @@ func (s *Session) Close() error {
 
 // doClose runs the teardown exactly once (guarded by closeOnce in Close).
 func (s *Session) doClose() error {
-	// Cancel any in-flight turn so it stops streaming and runs its deferred
-	// history persist, then join it before ending the store session so a
-	// cancelled turn isn't still writing to the store as EndSession runs.
-	// closed is set first so a Send racing this teardown (e.g. a Wake-driven
-	// queued drain) is rejected instead of starting a turn on the ended record.
+	// Cancel, then join before EndSession, so a cancelled turn is not still
+	// writing to the store as it runs. closed is set first, so a Send racing
+	// teardown is rejected rather than starting a turn on the ended record.
 	s.mu.Lock()
 	s.closed = true
 	cancel := s.turnCancel
@@ -428,11 +340,9 @@ func (s *Session) doClose() error {
 	if s.cfg.Store != nil {
 		endErr = s.cfg.Store.EndSession(s.sess.ID())
 	}
-	// Capture and nil s.runtime under s.mu so a concurrent WakeEvents() reader
-	// (a public accessor bot binaries call) never races this write. Only the
-	// field access is locked: rt.forget/rt.cleanup run after the unlock, since
-	// holding s.mu across them is unnecessary and could invite a lock-order
-	// deadlock with the runtime's own locking.
+	// Nil s.runtime under s.mu so a concurrent WakeEvents() reader never races
+	// the write. Only the field access is locked — holding s.mu across
+	// rt.forget could deadlock against the runtime's own locking.
 	s.mu.Lock()
 	rt := s.runtime
 	s.runtime = nil
@@ -443,22 +353,15 @@ func (s *Session) doClose() error {
 	return endErr
 }
 
-// RecoveryHint returns a short suggestion when err looks like a provider HTTP
-// 400 (Bad Request) — which usually means the last turn left the conversation
-// in a state the model rejects (e.g. a bad tool message or unsupported
-// content). Returns "" for other errors (auth 401, rate-limit 429, network,
-// 5xx), where rewriting history would not help. Front-ends append it to the
-// error they show.
-//
-// The suggested remedies are the ones that actually exist: compaction rewrites
-// the head of the conversation into a summary, and a new conversation starts
-// clean.
+// RecoveryHint suggests a remedy for a provider HTTP 400, which usually means
+// the last turn left the conversation in a state the model rejects. "" for
+// every other error (401, 429, network, 5xx), where rewriting history would
+// not help. Front-ends append it to the error they show.
 func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
 	}
 	const hint = "This usually means the last turn left the conversation in a state the model rejects — /compact (which rewrites the history into a summary) or starting a new conversation will normally clear it."
-	// Preferred: the adapter wraps provider API errors in llm.StatusError.
 	var se *llm.StatusError
 	if errors.As(err, &se) {
 		if se.Code == 400 {
@@ -466,8 +369,7 @@ func RecoveryHint(err error) string {
 		}
 		return ""
 	}
-	// Fallback for errors that lost the typed shell (e.g. proxies or paths that
-	// stringified the error).
+	// Fallback for errors that lost the typed shell (a proxy stringified it).
 	s := err.Error()
 	if strings.Contains(s, "400 Bad Request") || strings.Contains(s, `"http_code":"400"`) {
 		return hint
@@ -475,10 +377,9 @@ func RecoveryHint(err error) string {
 	return ""
 }
 
-// turnConfigLocked derives the per-turn config from the current cfg. Built
-// fresh each turn so a between-turns cfg mutation takes effect on the next
-// Send. Caller must hold s.mu: cfg and the session wiring fields it reads are
-// mutated by the mu-holding between-turns methods.
+// turnConfigLocked derives the per-turn config, built fresh each turn so a
+// between-turns mutation takes effect on the next Send. Caller must hold s.mu
+// — the fields it reads are mutated by the mu-holding between-turns methods.
 func (s *Session) turnConfigLocked() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers)
@@ -490,18 +391,16 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		}
 		allowed := cfg.Subagents // the active agent's registered-subagent allowlist
 		tc.StartSubagent = func(agent, prompt, desc string, direct bool, note string) (string, error) {
-			// Enforce the allowlist the task tool's schema advertises: only the
-			// registered subagent names may be spawned, never an arbitrary declared
-			// agent. An empty allowlist means this agent may not delegate at all.
+			// Only the registered subagent names the task tool's schema
+			// advertises; an empty allowlist means no delegation at all.
 			if !slices.Contains(allowed, agent) {
 				if len(allowed) == 0 {
-					return "", errors.New("this agent has no subagents configured (agents/ is empty)")
+					return "", errors.New("this agent has no subagents configured (the kit declares no employee)")
 				}
 				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
 			}
-			// Single-level delegation is enforced by construction: subagents are
-			// never granted the task tool, so this closure only runs on top-level
-			// sessions.
+			// Single-level by construction: subagents never get the task tool,
+			// so this closure only runs on top-level sessions.
 			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{direct: direct, note: note})
 		}
 		tc.ListJobs = func() string {
@@ -517,17 +416,18 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	return tc
 }
 
-// Compact forces one context compaction now (= /compact): it summarises the
-// head of the conversation and keeps the recent tail, exactly like the
-// automatic compact_at path, and returns the estimated prompt tokens
-// before/after. ErrBusy while a turn is in flight; chat.ErrNothingToCompact
-// when history is too small to have a summarisable head (history untouched on
-// any error). Unlike the other between-turns mutators it does NOT run under
-// withIdle — the summarisation round-trip can take minutes and must not hold
-// s.mu; instead it takes the FULL turn lifecycle (mirroring SendParts): the
-// busy gate, plus turnCancel/turnDone registration so /stop can abort the LLM
-// call and doClose cancels+joins before ending the store session — the
-// compaction rolls the runs session, so teardown must never race it.
+// Compact forces one compaction now, exactly like the automatic compact_at
+// path, returning estimated prompt tokens before and after. ErrBusy mid-turn;
+// chat.ErrNothingToCompact when there is no summarisable head, with history
+// untouched on any error. It does NOT run under withIdle — the round-trip can
+// take minutes and must not hold s.mu — but takes the FULL turn lifecycle
+// like Send, so /stop can abort the call and doClose joins before EndSession:
+// the compaction rolls the runs session, and teardown must not race it.
+//
+// TODO: no front-end binds this — no /compact command exists, and the bot
+// compacts automatically. It (and chat.CompactStandalone, and compactApply's
+// whole `forced` branch) is exercised only by tests. Either bind a command or
+// delete the forced path.
 func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 	cctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -544,10 +444,8 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 	s.busy = true
 	s.turnCancel = cancel
 	s.turnDone = done
-	// Capture the runtime under the busy gate (doClose nils it concurrently once
-	// done closes) and snapshot the turn config inside the same critical section,
-	// same as SendParts: cfg mutators (Clear, RegisterHostTool) hold s.mu, so
-	// they serialize wholly before or after this compaction.
+	// Capture the runtime and snapshot the config in one critical section, as
+	// Send does, so the cfg mutators serialize wholly before or after.
 	rt := s.runtime
 	tc := s.turnConfigLocked()
 	s.mu.Unlock()
@@ -556,9 +454,8 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 		s.busy = false
 		s.mu.Unlock()
 		close(done) // doClose may be blocked on this join; store state is final
-		// A notice queued while the busy gate was held had its Wake bounced off
-		// RunQueued's ErrBusy; re-emit exactly as SendParts' unwind does, so a
-		// completion that landed mid-compaction is never stranded.
+		// A notice queued behind the busy gate had its Wake bounced off
+		// RunQueued's ErrBusy; re-emit as Send's unwind does.
 		if rt != nil && s.sess.HasInbox() {
 			rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 		}
@@ -570,6 +467,5 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
-// Name returns the session's runtime key (e.g. "web-<thread>", or a generated
-// "sN"). Front-ends use it to label the session they attached to.
+// Name is the session's runtime key, which front-ends use as a label.
 func (s *Session) Name() string { return s.name }

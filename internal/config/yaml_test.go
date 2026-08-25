@@ -238,8 +238,7 @@ func TestParseYAMLKeepRecentClamp(t *testing.T) {
 	}
 }
 
-// A strict-decode failure is the first thing a 0.4.x upgrader with a `web:`
-// block meets, so it must name shell3.yaml's own blocks — not the Go types
+// A strict-decode failure must name the wiring's own blocks, not the Go types
 // behind them.
 func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 	for _, tc := range []struct {

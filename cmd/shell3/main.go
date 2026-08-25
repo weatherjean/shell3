@@ -18,9 +18,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (telegram, ask, boot, health, tool;
-// the bare root prints help) and executes it through fang, which owns help,
-// usage, error, and --version styling.
+// main wires the cobra command tree and executes it through fang, which owns
+// help, usage, error, and --version styling.
 func main() {
 	root := &cobra.Command{
 		Use:   "shell3",
@@ -28,9 +27,7 @@ func main() {
 	}
 
 	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
-	// error rather than be silently swallowed. shell3 is a Telegram-first
-	// hosted agent: the bare command prints help; `shell3 telegram` runs the
-	// bot, and `shell3 ask "..."` handles one-shot prompts.
+	// error rather than be silently swallowed.
 	root.Args = cobra.NoArgs
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -91,13 +88,13 @@ func wantsHelp(args []string) bool {
 }
 
 // addConfigFlag registers the shared --config/-c flag with the one canonical
-// description; every subcommand resolves it through resolveConfig.
+// description.
 func addConfigFlag(cmd *cobra.Command, configDir *string) {
 	cmd.Flags().StringVarP(configDir, "config", "c", "", "Path to the config directory containing shell3.sh (default ~/.shell3)")
 }
 
-// resolveConfig turns the shared --config flag value (a directory path; "" for
-// the default ~/.shell3) into the config directory every subcommand loads.
+// resolveConfig turns the --config flag value ("" = ~/.shell3) into the config
+// directory every subcommand loads.
 func resolveConfig(configDir string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

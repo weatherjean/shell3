@@ -12,7 +12,7 @@ import (
 // group. chat_id answers "where does the bot talk"; it says nothing about who
 // is standing in that room. Every member of a group can see the chat, and
 // treating presence as permission would hand an unrestricted shell — gated
-// only by hooks/tool-call.sh — to anyone who can be added to it.
+// only by the kit's `gate:` function — to anyone who can be added to it.
 //
 // The sender id is the right thing to key on: Telegram's servers populate it,
 // and unlike anything in the message body the sender cannot choose it.

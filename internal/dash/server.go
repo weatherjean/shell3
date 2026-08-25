@@ -16,8 +16,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// runsPageSize is how many runs one dash listing page shows. Larger than the
-// Telegram page (8): a browser scrolls.
+// runsPageSize is how many runs one dash listing page shows.
 const runsPageSize = 20
 
 // Sources is what the dash reads. RunsRoot and ConfigDir are resolved per

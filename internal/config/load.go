@@ -23,7 +23,7 @@ func Load(dir string) (*LoadedConfig, error) {
 func load(dir string) (*LoadedConfig, error) {
 	// The kit carries its own wiring in a `shell3:` block; here we only lift
 	// that. Its agents, tools and skills are loaded by agentsetup.
-	data, err := readWiring(dir)
+	k, data, err := readWiring(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func load(dir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Secrets: secrets, dir: dir}
+	c := &LoadedConfig{Secrets: secrets, dir: dir, kit: k}
 	if err := c.parseYAML(data, secrets); err != nil {
 		return nil, err
 	}

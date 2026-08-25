@@ -1,8 +1,7 @@
-// Package agentsetup is the shared config assembly used by every shell3
-// front-end (`shell3 telegram`, `shell3 ask`, and the internal/shell3 event
-// stream). It resolves paths, ensures project dirs, opens the store and log,
-// loads the config directory, and returns a fully-populated chat.Config — the single
-// source of truth for "what the agent is", independent of how it's driven.
+// Package agentsetup is the config assembly every front-end shares. It
+// resolves paths, ensures project dirs, opens the store and log, loads the
+// config directory, and returns a chat.Config — the single source of truth for
+// what the agent is, independent of how it is driven.
 package agentsetup
 
 import (
@@ -29,31 +28,24 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// Options parameterizes BuildParts: where to find the config and which
-// directories the runtime resolves against. CWD/HomeDir default via the caller
-// (front-ends pass os.Getwd()/os.UserHomeDir()). Per-session concerns (agent,
-// headless, out path) live in SessionOptions.
+// Options tells BuildParts where the config is and which directories the
+// runtime resolves against. Per-session concerns live in SessionOptions.
 type Options struct {
 	ConfigDir string // "" triggers default resolution (ResolveConfigDir)
 	CWD       string
 	HomeDir   string
 }
 
-// Parts is the session-independent runtime assembly: everything one process
-// shares across N sessions. Front-ends derive per-session chat.Configs from it
-// via SessionConfig.
+// Parts is everything one process shares across N sessions; front-ends derive
+// per-session chat.Configs from it via SessionConfig.
 //
-// Concurrency: all exported methods are safe for concurrent use by multiple
-// sessions. The loaded config (config.LoadedConfig) is immutable after load,
-// the runs store serializes writes through its database handle (safe for
-// concurrent callers), the proxy spawner is mutex-guarded internally,
-// and AgentRuntime builds a fresh LLM client per call, so no client state is
-// shared across sessions.
+// Every exported method is concurrency-safe: the loaded config is immutable,
+// the store serializes writes, the proxy spawner is mutex-guarded, and
+// AgentRuntime builds a fresh LLM client per call.
 //
-// Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes MCP connections, the runs store's database handle,
-// and the log; run_proxy processes are detached (never reaped here).
-// Any method call after cleanup has undefined behaviour.
+// Parts must not be used after BuildParts' cleanup runs — it closes the MCP
+// connections, the store handle and the log. run_proxy processes are detached
+// and never reaped here.
 type Parts struct {
 	// events is the shared `event:` delivery worker, started lazily by
 	// eventDispatcher() and torn down with these Parts.
@@ -66,32 +58,28 @@ type Parts struct {
 	log     applog.Logger
 	root    string // runtime root workdir (Options.CWD)
 	runsDir string // absolute path to .shell3_project/runs (for chat.Config.RunsDir + the Environment section)
-	// configDir is the resolved absolute config directory that produced this Parts;
-	// recorded per session so resume can reload the right config.
+	// configDir produced this Parts, recorded per session so a resume reloads
+	// the right config.
 	configDir string
-	// mcp is the connected MCP server manager (nil when no mcp: block
-	// is declared). Its Close rides the BuildParts closer stack, so /reload
-	// tears down old servers and connects fresh ones automatically. mcpWarns
-	// holds connect-time warnings (down servers, tool-name collisions),
-	// surfaced beside the config warnings.
+	// mcp is the connected server manager, nil when no mcp: block is declared.
+	// Its Close rides the closer stack, so /reload reconnects fresh. mcpWarns
+	// carries connect-time warnings, shown beside the config ones.
 	mcp      *mcp.Manager
 	mcpWarns []string
 	// kit is the parsed kit file when one was loaded (see LoadKit); nil
 	// otherwise. Agents declared in it resolve through KitAgentRuntime.
 	kit     *kit.Kit
 	kitPath string
-	// reviewer resolves the gate's {review} verdicts (built lazily by
-	// Reviewer(); nil when its model cannot resolve — reviews then fail
-	// closed at the chat layer). One instance per Parts so the denial
-	// breaker's per-agent tallies span every session of this generation.
+	// reviewer resolves the gate's {review} verdicts, built lazily; nil when
+	// its model cannot resolve, and reviews then fail closed. One per Parts,
+	// so the denial breaker's tallies span every session of this generation.
 	reviewer   *review.Reviewer
 	reviewOnce sync.Once
 	// home is the user's home dir, for expanding ~/ in a kit agent's workdir.
 	home string
 }
 
-// MCPStatus reports every declared MCP server's health (nil when no
-// mcp: block is declared) — for `shell3 health` and the status tool.
+// MCPStatus reports each declared server's health, nil when none is declared.
 func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	if p.mcp == nil {
 		return nil
@@ -99,31 +87,25 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	return p.mcp.Status()
 }
 
-// Store returns the runs store (always opened; nil only when the
-// store-open itself failed, which is non-fatal and logged).
+// Store is the runs store; nil only when the open failed, which is logged
+// and non-fatal.
 func (p *Parts) Store() *runs.Store { return p.st }
 
-// LoadedConfig exposes the parsed config, including the hooks a kit's `gate:`
-// and `note:` blocks installed. Front-ends reach it through the higher-level
-// accessors below; this is for callers that need the hook surface itself.
+// LoadedConfig exposes the parsed config, hooks included, for callers that
+// need the hook surface rather than the accessors below.
 func (p *Parts) LoadedConfig() *config.LoadedConfig { return p.lc }
 
 // Log returns the application logger (never nil once BuildParts succeeded).
 func (p *Parts) Log() applog.Logger { return p.log }
 
-// ConfigDir returns the resolved absolute config directory that produced these
-// parts (recorded per session for resume).
+// ConfigDir is the absolute config directory these parts came from.
 func (p *Parts) ConfigDir() string { return p.configDir }
 
-// BackgroundMaxConcurrent returns the `background.max_concurrent`
-// setting (0 = unset; default applied at newJobManager).
+// BackgroundMaxConcurrent is the declared job cap; 0 = unset.
 func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurrent }
 
-// ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// AgentCount returns the number of agents the kit declares (the main agent
-// plus every employee).
 func (p *Parts) AgentCount() int {
 	if p.kit == nil {
 		return 0
@@ -142,36 +124,28 @@ func (p *Parts) Cron() []kit.CronJob {
 	return p.kit.Crons
 }
 
-// RunsKeepDays returns `runs_keep_days` (always populated at load — default
-// 30; 0 = keep forever). Read by the runs janitor at `shell3 telegram` startup.
+// RunsKeepDays feeds the runs janitor at startup. Default 30, 0 = forever.
 func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 
-// MediaKeepDays returns `media_keep_days` (always populated at load —
-// default 0 = keep forever). Read by the media janitor at `shell3 telegram`
-// startup.
+// MediaKeepDays feeds the media janitor at startup. Default 0 = forever.
 func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 
-// DashPort returns `dash_port` (always populated at load — default 7333;
-// 0 = dash disabled). Read by the front-end hosts when wiring the web dash.
+// DashPort is where the dash listens. Default 7333, 0 = disabled.
 func (p *Parts) DashPort() int { return p.lc.DashPort }
 
-// RunsRoot returns the .shell3_project directory the runs Store was opened
-// against (runs.Open's root param) — the same root the runs janitor's Sweep
-// expects. Derived from runsDir (.../.shell3_project/runs) rather than
-// storing it separately, since Store already keys off exactly this
-// relationship (see runs.Store.runsDir).
+// RunsRoot is the .shell3_project directory the Store was opened against, the
+// root Sweep expects. Derived from runsDir rather than stored separately,
+// since Store already keys off that relationship.
 func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
 
-// AgentRuntime assembles the full chat runtime for the named agent: its model
-// client, persona, and tool defs. name "" uses the kit's first declared
-// agent; a name the kit does not declare returns an error.
+// AgentRuntime assembles an agent's model client, persona and tool defs. ""
+// uses the kit's first agent; an undeclared name is an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	return p.KitAgentRuntime(name)
 }
 
-// SubagentWorkdir returns the declared working directory for an employee —
-// its kit `workdir:`, with a leading ~/ expanded. "" means "inherit the
-// spawner's workdir", the default for an agent that declares none.
+// SubagentWorkdir is an employee's declared workdir with ~/ expanded. ""
+// inherits the spawner's, the default when none is declared.
 func (p *Parts) SubagentWorkdir(name string) string {
 	if p.kit == nil {
 		return ""
@@ -184,20 +158,14 @@ func (p *Parts) SubagentWorkdir(name string) string {
 	return ""
 }
 
-// EnvironmentReminder renders the host-injected Environment standing reminder
-// (no longer part of the system prompt). It exposes the agent's own config path
-// (so any front-end can resolve its config dir without a tool), the active model
-// and this session's id, and where conversation history lives — the SQLite
-// runs store the history tool searches. The result is wrapped in
-// <system-reminder>…</system-reminder>.
+// EnvironmentReminder renders the host-injected Environment standing
+// reminder: the agent's own config path, the active model, this session's id,
+// and where conversation history lives.
 //
-// It is a package-level function (not a *Parts method) so internal/shell3 can render
-// it from the per-session chat.Config fields it already holds — config path,
-// runs dir, model (from the status line), and the runs session id — keeping the
-// fact wording in exactly one place.
-//
-// Returns "" when runsDir is empty (store-open failed), so the reminder never
-// advertises a path the agent cannot use.
+// A package-level function rather than a *Parts method, so internal/shell3 can
+// render it from the chat.Config fields it already holds and the wording lives
+// in one place. "" when runsDir is empty, so it never advertises a path the
+// agent cannot use.
 func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	if runsDir == "" {
 		return ""
@@ -211,25 +179,21 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 		fmt.Fprintf(&b, "- session id: %s\n", sessionID)
 	}
 	if configDir != "" {
-		// Name what is actually on disk. A reminder that lists files the
-		// install does not have teaches the model a layout it will then
-		// contradict itself about.
+		// Name what is on disk: listing files the install lacks teaches the
+		// model a layout it will contradict itself about.
 		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s (wiring, agents, tools, the gate), skills/, projects/<agent>/skills/ — edit it via the self-evolve skill)\n", configDir, kit.FileName)
 	}
-	// Derive the model-facing paths from paths.ProjectDirName (its single
-	// source): a renamed project dir must not leave the reminder teaching the
-	// model paths that no longer exist.
+	// From paths.ProjectDirName, so renaming the project dir cannot leave the
+	// reminder teaching paths that no longer exist.
 	fmt.Fprintf(&b, "- history: every conversation (subagent runs included) is stored in `%s/shell3.db`; recall past sessions with the history tool when you have it (search, then read around a hit)\n", paths.ProjectDirName)
 	fmt.Fprintf(&b, "- background job logs: `%s/runs/<session>/jobs/<job>.log` (plain files)\n", paths.ProjectDirName)
 	b.WriteString("</system-reminder>")
 	return b.String()
 }
 
-// RefreshPromptFor re-renders the named kit agent's system prompt, so a
-// `context:` file edited mid-conversation is current on the next turn.
-// Callers pass names already validated by a successful AgentRuntime call
-// (they come from ModeLabel). An impossible miss returns "" rather than
-// panicking; the turn then keeps the prompt it already has.
+// RefreshPromptFor re-renders an agent's system prompt, so a context: file
+// edited mid-conversation is current next turn. Names come pre-validated from
+// ModeLabel; an impossible miss returns "" and the turn keeps its prompt.
 func (p *Parts) RefreshPromptFor(name string) string {
 	r, err := p.KitAgent(name)
 	if err != nil {
@@ -243,18 +207,14 @@ type SessionOptions struct {
 	Agent    string // "" → first declared (falls back to a subagent name)
 	WorkDir  string // "" → runtime root
 	Headless bool
-	// PromptSuffix appends per-session text to the system prompt, re-rendered
-	// every turn (see chat.Config.PromptSuffix). Nil appends nothing.
+	// PromptSuffix appends per-session text, re-rendered every turn.
 	PromptSuffix func() string
 }
 
-// BridgeVerdict maps a config tool-call hook verdict to the chat package's
-// equivalent, field by field. The two Action enums are independent iota
-// blocks; an explicit mapping (rather than a numeric cast) keeps this security
-// boundary correct if either is ever reordered, and an unrecognized action
-// fails closed (ActionBlock) rather than silently falling through to
-// ActionRun. Exported so integration tests exercise the same bridge
-// production uses instead of hand-copying it.
+// BridgeVerdict maps a config gate verdict to the chat package's, field by
+// field. The two Action enums are independent iota blocks, so an explicit
+// mapping keeps this security boundary correct if either is reordered, and an
+// unrecognized action fails closed. Exported so tests exercise the real bridge.
 func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	action := chat.ActionBlock // fail closed on any unmapped action
 	switch v.Action {
@@ -271,9 +231,8 @@ func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	}
 }
 
-// SessionConfig derives a per-session chat.Config from the shared parts.
-// The returned config embeds per-session closures (RefreshPrompt, the hook
-// bridges) that consult only declared config plus the session's own agent.
+// SessionConfig derives a per-session chat.Config from the shared parts. Its
+// closures consult only declared config plus the session's own agent.
 func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	workdir := so.WorkDir
 	if workdir == "" {
@@ -333,15 +292,13 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	if cfg.HostTool == nil && kitTool != nil {
 		cfg.HostTool = kitTool
 	}
-	// hooks/*.tool-call.sh: the per-agent gate script run before every tool.
-	// Each agent is governed by its own script or none — no fallback.
+	// The kit's gate:, run before every tool. Each agent has its own or none.
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
 			return BridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
 		}
-		// The {review} soft deny resolves through the shared reviewer, keyed
-		// by the active agent so one runaway agent's denial-breaker tally
-		// never hard-stops another. Nil reviewer (model unresolvable) leaves
+		// Keyed by the active agent, so one runaway agent's denial-breaker
+		// tally never hard-stops another. A nil reviewer leaves
 		// cfg.ReviewToolCall nil and reviews fail closed downstream.
 		if rev := p.Reviewer(); rev != nil {
 			cfg.ReviewToolCall = func(ctx context.Context, name, command, reason string) (bool, string) {
@@ -349,18 +306,16 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 			}
 		}
 	}
-	// hooks/*.tool-result.sh: the per-agent output-rewrite script.
+	// The kit's `note:` function: the per-agent output rewrite.
 	if p.lc.HasToolResult() {
 		cfg.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
 			return p.lc.RunToolResult(ctx, activeName, name, argsJSON, output)
 		}
 	}
-	// `event:` — the per-agent observer of this session's event stream. The
-	// subscription check comes FIRST, before the event is rendered to JSON:
+	// The subscription check comes FIRST, before rendering to JSON:
 	// assistant_token fires per streamed token, so an unsubscribed kind must
-	// cost a map lookup and nothing else. Delivery is then handed to the
-	// shared dispatcher, off this goroutine — a turn never waits on an
-	// observer.
+	// cost a map lookup and nothing else. Delivery then hands off to the
+	// shared dispatcher — a turn never waits on an observer.
 	if p.lc.HasEvent() {
 		if d := p.eventDispatcher(); d != nil {
 			cfg.OnEvent = func(ev chat.Event) {
@@ -376,10 +331,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	return cfg, nil
 }
 
-// eventDispatcher returns the shared `event:` delivery worker, starting it on
-// first use. One per Parts: subscribers run serially across the whole install,
-// so a shell function appending to a log never races itself, and a reload
-// tears the old one down with the Parts that owned it.
+// eventDispatcher is the shared delivery worker, started on first use. One
+// per Parts, so subscribers run serially install-wide and a shell function
+// appending to a log never races itself.
 func (p *Parts) eventDispatcher() *eventDispatcher {
 	p.eventOnce.Do(func() {
 		p.events = newEventDispatcher(eventQueueDepth, p.lc.RunEvent, p.log)
@@ -387,8 +341,7 @@ func (p *Parts) eventDispatcher() *eventDispatcher {
 	return p.events
 }
 
-// CloseEvents stops the event dispatcher. Called from the Parts teardown
-// stack; safe when no dispatcher was ever started.
+// CloseEvents stops the dispatcher, safe when none was started.
 func (p *Parts) CloseEvents() {
 	p.eventOnce.Do(func() {}) // claim the once so a late caller cannot start one
 	if p.events != nil {
@@ -396,9 +349,8 @@ func (p *Parts) CloseEvents() {
 	}
 }
 
-// BuildParts assembles the shared runtime parts. The returned cleanup closes
-// MCP connections, the runs store, and the log; callers MUST invoke it once.
-// (run_proxy processes are detached fire-and-forget — see modelproxy.)
+// BuildParts assembles the shared runtime parts. Callers MUST invoke the
+// returned cleanup once; it closes the MCP connections, store and log.
 func BuildParts(opts Options) (*Parts, func(), error) {
 	b := &builder{opts: opts}
 	noop := func() {}
@@ -419,27 +371,20 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		mcp:       b.mcp, mcpWarns: b.mcpWarns,
 		home: opts.HomeDir,
 	}
-	// A shell3.sh beside the config is THE config: its agents, tools, and
-	// skills take precedence over the markdown tree. Presence enables it —
-	// there is no toggle.
-	if kp := filepath.Join(b.configDir, kit.FileName); fileExists(kp) {
-		if err := p.LoadKit(kp); err != nil {
-			b.closeAll()
-			return nil, noop, err
-		}
+	// ResolveConfigDir already refused a directory with no kit.
+	if err := p.LoadKit(filepath.Join(b.configDir, kit.FileName)); err != nil {
+		b.closeAll()
+		return nil, noop, err
 	}
-	// The event dispatcher is started lazily by the first session that needs
-	// it, so its closer is registered here rather than at start: a reload's
-	// teardown must stop the worker whether or not one was ever spun up.
+	// The dispatcher starts lazily, so its closer registers here: a reload
+	// must stop the worker whether or not one was ever spun up.
 	b.closers = append(b.closers, p.CloseEvents)
 	return p, b.closeAll, nil
 }
 
-// builder accumulates the state and open resources used to assemble the shared
-// Parts across BuildParts' stages. closers is a LIFO teardown stack: stages
-// push a closer as they acquire a resource, and closeAll runs them in
-// reverse-acquisition order — matching the original cleanup ordering
-// (store → lc → log).
+// builder accumulates state and open resources across BuildParts' stages.
+// closers is a LIFO stack: each stage pushes as it acquires, and closeAll
+// unwinds in reverse (store → lc → log).
 type builder struct {
 	opts Options
 
@@ -464,9 +409,8 @@ func (b *builder) closeAll() {
 	}
 }
 
-// resolvePaths resolves the config path, builds the global/local path sets, and
-// ensures the global root + project runtime directories exist. The project
-// identity is now the directory itself (.shell3_project/), so there is no UUID.
+// resolvePaths resolves the config path, builds the path sets, and ensures the
+// global root and project dirs exist. A project's identity is its directory.
 func (b *builder) resolvePaths() error {
 	configDir, err := ResolveConfigDir(b.opts.ConfigDir, b.opts.HomeDir)
 	if err != nil {
@@ -485,8 +429,8 @@ func (b *builder) resolvePaths() error {
 	return nil
 }
 
-// openLog opens the rotating app log. Failure is non-fatal: it warns on stderr
-// (the log itself being unavailable to record it) and falls back to Noop.
+// openLog opens the rotating app log. A failure warns on stderr — the log
+// being unavailable to record it — and falls back to Noop.
 func (b *builder) openLog() {
 	log, logCloser, err := applog.Open(b.g.LogFile, applog.DefaultMaxBytes, applog.DefaultMaxArchives)
 	if err != nil {
@@ -498,17 +442,16 @@ func (b *builder) openLog() {
 	b.closers = append(b.closers, func() { _ = logCloser.Close() })
 }
 
-// loadConfig loads the config directory. Hooks and .env resolve against that
-// directory; the agent's bash cwd stays opts.CWD. These differ on purpose.
+// loadConfig loads the config directory. Hooks and .env resolve against it
+// while the agent's bash cwd stays opts.CWD — different on purpose.
 func (b *builder) loadConfig() error {
 	lc, err := config.Load(b.configDir)
 	if err != nil {
 		return err
 	}
 	b.lc = lc
-	// Surface non-fatal config issues (e.g. a skipped invalid skill file). To
-	// both the app log and stderr: the log keeps a durable record, and stderr
-	// reaches headless/CLI runs directly.
+	// To both the log, for a durable record, and stderr, which reaches
+	// headless runs directly.
 	for _, w := range lc.Warnings() {
 		b.log.Warn("config warning", "detail", w)
 		fmt.Fprintln(os.Stderr, "shell3: config warning: "+w)
@@ -516,11 +459,10 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// connectMCP builds + connects the MCP server manager when an mcp: block is
-// declared. Synchronous by design (servers dial in parallel, each under its
-// own timeout): tool defs become plain static config, and a hosted bot does
-// not care about a few seconds at startup/reload. A down server is a warning,
-// never a build failure; its tools are absent until the next reload.
+// connectMCP connects the server manager when an mcp: block is declared.
+// Synchronous by design — servers dial in parallel under their own timeouts,
+// which makes tool defs plain static config for a few seconds at startup. A
+// down server is a warning; its tools are absent until the next reload.
 func (b *builder) connectMCP() {
 	servers := b.lc.MCPServers()
 	if len(servers) == 0 {
@@ -535,11 +477,10 @@ func (b *builder) connectMCP() {
 	}
 }
 
-// openStore opens the runs store (the per-project SQLite database)
-// unconditionally: it always persists the conversation, and the history tool
-// reads it back. Non-fatal: a failure warns and proceeds with a nil store
-// (persistence and history silently degrade). The database handle rides the
-// closer stack so a reload's parked old generation releases it.
+// openStore opens the per-project database unconditionally: it persists the
+// conversation and backs the history tool. A failure warns and proceeds with
+// a nil store. The handle rides the closer stack, so a parked generation
+// releases it.
 func (b *builder) openStore() {
 	if s, e := runs.Open(b.l.Root); e == nil {
 		b.st = s
@@ -551,16 +492,15 @@ func (b *builder) openStore() {
 }
 
 // reviewMaxTokens caps the reviewer's reply. The verdict is one word, but a
-// reasoning model spends thinking tokens first — 16 (Hermes' cap on plain
-// chat models) would truncate the thought and fail every review closed.
+// reasoning model spends thinking tokens first, and a 16-token cap would
+// truncate the thought and fail every review closed.
 const reviewMaxTokens = 1024
 
-// Reviewer returns the shared reviewer behind the gate's {review} verdict,
-// built on first use: `review_model` (default: the main agent's model) on a
-// DEDICATED client at temperature 0 — never the agent's own client, whose
-// params are client state a reviewer override would corrupt. Returns nil
-// when the model cannot resolve; the chat layer then fails review verdicts
-// closed with a named reason.
+// Reviewer is the shared reviewer behind the gate's {review} verdict, built on
+// first use: review_model, defaulting to the main agent's, on a DEDICATED
+// client at temperature 0 — never the agent's own, whose params a reviewer
+// override would corrupt. nil when the model cannot resolve, and the chat
+// layer then fails review verdicts closed with a named reason.
 func (p *Parts) Reviewer() *review.Reviewer {
 	p.reviewOnce.Do(func() {
 		name := p.lc.ReviewModel
@@ -573,17 +513,12 @@ func (p *Parts) Reviewer() *review.Reviewer {
 			return
 		}
 		p.proxy.Ensure(md.Name, md.RunProxy)
-		cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 		zero := 0.0
-		cl.SetParams(llm.RequestParams{
+		p.reviewer = review.New(newModelClient(md, llm.RequestParams{
 			Temperature:     &zero,
 			MaxTokens:       reviewMaxTokens,
 			ReasoningEffort: md.Reasoning,
-		})
-		if md.Extra != nil {
-			cl.SetExtra(md.Extra)
-		}
-		p.reviewer = review.New(cl, p.lc.ReviewPolicy)
+		}), p.lc.ReviewPolicy)
 	})
 	return p.reviewer
 }
@@ -591,17 +526,24 @@ func (p *Parts) Reviewer() *review.Reviewer {
 // buildClient constructs a streaming client plus its request params from a
 // configured model. Reused for the initial client and on each agent switch.
 func buildClient(md config.Model) (chat.LLMClient, llm.RequestParams) {
-	cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 	rp := llm.RequestParams{
 		ReasoningEffort: md.Reasoning,
 		MaxTokens:       md.MaxTokens,
 		Temperature:     md.Temperature,
 	}
+	return newModelClient(md, rp), rp
+}
+
+// newModelClient dials a configured model with the given request params. The
+// one place a model's endpoint, key, and `extra:` fields reach the adapter —
+// the reviewer takes the same route with its own params.
+func newModelClient(md config.Model, rp llm.RequestParams) *openai.Client {
+	cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 	cl.SetParams(rp)
 	if md.Extra != nil {
 		cl.SetExtra(md.Extra)
 	}
-	return cl, rp
+	return cl
 }
 
 // ResolveConfigDir returns the config directory to load: the explicit flag (a

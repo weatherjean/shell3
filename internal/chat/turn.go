@@ -17,14 +17,12 @@ import (
 )
 
 // headlessReminder is injected once at the start of a headless turn so the
-// model understands the environment. Adapters that block destructive tool
-// calls also append their own reasons via the existing hook path.
+// model understands the environment.
 const headlessReminder = "<system-reminder>\nheadless mode: no interactive shell, no human available to answer questions. Decide and proceed. Destructive commands may be blocked by host policy — if a block occurs, adapt rather than retry.\n</system-reminder>"
 
-// logStreamError writes the failing turn's messages and the last raw HTTP
-// traffic to .shell3_project/last_error.json under cfg.WorkDir, then records the
-// event in the logger at Debug level (the front-end channel shows the error to the
-// user, so stderr duplication is not needed here).
+// logStreamError dumps the failing turn's messages and last raw HTTP traffic
+// to .shell3_project/last_error.json, then logs at Debug — the front-end
+// already shows the error, so stderr would duplicate it.
 func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	var reqBody, resBody []byte
 	if ts, ok := cfg.LLM.(llm.TrafficInspector); ok {
@@ -45,8 +43,7 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 			if werr := os.MkdirAll(filepath.Dir(p), 0o755); werr != nil {
 				dumpErr = werr
 			} else if werr := os.WriteFile(p, data, 0644); werr != nil {
-				// Don't advertise a dump file that wasn't written; surface the
-				// write error instead so the failure is observable.
+				// Don't advertise a dump that wasn't written.
 				dumpErr = werr
 			} else {
 				dumpPath = p
@@ -59,24 +56,20 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
-// RunTurn executes one user→assistant turn, delivering chat.Events to the
-// session sink synchronously as they occur. When RunTurn returns, every event
-// (including the terminal turn_done/error) has been delivered.
+// RunTurn executes one user→assistant turn, delivering events to the sink
+// synchronously; when it returns everything, terminal event included, has
+// been delivered.
 //
-// beforeDone, if non-nil, runs once at turn teardown immediately before the
-// single terminal event (turn_done or error) is emitted — Session.Run uses it
-// to persist history. The ordering matters: the terminal event is what front-ends
-// (internal/shell3) treat as "turn finished, safe to mutate session state",
-// so any read of sess.messages in beforeDone must complete before it fires, or
-// it races a concurrent SetMessages.
+// beforeDone runs at teardown immediately before that terminal event —
+// Session.Run persists history there. The ordering matters: front-ends treat
+// the terminal event as "safe to mutate session state", so a read of
+// sess.messages in beforeDone must finish first or it races SetMessages.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
-	// Reset before anything else runs: a turn that returns via the early skip
-	// path below (inbox-seeded, no rounds) must not let saveHistory re-add a
-	// previous turn's leftover usage onto the store's cumulative ledger.
+	// Reset first: a turn returning via the early skip path below must not let
+	// saveHistory re-add a previous turn's usage to the cumulative ledger.
 	sess.turnUsage = llm.Usage{}
-	// terminalEmit holds the turn's single end event. It is emitted from the
-	// deferred closure below, after beforeDone, so persistence happens-before
-	// the done/error signal the front-end reacts to.
+	// terminalEmit is emitted from the defer below, after beforeDone, so
+	// persistence happens-before the signal the front-end reacts to.
 	var terminalEmit func()
 	defer func() {
 		if r := recover(); r != nil {
@@ -93,16 +86,14 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 	}()
 
-	// Host-enforced auto-compaction runs BEFORE the new user message is
-	// appended and allMsgs is built, so the turn proceeds against the compacted
-	// history. It is best-effort and never blocks or fails the turn (see
-	// maybeCompact): on any error it leaves history untouched.
+	// Auto-compaction runs BEFORE the user message is appended, so the turn
+	// proceeds against the compacted history. Best-effort: on any error it
+	// leaves history untouched.
 	maybeCompact(ctx, cfg, sess)
 
-	// A purely inbox-seeded turn (RunQueued → empty prompt, no parts) has an
-	// empty initiating message; the queued text arrives via the inbox-drain
-	// reminder below. Don't persist an empty, part-less user message — it would
-	// replay as an empty user turn (rejected by real providers) on later turns.
+	// An inbox-seeded turn has an empty initiating message; its text arrives
+	// through the drain reminder below. Persisting the empty one would replay
+	// as an empty user turn, which real providers reject.
 	inboxSeeded := userMsg.Content == "" && len(userMsg.ContentParts) == 0
 	if !inboxSeeded {
 		sess.append(userMsg)
@@ -120,12 +111,10 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage)
-			// totalUsage's PromptTokens is deliberately "latest round wins" (see
-			// addUsage's doc comment) — right for the context-fullness gauge, wrong
-			// for cost: a tool-heavy turn's later rounds re-send and pay for the
-			// whole growing prompt again, so the ledger sums every round's prompt
-			// count raw rather than reusing totalUsage's merged value. Understating
-			// this is exactly the shape of the incident that motivated this task.
+			// totalUsage's PromptTokens is "latest round wins" — right for the
+			// context gauge, wrong for cost: a tool-heavy turn's later rounds
+			// re-send and pay for the whole growing prompt again. The ledger
+			// therefore sums each round raw rather than reusing the merge.
 			sess.turnUsage.PromptTokens += usage.PromptTokens
 			sess.turnUsage.CompletionTokens += usage.CompletionTokens
 		}
@@ -134,20 +123,17 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 		if err != nil {
 			logStreamError(cfg, allMsgs, err)
-			// Capture the typed error into a fresh local so terminalEmit carries
-			// the value itself (errors.Is/As survives the public boundary), and so
-			// the capture stays correct if this site is ever refactored away from
-			// the immediate return.
+			// Capture into a fresh local so terminalEmit carries the value
+			// itself and errors.Is/As survives the public boundary.
 			streamErr := err
 			terminalEmit = func() { emitError(sess, streamErr) }
 			return
 		}
-		// A capped response just stops mid-sentence — the provider reports it
-		// only as finish_reason "length", so without this the user sees a
-		// mangled reply and no reason for it. The notice rides the token
-		// stream (front-ends build the reply from tokens) AND stays in the
-		// recorded message, so the next round the model knows its own previous
-		// output was cut rather than treating it as something it chose to say.
+		// A capped response stops mid-sentence, reported only as finish_reason
+		// "length", so without this the user sees a mangled reply and no
+		// reason. The notice rides the token stream AND stays in the recorded
+		// message, so next round the model knows its output was cut rather
+		// than something it chose to say.
 		if truncated {
 			emitAssistantToken(sess, truncationNotice)
 			text += truncationNotice
@@ -156,13 +142,10 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			emitAssistantMessage(sess, text)
 		}
 
-		// Replace provider-emitted tool-call ids with sequential session-scoped
-		// decimal ids ("1", "2", ...). Provider-native ids like "web_fetch:0"
-		// get truncated by models when echoed back, breaking id-based tool-result
-		// addressing; a bare integer has no
-		// separator to chop at. The provider pairs ids by string match between
-		// assistant.tool_calls[i].id and tool.tool_call_id, so the rewrite is
-		// transparent on the wire.
+		// Replace provider ids with sequential decimal ones. Native ids like
+		// "web_fetch:0" get truncated by models when echoed back, breaking
+		// id-based addressing; a bare integer has no separator to chop at.
+		// Pairing is by string match, so the rewrite is transparent on the wire.
 		for i := range toolCalls {
 			toolCalls[i].ID = sess.allocToolCallID()
 		}
@@ -184,8 +167,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			return
 		}
 
-		// Execute tool calls. toolErr (distinct from the stream err above) is
-		// non-nil only on context cancellation observed during the tool loop.
+		// toolErr, unlike the stream err above, is non-nil only on a
+		// cancellation observed during the tool loop.
 		outcome, toolErr := executeToolCalls(ctx, cfg, sess, toolCalls, toolSchemas, allMsgs)
 		if toolErr != nil {
 			turnErr := toolErr
@@ -194,25 +177,20 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 		allMsgs = outcome.allMsgs
 
-		// After all tool results are appended, check if a reminder is due
-		// before the next LLM round. Append to the last tool message in
-		// allMsgs only — sess.messages stays clean.
-		// Count bytes across all of allMsgs (including pruned replacements)
-		// so prune is automatically reflected without any delta tracking.
+		// A reminder due before the next round appends to the last tool
+		// message in allMsgs only; sess.messages stays clean. Counting bytes
+		// across all of allMsgs reflects pruning with no delta tracking.
 		injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)), true)
-		// Mid-turn: deliver user steering promptly (it's interactive), but leave
-		// host notifications queued — a finished background task waits for a turn
-		// boundary so it never interrupts the in-flight turn.
-		steerTexts, _, userParts := sess.drainInbox(true)
+		// Mid-turn: steering is interactive and delivered now; notices wait for
+		// a turn boundary so a finished task never interrupts this turn.
+		steerTexts, _ := sess.drainInbox(true)
 		injectAndEmit(sess, &allMsgs, reminderBlock(steerReminderHeader, steerTexts), true)
 
-		// read_media results are text-only (tool messages can't carry media), so
-		// files it loaded — plus any attachments the user interjected during the
-		// round — are appended here as a synthetic user message, the only role
-		// the adapter renders image/audio parts for. This runs after the
-		// reminder block so the reminder lands on the last tool message (text),
-		// not on this parts-carrying user message.
-		if msg, ok := attachmentsMessage(outcome.pendingMedia, userParts); ok {
+		// Tool messages cannot carry media, so read_media's files are appended
+		// as a synthetic user message — the only role the adapter renders
+		// parts for. After the reminder block, so the reminder lands on the
+		// last tool message rather than this parts-carrying one.
+		if msg, ok := attachmentsMessage(outcome.pendingMedia); ok {
 			allMsgs = append(allMsgs, msg)
 			sess.append(msg)
 		}
@@ -220,11 +198,9 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 }
 
 // injectAndEmit adds reminder r to the outbound context and mirrors it on the
-// event stream; no-op for "". appendToLast=false places it via injectReminder
-// (the turn-start path: the reminder rides the turn's user message);
-// appendToLast=true appends to the trailing message (the mid-turn path: the
-// reminder rides the round's last tool message, never a parts-carrying user
-// message).
+// event stream, no-op for "". appendToLast=false uses injectReminder, so the
+// reminder rides the turn's user message; true appends to the trailing
+// message, the mid-turn path onto the round's last tool message.
 func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast bool) {
 	if r == "" {
 		return
@@ -237,38 +213,29 @@ func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast
 	emitSystemReminder(sess, r)
 }
 
-// assembleTurnContext builds the provider-bound context for one turn: system
-// prompt + history + standing reminders (+ headless reminder), the tool list
-// and its schema index, then the turn-start reminder-and-inbox drain (a fresh
-// turn is a clean boundary, so BOTH user steering and host notifications are
-// delivered, each as its own labeled block). Parts queued while idle are
-// appended — to allMsgs and to sess — as a user message AFTER the reminders,
-// so a reminder never lands on a parts-carrying message (only user messages
-// can carry media; consecutive user messages are fine on the wire).
+// assembleTurnContext builds one turn's provider-bound context: system prompt
+// + history + standing reminders, the tool list and schema index, then the
+// turn-start inbox drain. A fresh turn is a clean boundary, so BOTH steering
+// and notices are delivered, each in its own labeled block.
 //
-// skip=true reports a wake/inbox-seeded turn that delivers nothing to the
-// provider: an empty initiating message, a drained inbox whose items were all
-// whitespace-only, no media parts, and no prior history. allMsgs would
-// otherwise be just [system] — a system-only request a strict provider may
-// reject — so the caller ends the turn cleanly (turn_done, no stream call).
+// skip=true means the turn delivers nothing: empty initiating message, a
+// drained inbox of only whitespace, no history. allMsgs would be just
+// [system], which a strict provider may reject, so the caller ends cleanly.
 func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMsgs []llm.Message, toolList []llm.ToolDefinition, toolSchemas map[string]map[string]any, skip bool) {
 	msgs := sess.messages
 
-	// The system prompt is re-rendered per turn when the config wires a
-	// refresher: context files (agent.md frontmatter `context:`) and the
-	// prompt's timestamp track the disk NOW, not the session-creation
-	// snapshot — a long-lived conversation would otherwise serve stale
-	// context until /new or a restart.
+	// Re-rendered per turn when a refresher is wired, so context: files track
+	// the disk NOW; otherwise a long-lived conversation serves the
+	// session-creation snapshot until /new or a restart.
 	sysPrompt := renderSystemPrompt(cfg)
 	recordTurnPrompt(cfg, sess, sysPrompt, len(msgs))
 	allMsgs = make([]llm.Message, 0, len(msgs)+1)
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: sysPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
-	// Standing reminders (host Environment context) sit right after
-	// the system prompt every turn. Set by SetStandingReminders and regenerated
-	// on resume — not persisted. Snapshot via the accessor (msgMu): an agent
-	// switch may replace the slice while a turn is in flight.
+	// Standing reminders sit right after the system prompt every turn,
+	// regenerated on resume rather than persisted. Snapshot via the accessor:
+	// an agent switch may replace the slice mid-turn.
 	for _, r := range sess.StandingReminders() {
 		allMsgs = injectReminder(allMsgs, r)
 	}
@@ -278,16 +245,14 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 		allMsgs = injectReminder(allMsgs, headlessReminder)
 	}
 
-	// Schema index for fast lookup during tool call validation.
 	toolSchemas = make(map[string]map[string]any, len(toolList))
 	for _, td := range toolList {
 		toolSchemas[td.Name] = td.Parameters
 	}
 
-	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
-	// A delivered report leaves a durable one-line trace in history BEFORE any
-	// reminder injects, so the reminders land on it and the agent's reply has a
-	// visible cause on every later turn. The full report stays ephemeral.
+	steerTexts, noticeTexts := sess.drainInbox(false)
+	// A delivered report leaves its one-line trace BEFORE any reminder
+	// injects, so reminders land on it and the reply keeps a visible cause.
 	if trace := reportTrace(noticeTexts); trace != "" {
 		msg := llm.Message{Role: llm.RoleUser, Content: trace}
 		allMsgs = append(allMsgs, msg)
@@ -298,37 +263,22 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
 	injectAndEmit(sess, &allMsgs, steerReminder, false)
 	injectAndEmit(sess, &allMsgs, noticeReminder, false)
-	if msg, ok := attachmentsMessage(nil, userParts); ok {
-		allMsgs = append(allMsgs, msg)
-		sess.append(msg)
-	}
 
-	skip = inboxSeeded && steerReminder == "" && noticeReminder == "" && len(userParts) == 0 && len(msgs) == 0
+	skip = inboxSeeded && steerReminder == "" && noticeReminder == "" && len(msgs) == 0
 	return allMsgs, toolList, toolSchemas, skip
 }
 
-// attachmentsMessage builds the synthetic user message that delivers media
-// parts mid-conversation: read_media loads from the last tool round and/or
-// attachments the user sent via Interject. Tool messages can't carry media
-// and the adapter renders image/audio parts only on user messages, so this is
-// the single injection point. The trailing text part tells the model where
-// the media came from. ok is false when there is nothing to deliver.
-func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, bool) {
-	total := len(readMedia) + len(userSent)
-	if total == 0 {
+// attachmentsMessage delivers the media read_media loaded this round. Tool
+// messages cannot carry it and the adapter renders parts only on user
+// messages, so this is the single injection point; the trailing text part says
+// where the media came from. ok is false when there is nothing to deliver.
+func attachmentsMessage(readMedia []llm.ContentPart) (llm.Message, bool) {
+	if len(readMedia) == 0 {
 		return llm.Message{}, false
 	}
-	parts := make([]llm.ContentPart, 0, total+1)
+	parts := make([]llm.ContentPart, 0, len(readMedia)+1)
 	parts = append(parts, readMedia...)
-	parts = append(parts, userSent...)
-	var notes []string
-	if len(readMedia) > 0 {
-		notes = append(notes, fmt.Sprintf("%d file(s) you loaded with read_media", len(readMedia)))
-	}
-	if len(userSent) > 0 {
-		notes = append(notes, fmt.Sprintf("%d attachment(s) sent by the user", len(userSent)))
-	}
-	label := strings.Join(notes, "; ")
+	label := fmt.Sprintf("%d file(s) you loaded with read_media", len(readMedia))
 	parts = append(parts, llm.ContentPart{
 		Type: llm.ContentPartTypeText,
 		Text: "Above are the attached media file(s): " + label + ".",
@@ -340,21 +290,16 @@ func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, boo
 	}, true
 }
 
-// toolLoopState is the mutable state one tool-execution loop threads through
-// its handlers, and — dereferenced — the outcome it reports: the working
-// message slice and the media parts read_media collects for post-loop
-// injection. These were two identical structs (toolLoopOutcome and
-// toolLoopState) in this same file, converted into each other field by field
-// at every return.
+// toolLoopState is what one tool loop threads through its handlers and
+// reports back: the working message slice and read_media's collected parts.
 type toolLoopState struct {
 	allMsgs      []llm.Message     // updated slice
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
 }
 
-// turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
-// than in the shared NewHandlers map, because they need state beyond
-// ToolConfig: read_media collects media parts for the post-loop user message.
-// They close over st, so they are rebuilt for each executeToolCalls invocation.
+// turnScopedHandlers builds the handlers that need state beyond ToolConfig —
+// read_media collects parts for the post-loop message. They close over st, so
+// they are rebuilt per executeToolCalls call.
 func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
@@ -367,25 +312,19 @@ func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandle
 	}
 }
 
-// executeToolCalls runs the assistant's tool calls in order, emitting
-// tool_call/tool_result events and appending each tool message to both allMsgs
-// and the session. It returns the updated allMsgs.
-//
-//   - a non-nil error means the context was cancelled mid-loop; the caller
-//     emits an error terminal event and ends the turn.
-//   - otherwise the loop completed normally; outcome.allMsgs carries the
-//     updated message slice for the next round.
+// executeToolCalls runs the tool calls in order, emitting events and
+// appending each tool message to allMsgs and the session. A non-nil error
+// means the context was cancelled mid-loop and the caller ends the turn;
+// otherwise outcome.allMsgs carries the slice for the next round.
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopState, error) {
 	st := &toolLoopState{allMsgs: allMsgs}
 	turnScoped := turnScopedHandlers(cfg, st)
 	for i, tc := range toolCalls {
 		if ctx.Err() != nil {
-			// Cancelled mid-loop. The assistant message carrying these tool_calls
-			// is already persisted, and OpenAI-compatible APIs require a tool
-			// result for every tool_call id — a gap makes the NEXT request 400
-			// ("tool call result does not follow tool call"). Backfill a synthetic
-			// cancelled result for this and every remaining call so the session
-			// stays replayable, then surface the cancellation.
+			// Cancelled mid-loop. The assistant message is already persisted
+			// and every tool_call id needs a result — a gap 400s the NEXT
+			// request — so backfill a synthetic cancelled result for this and
+			// every remaining call, then surface the cancellation.
 			for _, rem := range toolCalls[i:] {
 				appendToolResult(sess, st, rem, errResult("error: tool call cancelled"))
 			}
@@ -394,17 +333,14 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
 		res, invalid := validateCall(toolSchemas, tc)
-		// If validation failed, res already carries the typed reason and we skip
-		// dispatch. Otherwise gate, then resolve a handler — turn-scoped first,
-		// then the custom dispatchers, then the shared built-ins (custom before
-		// built-ins so a config-declared tool name always wins) — and run it
-		// through the single execute path.
+		// On a validation failure res already carries the reason. Otherwise
+		// gate, then resolve a handler: turn-scoped, then custom dispatchers,
+		// then built-ins — custom first, so a declared tool name always wins.
 		if !invalid {
-			// The tool-call hook is the only policy surface, and it fires before
-			// every tool. The bash family (bash, bash_bg) self-gates inside its
-			// handlers, where command rewrite and runner-swap are resolved; every
-			// other tool is gated here by name/args (block / ask only — t.command
-			// is nil for them).
+			// The gate is the only policy surface and fires before every tool.
+			// The bash family self-gates in its handlers, where rewrite and
+			// runner-swap resolve; everything else is gated here by name and
+			// args, pass or block only, with a nil command.
 			gateMsg, gateBlocked := "", false
 			if !isBashTool(tc.Name) {
 				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg.ToolConfig, tc.Name, tc.RawArgs)
@@ -426,11 +362,10 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), cfg.ToolConfig)
 					res = classifyHandlerOutput(out)
 					if herr != nil {
-						// Most handlers encode failures in their output string and
-						// return a nil error; a non-nil error is a genuine handler
-						// fault (e.g. bash_bg failing to spawn). Log it, and if the
-						// handler left no output, surface the error to the model as a
-						// tool error rather than emitting an empty result.
+						// Handlers normally encode failure in their output, so a
+						// non-nil error is a genuine fault. Log it, and with no
+						// output surface it to the model rather than an empty
+						// result.
 						cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
 						if out == "" {
 							res = errResult("error: " + herr.Error())
@@ -452,15 +387,13 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 	return *st, nil
 }
 
-// appendToolResult emits the tool_result event and appends the tool message to
-// both the in-flight slice and the persisted session. Every tool_call must get
-// exactly one of these (OpenAI requires strict tool_call/tool_result pairing),
-// so it is the single append site for both the normal and cancelled paths.
+// appendToolResult emits the tool_result event and appends the tool message
+// to both the in-flight slice and the session. Every tool_call needs exactly
+// one, so this is the single append site for the normal and cancelled paths.
 func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res toolResult) {
 	emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
-	// Prepend the tool_call_id so there is a stable handle for the result in the
-	// rendered transcript. Without this the id only lives in structured
-	// metadata, which is not visible in the rendered result.
+	// Prepend the tool_call_id: without it the handle lives only in structured
+	// metadata, invisible in the rendered transcript.
 	content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
 	toolMsg := llm.Message{
 		Role:       llm.RoleTool,
@@ -472,10 +405,9 @@ func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res too
 	sess.append(toolMsg)
 }
 
-// validateCall checks tc's arguments against the tool's schema (when one is
-// registered). invalid is true when validation failed, in which case res
-// carries the error result to send back to the model; otherwise the call
-// should proceed to dispatch (invalid false, res zero).
+// validateCall checks tc's arguments against the tool's schema when one is
+// registered. invalid means res carries the error result for the model;
+// otherwise the call proceeds to dispatch and res is zero.
 func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res toolResult, invalid bool) {
 	schema, ok := toolSchemas[tc.Name]
 	if !ok {
@@ -491,12 +423,11 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 // cap. Raising the model's max_tokens is the fix, so the notice names it.
 const truncationNotice = "\n\n⚠️ [output cut off — hit the model's max_tokens limit]"
 
-// IsTruncatedReply reports whether assistant text carries the truncation
-// notice. A front-end that renders the reply for a human can ignore this — the
-// notice speaks for itself — but one that consumes the text PROGRAMMATICALLY
-// must check: the notice rides the reply itself, not any error channel, so a
-// cut-off reply is otherwise indistinguishable from a complete one and the
-// marker ends up stored as if it were content.
+// IsTruncatedReply reports the truncation notice in assistant text. A
+// front-end rendering for a human can ignore it — the notice speaks for
+// itself — but one consuming the text PROGRAMMATICALLY must check: the notice
+// rides the reply, not an error channel, so a cut-off reply is otherwise
+// indistinguishable from a complete one.
 func IsTruncatedReply(text string) bool {
 	return strings.Contains(text, truncationNotice)
 }
@@ -536,16 +467,13 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 	return sb.String(), rb.String(), toolCalls, usage, truncated, streamErr
 }
 
-// addUsage accumulates token usage across the multiple LLM requests that can
-// make up one agent turn when tools are involved.
-// Each round re-sends the full context, so prompt tokens are not additive —
-// only the latest round's prompt count is meaningful. Completion tokens are
-// genuinely additive across rounds.
+// addUsage accumulates usage across the rounds one turn can take. Each round
+// re-sends the full context, so prompt tokens are not additive and only the
+// latest count is meaningful; completion tokens genuinely are.
 func addUsage(a, b llm.Usage) llm.Usage {
 	completion := a.CompletionTokens + b.CompletionTokens
-	// A follow-up round may stream completion tokens but omit the prompt count
-	// (PromptTokens=0); keep the last known prompt count rather than zeroing the
-	// reported prompt/total for that round.
+	// A follow-up round may omit the prompt count; keep the last known one
+	// rather than zeroing the round's reported prompt and total.
 	prompt, cached := b.PromptTokens, b.CachedTokens
 	if prompt == 0 {
 		prompt, cached = a.PromptTokens, a.CachedTokens
@@ -558,28 +486,23 @@ func addUsage(a, b llm.Usage) llm.Usage {
 	}
 }
 
-// saveHistory persists new messages to the runs store after a turn. Append
-// failures are logged but not fatal — history is best-effort, but a silent
-// drop would hide real faults (a full disk), so they surface via lg.
+// saveHistory persists a turn's new messages. Append failures are logged, not
+// fatal — history is best-effort, but a silent drop would hide a full disk.
 //
-// On a compacting turn, maybeCompact runs before the user message is appended
-// and resets sess.messages to a short continuation (2 messages) while
-// sess.persistedLen is set to that length. This function uses persistedLen as
-// the high-water mark so it always flushes exactly the new messages appended
-// during this turn regardless of whether compaction ran.
+// It flushes from persistedLen, the high-water mark, so a compacting turn —
+// where maybeCompact already reset sess.messages and that mark together —
+// still flushes exactly this turn's new messages.
 func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID string) {
 	if st == nil {
 		return
 	}
 	if sess.persistedLen > len(sess.messages) {
-		// Shouldn't happen, but guard against it.
 		return
 	}
 	sess.persistedLen += flushMessages(st, lg, sessionID, sess.messages[sess.persistedLen:])
-	// Persist the provider-reported prompt-token count alongside the messages so
-	// a resume restores the accurate context gauge (not the chars/4 estimate) and
-	// the first resumed turn's prune/compaction fires. Best-effort like the flush
-	// above; a no-op when the count is unchanged.
+	// Persist the provider-reported prompt count so a resume restores the
+	// accurate gauge rather than the chars/4 estimate. Best-effort, and a
+	// no-op when unchanged.
 	if sess.lastPromptTokens > 0 {
 		if err := st.SetLastPromptTokens(sessionID, sess.lastPromptTokens); err != nil {
 			lg.Warn("persist prompt tokens failed", "session_id", sessionID, "error", err)

@@ -9,10 +9,9 @@ import (
 	robcron "github.com/robfig/cron/v3"
 )
 
-// FileName is the kit a config directory is read from. Its presence is what
-// makes a directory a shell3 config — there is no second format. It lives
-// here because this package defines the format; config and agentsetup used to
-// carry a copy each.
+// FileName is the kit a config directory is read from; its presence is what
+// makes a directory a shell3 config. It lives here because this package
+// defines the format.
 const FileName = "shell3.sh"
 
 // Tool is one declared verb: what the model sees, plus the shell function that
@@ -23,36 +22,24 @@ type Tool struct {
 	Line             int
 }
 
-// Skill is knowledge an agent reads; Func emits the body on stdout.
-type Skill struct {
-	Name, Func string
-	// Body is the skill's prose, read statically from its heredoc at parse
-	// time — a kit is never executed to learn what it says.
-	Body string
-	Line int
-}
-
-// Command is one declared host command: a verb the front-end answers by
-// running Func, with no model turn and no tokens spent. Commands are
-// install-wide rather than scoped to an agent.
+// Command is a verb the front-end answers by running Func, with no model turn.
+// Commands are install-wide rather than scoped to an agent.
 type Command struct {
 	Name, Desc, Func string
 	Line             int
 }
 
-// EventHook is one declared event subscriber: Func receives the JSON for each
-// event whose kind is named in On. It observes only — its stdout is ignored,
-// and it can neither refuse nor rewrite anything.
+// EventHook receives the JSON for each event whose kind is named in On. It
+// observes only: stdout ignored, nothing it can refuse or rewrite.
 type EventHook struct {
 	Func string
 	On   []string
 	Line int
 }
 
-// EventNames are the event kinds an `event:` block may subscribe to. They
-// mirror chat.EventKind.String(); internal/chat's kit_events_test.go pins the
-// two lists together, which is why this one can live here without kit
-// importing the runtime.
+// EventNames mirror chat.EventKind.String(). internal/chat's
+// kit_events_test.go pins the two lists together, which is what lets this one
+// live here without kit importing the runtime.
 var EventNames = []string{
 	"session_end",
 	"user_message",
@@ -69,12 +56,10 @@ var EventNames = []string{
 	"compacted",
 }
 
-// ReservedCommands are the verbs a front-end answers itself. A `command:`
-// block may not declare one: the built-in is matched first at dispatch, so
-// the declaration would never fire and its author would have no way to see
-// why. Mirrors telegram.BotCommands(); internal/telegram's
-// kitcommands_test.go pins the two lists together, which is why this one can
-// live here without kit importing a front-end.
+// ReservedCommands are the verbs a front-end answers itself. A command: block
+// may not declare one — the built-in is matched first, so the declaration
+// would never fire and its author could not see why. kitcommands_test.go pins
+// this against telegram.BotCommands().
 var ReservedCommands = []string{
 	"ask",
 	"help",
@@ -91,23 +76,20 @@ var ReservedCommands = []string{
 // CronJob is one declared scheduled job. Exactly one of Agent (dispatch that
 // agent with Prompt) or Tool (run that kit tool directly, with no model turn)
 // is set; the tool form binds no function at all, so Func and Prompt are
-// empty. Jobs are declaration-ordered — nothing depends on the order, but it
-// is stable, where the cron/<name>.md format it replaced was filename-sorted.
+// empty. Jobs are declaration-ordered; nothing depends on the order.
 type CronJob struct {
 	Name, Schedule, Agent, Tool string
 	// Prompt is the agent job's prompt, read statically from the heredoc in
 	// the function under the block — the same way an agent's own prompt is.
 	Prompt string
-	// Func is the function the prompt was read out of. Kept for the same
-	// reason Agent.PromptFunc is: it names the definition an author's error
-	// points at.
+	// Func is where the prompt was read from, kept so an author's error names
+	// the definition it points at.
 	Func string
 	// WorkDir overrides the shell the job runs in.
 	WorkDir string
-	// Direct posts the run's raw result straight to the user, skipping the
-	// default agent-mail turn. The cost valve: a default tick wakes the main
-	// model to judge its result; a direct one costs no tokens at all. Only an
-	// agent job may set it — a tool job already posts its own result.
+	// Direct posts the raw result to the user, skipping the agent-mail turn —
+	// the cost valve, since a default tick wakes the main model to judge it.
+	// Agent jobs only; a tool job already posts its own result.
 	Direct bool
 	Line   int
 }
@@ -118,34 +100,30 @@ type Test struct {
 	Line       int
 }
 
-// Agent is one declared agent: prompt, capability list, and everything scoped
-// under it.
+// Agent is one declared agent and everything scoped under it.
 type Agent struct {
 	Name, Desc, Model, Workdir, PromptFunc string
 	// Prompt is the system prompt, read statically from the prompt function's
 	// heredoc.
 	Prompt string
 	Use    []string
-	// Context lists config-dir-relative files re-read at every turn start and
-	// appended to the prompt — an agent's live memory.
+	// Context lists files re-read at every turn start and appended to the
+	// prompt — an agent's live memory.
 	Context []string
-	// MCP is the `mcp:` opt-in: the wiring's mcp server names whose tools this
-	// agent gets. MCPAll is the `mcp: all` form. Both empty/false (the
-	// default) means no MCP tools.
+	// MCP names the servers whose tools this agent gets; MCPAll is `mcp: all`.
+	// Neither set means no MCP tools.
 	MCP    []string
 	MCPAll bool
 	Tools  []Tool
-	Skills []Skill
 	Tests  []Test
 	Line   int
 }
 
-// Group is a shared bundle of tools and skills that agents import via `use:`.
+// Group is a shared bundle of tools that agents import via `use:`.
 type Group struct {
-	Name   string
-	Tools  []Tool
-	Skills []Skill
-	Line   int
+	Name  string
+	Tools []Tool
+	Line  int
 }
 
 // Kit is a parsed kit file.
@@ -154,14 +132,13 @@ type Kit struct {
 	Agents []Agent
 	Shared []Group
 	// Gates and Notes map an agent name to the shell function governing its
-	// tool calls (before) and tool results (after). Both are declared in the
-	// kit rather than as hooks/*.sh files, so an install is one file.
+	// tool calls (before) and tool results (after).
 	Gates map[string]string
 	Notes map[string]string
 	// Events maps an agent name to the subscriber observing its event stream.
 	Events map[string]EventHook
-	// Commands maps a command name to its declaration. Keyed by command
-	// rather than by agent: a host command belongs to the install.
+	// Commands is keyed by command, not agent: a host command belongs to the
+	// install.
 	Commands map[string]Command
 	// Crons are the scheduled jobs, in declaration order.
 	Crons []CronJob
@@ -187,10 +164,10 @@ func Parse(src []byte) (*Kit, error) {
 		seenFunc[f.name] = f.line
 	}
 
-	// nextBlockLine is the ceiling for binding: a declaration owns the function
-	// under it only if that function appears before the next declaration.
-	// Without it, an agent block whose prompt function is missing silently binds
-	// the following tool's implementation instead.
+	// nextBlockLine is the binding ceiling: a declaration owns the function
+	// under it only if that function precedes the next declaration. Without
+	// it, an agent block with no prompt function silently binds the following
+	// tool's implementation.
 	nextBlockLine := func(n int) int {
 		for _, b := range blocks {
 			if b.line > n {
@@ -258,10 +235,9 @@ func Parse(src []byte) (*Kit, error) {
 			}
 
 		case declCommand:
-			// Positional like tool:, because a command names itself. It is
-			// deliberately NOT scoped to the open agent — a host command is
-			// answered by the front-end, not by a model, so there is no agent
-			// for it to belong to.
+			// Positional like tool:, but NOT scoped to the open agent: a
+			// command is answered by the front-end, not a model, so there is
+			// no agent for it to belong to.
 			if d.desc == "" {
 				return nil, fmt.Errorf("line %d: command %q needs a description — it is registered in the front-end's command menu", d.line, d.name)
 			}
@@ -281,9 +257,8 @@ func Parse(src []byte) (*Kit, error) {
 			k.Commands[d.name] = Command{Name: d.name, Desc: d.desc, Func: f.name, Line: d.line}
 
 		case declCron:
-			// Positional in form like tool:/command:, but scoped to NOTHING:
-			// a job names its own target agent, so it must not open, close,
-			// or disturb the scope tool:/skill: blocks file into.
+			// Positional in form, scoped to NOTHING: a job names its own
+			// target, so it must not open, close or disturb the tool scope.
 			job, jerr := cronFromDecl(d, srcLines, nextFunc)
 			if jerr != nil {
 				return nil, jerr
@@ -297,18 +272,17 @@ func Parse(src []byte) (*Kit, error) {
 
 		case declGate, declNote, declEvent:
 			// Gates and notes are NOT positional: they name the agents they
-			// govern, because one function usually governs several (a subagent
-			// with no gate of its own runs ungated, and copying the rules is
-			// how they drift apart). They may appear anywhere in the file.
+			// govern, because one function usually governs several and a copy
+			// per agent is how two rule sets drift apart.
 			f, ok := nextFunc(d.endLine)
 			if !ok {
 				return nil, fmt.Errorf("line %d: %s %q has no function under it", d.line, d.kind, d.name)
 			}
 			if d.kind == declEvent {
-				// on: is mandatory. assistant_token fires once per streamed
-				// token, so an unfiltered subscriber would fork a shell
-				// thousands of times per turn — the filter is what makes this
-				// hook affordable, not a convenience.
+				// on: is mandatory. assistant_token fires per streamed token,
+				// so an unfiltered subscriber would fork a shell thousands of
+				// times per turn: the filter is what makes the hook
+				// affordable, not a convenience.
 				if len(d.on) == 0 {
 					return nil, fmt.Errorf("line %d: event %q needs an on: list naming the event kinds it receives (one of %s)", d.line, d.name, strings.Join(EventNames, ", "))
 				}
@@ -342,7 +316,7 @@ func Parse(src []byte) (*Kit, error) {
 				(*target)[agent] = f.name
 			}
 
-		case declTool, declSkill, declTest:
+		case declTool, declTest:
 			if curAgent == nil && curGroup == nil {
 				return nil, fmt.Errorf("line %d: %s %q appears before any agent or shared block", d.line, d.kind, d.name)
 			}
@@ -350,20 +324,19 @@ func Parse(src []byte) (*Kit, error) {
 			if !ok {
 				return nil, fmt.Errorf("line %d: %s %q has no function under it", d.line, d.kind, d.name)
 			}
-			if err := attach(curAgent, curGroup, d, f, srcLines); err != nil {
+			if err := attach(curAgent, curGroup, d, f); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	// Checked after the loop, not inside it: a gate may be declared above the
-	// agent it governs, and a typo'd name must not silently mean "ungated".
+	// After the loop: a gate may be declared above the agent it governs, and
+	// a typo'd name must not silently mean "ungated".
 	known := map[string]bool{}
 	for _, a := range k.Agents {
 		known[a.Name] = true
 	}
-	// Ordered, not a map range: when both a gate and a note name an unknown
-	// agent, the error text must be the same on every run.
+	// Ordered, not a map range, so the error text is stable across runs.
 	for _, decl := range []struct {
 		kind string
 		m    map[string]string
@@ -379,9 +352,8 @@ func Parse(src []byte) (*Kit, error) {
 			return nil, fmt.Errorf("event names agent %q, which this kit does not declare", agent)
 		}
 	}
-	// Cron targets resolve here for the same reason gate targets do: a job
-	// that cannot fire must fail at load, not at 3am on its first tick, in
-	// the app log, hours after anyone looked.
+	// As with gate targets: a job that cannot fire must fail at load, not at
+	// 3am on its first tick, in a log nobody is reading.
 	if err := checkCronTargets(k, known); err != nil {
 		return nil, err
 	}
@@ -393,24 +365,20 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 	if d.schedule == "" {
 		return CronJob{}, fmt.Errorf("line %d: cron %q needs a schedule", d.line, d.name)
 	}
-	// The same parser cron.New uses at arm time, so a schedule that loads is
-	// a schedule that boots.
+	// The parser cron.New uses at arm time, so a schedule that loads boots.
 	if _, err := robcron.ParseStandard(d.schedule); err != nil {
 		return CronJob{}, fmt.Errorf("line %d: cron %q has invalid schedule %q: %v", d.line, d.name, d.schedule, err)
 	}
-	// A job is either a prompt (agent:) or a tool call (tool:), never both
-	// and never neither — a job with no move at all is a config mistake, not
-	// a no-op.
+	// A job is either a prompt or a tool call, never both and never neither:
+	// one with no move at all is a mistake, not a no-op.
 	switch {
 	case d.cronAgnt != "" && d.cronTool != "":
 		return CronJob{}, fmt.Errorf("line %d: cron %q sets both agent: and tool: — exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
 	case d.cronAgnt == "" && d.cronTool == "":
 		return CronJob{}, fmt.Errorf("line %d: cron %q needs exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
 	case d.cronTool != "" && d.direct:
-		// direct: true only means something for an agent job (raw post, no
-		// report turn) — a tool job already posts its own result with no
-		// agent turn around it at all, so direct: true on one is a no-op
-		// that silently does nothing.
+		// direct: means something only for an agent job. A tool job already
+		// posts its own result with no agent turn, so it would do nothing.
 		return CronJob{}, fmt.Errorf("line %d: cron %q sets both tool: and direct: — direct only applies to an agent: job (a tool job already posts its own result with no agent turn)", d.line, d.name)
 	}
 	job := CronJob{
@@ -418,8 +386,8 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 		WorkDir: d.workdir, Direct: d.direct, Line: d.line,
 	}
 	if job.Tool != "" {
-		// A tool job has no prompt, so it binds NO function: the next
-		// definition in the file is somebody else's implementation.
+		// A tool job has no prompt and binds NO function: the next definition
+		// is somebody else's implementation.
 		return job, nil
 	}
 	f, ok := nextFunc(d.endLine)
@@ -434,10 +402,10 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 	return job, nil
 }
 
-// checkCronTargets resolves every job's agent or tool against the whole kit.
-// A tool job names no agent, so there is no Resolved capability set to search
-// — the operator scheduling a tool they declared themselves is the trust
-// boundary, and positional use: scoping still bounds what a MODEL may call.
+// checkCronTargets resolves every job's target against the whole kit. A tool
+// job names no agent, so there is no Resolved set to search: the operator
+// scheduling their own tool is the trust boundary, and use: scoping still
+// bounds what a MODEL may call.
 func checkCronTargets(k *Kit, known map[string]bool) error {
 	for _, j := range k.Crons {
 		if j.Tool == "" {
@@ -471,8 +439,8 @@ func checkCronTargets(k *Kit, known map[string]bool) error {
 	return nil
 }
 
-// attach files a tool/skill/test onto whichever scope is open.
-func attach(a *Agent, g *Group, d decl, f fnDef, srcLines []string) error {
+// attach files a tool or test onto whichever scope is open.
+func attach(a *Agent, g *Group, d decl, f fnDef) error {
 	switch d.kind {
 	case declTool:
 		if d.desc == "" {
@@ -505,18 +473,6 @@ func attach(a *Agent, g *Group, d decl, f fnDef, srcLines []string) error {
 			a.Tools = append(a.Tools, t)
 		} else {
 			g.Tools = append(g.Tools, t)
-		}
-
-	case declSkill:
-		body, err := extractHeredoc(srcLines, f.line, "skill", d.name)
-		if err != nil {
-			return fmt.Errorf("line %d: %w", d.line, err)
-		}
-		s := Skill{Name: d.name, Func: f.name, Body: body, Line: d.line}
-		if a != nil {
-			a.Skills = append(a.Skills, s)
-		} else {
-			g.Skills = append(g.Skills, s)
 		}
 
 	case declTest:

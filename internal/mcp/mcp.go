@@ -1,9 +1,8 @@
-// Package mcp is shell3's MCP client: tools only, stdio + streamable HTTP,
-// on the official modelcontextprotocol/go-sdk. A Manager connects every
-// declared server synchronously at build time (agentsetup.BuildParts), lists
-// tools once, and dispatches calls with one reconnect retry. No OAuth,
-// resources, prompts, sampling, or SSE; ToolListChanged is ignored — the tool
-// list is static until the next /reload rebuilds the Manager.
+// Package mcp is shell3's MCP client: tools only, stdio and streamable HTTP,
+// on the official go-sdk. A Manager connects every declared server
+// synchronously at build time, lists tools once, and dispatches with one
+// reconnect retry. No OAuth, resources, prompts, sampling or SSE, and
+// ToolListChanged is ignored — the list is static until the next /reload.
 package mcp
 
 import (
@@ -27,10 +26,12 @@ import (
 
 const defaultTimeout = 10 * time.Second
 
-// ToolPrefix + "<server>_<tool>" is the model-facing name of every MCP tool.
-// tool-call hook gates match on it (t.name), so the prefix is part of the
-// public config surface — never change it casually.
+// ToolPrefix + "<server>_<tool>" is every MCP tool's model-facing name. The
+// kit's gate matches on it, so the prefix is public config surface.
 const ToolPrefix = "mcp_"
+
+// toolName is the one place a server's tool gets its model-facing name.
+func toolName(server, tool string) string { return ToolPrefix + server + "_" + tool }
 
 // ServerStatus is one server's health for `shell3 health` and the Status view.
 type ServerStatus struct {
@@ -40,13 +41,13 @@ type ServerStatus struct {
 	Err       string `json:"err,omitempty"`
 }
 
-// dialFunc opens a transport for a server; swapped in tests for in-memory
-// transports. Called on initial connect and again on each renewal.
+// dialFunc opens a server's transport, on connect and on each renewal;
+// swapped for in-memory transports in tests.
 type dialFunc func(ctx context.Context, s config.MCPServer) (sdk.Transport, error)
 
-// serverConn is one declared server's live state. mu serializes connect,
-// renewal, and calls for this server (MCP stdio sessions are sequential
-// anyway; HTTP servers rarely benefit from parallel calls from one agent).
+// serverConn is one server's live state; mu serializes its connect, renewal
+// and calls. Stdio sessions are sequential anyway, and one agent rarely
+// benefits from parallel HTTP calls.
 type serverConn struct {
 	cfg     config.MCPServer
 	mu      sync.Mutex
@@ -95,8 +96,8 @@ func defaultDial(_ context.Context, s config.MCPServer) (sdk.Transport, error) {
 	if len(s.Command) > 0 {
 		cmd := exec.Command(s.Command[0], s.Command[1:]...)
 		cmd.Env = append(os.Environ(), envList(s.Env)...)
-		// Own process group so a terminal SIGINT to shell3 doesn't hit the
-		// server; shutdown stays the SDK's stdin-close → SIGTERM sequence.
+		// Its own process group, so a terminal SIGINT to shell3 misses the
+		// server; shutdown stays the SDK's stdin-close then SIGTERM.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		return &sdk.CommandTransport{Command: cmd}, nil
 	}
@@ -107,8 +108,8 @@ func defaultDial(_ context.Context, s config.MCPServer) (sdk.Transport, error) {
 	return &sdk.StreamableClientTransport{
 		Endpoint:   s.URL,
 		HTTPClient: client,
-		// Tools-only client: we never consume server-initiated notifications, so
-		// skip the standalone SSE stream (some servers mishandle the GET anyway).
+		// Tools-only: nothing consumes server-initiated notifications, so skip
+		// the standalone SSE stream, which some servers mishandle anyway.
 		DisableStandaloneSSE: true,
 	}, nil
 }
@@ -121,8 +122,8 @@ func envList(m map[string]string) []string {
 	return out
 }
 
-// headerTransport injects the configured headers into every request (the
-// bearer-token auth story: headers = { Authorization = "Bearer …" }).
+// headerTransport injects the configured headers — how bearer-token auth is
+// expressed: headers = { Authorization = "Bearer …" }.
 type headerTransport struct {
 	headers map[string]string
 	base    http.RoundTripper
@@ -135,13 +136,12 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// Connect dials every server in parallel (each under its own timeout), lists
-// tools, applies allow/deny, and indexes the prefixed names. A server that
-// fails to connect is left down with a returned warning — the config still
-// loads and its tools are simply absent until the next reload. A prefixed-name
-// collision is also a warning (first registration wins, deterministic because
-// servers are name-sorted): only detectable after a remote ListTools, a hard
-// failure here would let a remote server's tool rename brick a /reload.
+// Connect dials every server in parallel under its own timeout, lists tools,
+// applies allow/deny, and indexes the prefixed names. A server that fails is
+// left down with a warning: the config still loads and its tools are absent
+// until the next reload. A name collision is also a warning, first
+// registration winning deterministically — it is only detectable after a
+// remote ListTools, and failing hard would let a remote rename brick a reload.
 func (m *Manager) Connect(ctx context.Context) []string {
 	if ctx == nil { // e.g. a cobra command without an executed root
 		ctx = context.Background()
@@ -167,12 +167,11 @@ func (m *Manager) Connect(ctx context.Context) []string {
 			continue
 		}
 		for _, t := range sc.tools {
-			full := ToolPrefix + sc.cfg.Name + "_" + t.Name
+			full := toolName(sc.cfg.Name, t.Name)
 			if prev, dup := m.byTool[full]; dup {
-				// Ambiguous dispatch (e.g. server "a" tool "b_c" vs server "a_b"
-				// tool "c"). Drop the later tool with a warning rather than failing
-				// the whole load — the first registration wins deterministically
-				// (servers are sorted by name).
+				// Ambiguous dispatch — server "a" tool "b_c" against server
+				// "a_b" tool "c". Drop the later one with a warning; servers
+				// are name-sorted, so the winner is deterministic.
 				warns = append(warns, fmt.Sprintf(
 					"mcp: tool name collision on %q (server %q tool %q vs server %q tool %q) — keeping the first",
 					full, prev.sc.cfg.Name, prev.tool, sc.cfg.Name, t.Name))
@@ -199,8 +198,7 @@ func (m *Manager) connectLocked(ctx context.Context, sc *serverConn) {
 		sc.up, sc.lastErr = false, err
 		return
 	}
-	// sess.Tools follows nextCursor across pages — a plain ListTools would
-	// silently stop at the server's first page.
+	// sess.Tools follows nextCursor; a plain ListTools stops at page one.
 	var tools []*sdk.Tool
 	for t, err := range sess.Tools(cctx, nil) {
 		if err != nil {
@@ -216,8 +214,7 @@ func (m *Manager) connectLocked(ctx context.Context, sc *serverConn) {
 	m.log.Debug("mcp server connected", "server", sc.cfg.Name, "tools", len(sc.tools))
 }
 
-// filterTools applies the per-server allow/deny lists (at most one is set,
-// enforced at config load).
+// filterTools applies the allow/deny lists; at most one is set, per load.
 func filterTools(tools []*sdk.Tool, allow, deny []string) []*sdk.Tool {
 	var out []*sdk.Tool
 	for _, t := range tools {
@@ -232,9 +229,8 @@ func filterTools(tools []*sdk.Tool, allow, deny []string) []*sdk.Tool {
 	return out
 }
 
-// Tools returns the llm tool definitions for the opted-in servers (names from
-// the agent's mcp: frontmatter; all=true means every declared server). Down servers
-// contribute nothing.
+// Tools is the llm definitions for the opted-in servers, or every declared one
+// when all is set. Down servers contribute nothing.
 func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -247,7 +243,7 @@ func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 			continue
 		}
 		for _, t := range sc.tools {
-			full := ToolPrefix + sc.cfg.Name + "_" + t.Name
+			full := toolName(sc.cfg.Name, t.Name)
 			if r, ok := m.byTool[full]; !ok || r.sc != sc {
 				continue // lost a collision — not dispatchable, so not advertised
 			}
@@ -261,10 +257,10 @@ func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 	return defs
 }
 
-// schemaMap normalizes the SDK's InputSchema (any) to the map[string]any the
-// llm layer serializes. From the client side the SDK already unmarshals to
-// map[string]any; anything else round-trips through JSON. A nil/failed schema
-// becomes an empty object schema (valid per spec).
+// schemaMap normalizes the SDK's InputSchema to what the llm layer
+// serializes. The client side already unmarshals to a map; anything else
+// round-trips through JSON, and a nil or failed schema becomes an empty
+// object schema, which is spec-valid.
 func schemaMap(s any) map[string]any {
 	if m, ok := s.(map[string]any); ok {
 		return m
@@ -280,8 +276,8 @@ func schemaMap(s any) map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
 
-// Owns reports whether name is a dispatchable (connected, not collision-lost,
-// not filtered) MCP tool.
+// Owns reports a dispatchable tool: connected, not collision-lost, not
+// filtered.
 func (m *Manager) Owns(name string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -289,12 +285,10 @@ func (m *Manager) Owns(name string) bool {
 	return ok
 }
 
-// Call dispatches a prefixed MCP tool call and returns the flattened text
-// result. Transport-level failures get ONE renewal (re-dial + re-list) and a
-// retry; a still-failing call — and a tool-level isError result — comes back
-// as error TEXT with a nil Go error, so a broken server can never kill a
-// turn. The only Go error is an unknown tool name (routed to the chat layer's
-// unknown-tool handling).
+// Call dispatches a prefixed tool call and returns the flattened text.
+// Transport failures get ONE renewal and retry; a still-failing call, and a
+// tool-level isError, come back as error TEXT with a nil Go error, so a broken
+// server cannot kill a turn. The only Go error is an unknown tool name.
 func (m *Manager) Call(ctx context.Context, name, argsJSON string) (string, error) {
 	m.mu.RLock()
 	r, ok := m.byTool[name]
@@ -313,8 +307,8 @@ func (m *Manager) Call(ctx context.Context, name, argsJSON string) (string, erro
 	defer sc.mu.Unlock()
 	res, err := m.callLocked(ctx, sc, r.tool, args)
 	if err != nil {
-		// One renewal: the stdio child may have died or the HTTP session
-		// expired. Re-dial, re-list (index refresh), retry once.
+		// The stdio child may have died or the HTTP session expired: re-dial,
+		// re-list, retry once.
 		m.log.Warn("mcp call failed, renewing session", "server", sc.cfg.Name, "tool", r.tool, "error", err)
 		if sc.sess != nil {
 			_ = sc.sess.Close()
@@ -345,11 +339,11 @@ func (m *Manager) callLocked(ctx context.Context, sc *serverConn, tool string, a
 	return sc.sess.CallTool(cctx, &sdk.CallToolParams{Name: tool, Arguments: args})
 }
 
-// flatten joins a result's text parts with newlines; non-text parts become a
-// marker so the model knows something was there (shell3's MCP surface is
-// text-only in v1 — read_media covers local files, not MCP blobs). A result
-// whose only payload is structuredContent (spec-legal: mirroring it into a
-// text block is a SHOULD, not a MUST) is serialized as JSON so it isn't lost.
+// flatten joins a result's text parts, marking non-text ones so the model
+// knows something was there — this surface is text-only, and read_media covers
+// local files rather than MCP blobs. A result whose only payload is
+// structuredContent, which is spec-legal, is serialized as JSON so it is not
+// lost.
 func flatten(res *sdk.CallToolResult) string {
 	var parts []string
 	hasText := false
@@ -395,8 +389,7 @@ func (m *Manager) Status() []ServerStatus {
 	return out
 }
 
-// Close closes every session; CommandTransport terminates its stdio child
-// (stdin close → SIGTERM after its TerminateDuration).
+// Close closes every session; CommandTransport terminates its stdio child.
 func (m *Manager) Close() {
 	for _, sc := range m.servers {
 		sc.mu.Lock()

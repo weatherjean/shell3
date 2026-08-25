@@ -40,7 +40,7 @@ func (rt *Runtime) Telegram() TelegramConfig {
 	return rt.telegram
 }
 
-// Cron returns the jobs declared as cron/<name>.md files.
+// Cron returns the kit's `cron:` jobs, in declaration order.
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // Parts returns the runtime's current shared config assembly, for host code

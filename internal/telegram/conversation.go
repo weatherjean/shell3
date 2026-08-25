@@ -2,15 +2,12 @@
 
 package telegram
 
-// conversation is ONE chat's conversation: the long-lived main session every
-// message in that chat continues, plus the turn slot, anchors and queues that
-// belong to it. shell3 holds one per Telegram chat, so two rooms never share a
-// context window, an anchor, or a turn — the state that used to live on Bot as
-// single fields lives here as one struct per room.
+// conversation is ONE chat's conversation: the long-lived session every
+// message there continues, plus that room's turn slot, anchors and queues.
+// One per chat, so two rooms never share a context window, an anchor or a turn.
 //
-// Locking: c.mu guards this conversation's own state (slot, session, queues);
-// b.mu guards the Bot-wide registry and wiring. Take b.mu inside c.mu, never
-// the other way round.
+// Locking: c.mu guards this room's state, b.mu the Bot-wide registry and
+// wiring. Take b.mu inside c.mu, never the other way round.
 
 import (
 	"context"
@@ -26,23 +23,21 @@ type conversation struct {
 	b       *Bot
 	chatID  int64
 	isGroup bool
-	// index persists WHICH store session is this room's conversation, under
-	// the room's own surface key ("telegram:<chatid>"), so a restart resumes
-	// every room and not just one.
+	// index persists which store session is this room's conversation, under
+	// the room's own surface key, so a restart resumes every room.
 	index *ThreadIndex
 
 	mu sync.Mutex // guards this room's turn slot, session, anchors and queues
-	// main is THIS ROOM's conversation: one long-lived session every message
-	// in this chat continues, replaced only by /new here.
+	// main is the long-lived session every message here continues, replaced
+	// only by a /new in this room.
 	main *shell3.Session
-	// mainAnchor is this room's latest chat message id — replies and agent
-	// mail thread onto it.
+	// mainAnchor is the latest chat message id replies thread onto.
 	mainAnchor string
-	// steerAnchor is the newest STEERED user message id, held separately so
-	// the running turn's own reply can't clobber it.
+	// steerAnchor is the newest steered message id, separate so the running
+	// turn's own reply cannot clobber it.
 	steerAnchor string
-	// lastAgentMail is the previous ✉️ wake-turn post in this room, so an
-	// identical repeat is dropped host-side. Cleared by /new.
+	// lastAgentMail is the previous ✉️ post, so an identical repeat is
+	// dropped host-side. Cleared by /new.
 	lastAgentMail string
 
 	cancelTurn  context.CancelFunc // non-nil while a turn runs in this room
@@ -52,15 +47,14 @@ type conversation struct {
 	mailQueue   []inMail
 	burst       []inMail
 	burstTimer  *time.Timer
-	// sentIDs is a bounded ring of message ids the bot posted in this room.
-	// A group message replying to one of them is addressed to the bot (see
-	// trigger.go) — the only way, short of an @mention, to tell "answer me"
-	// from ordinary room chatter.
+	// sentIDs rings the message ids the bot posted here: a group message
+	// replying to one is addressed to the bot, which short of an @mention is
+	// the only way to tell "answer me" from room chatter.
 	sentIDs []string
 }
 
-// sentIDsCap bounds the recorded-sent ring. Big enough that a reply to
-// anything still on screen resolves, small enough to stay free.
+// sentIDsCap bounds the ring: enough that a reply to anything still on screen
+// resolves, small enough to stay free.
 const sentIDsCap = 200
 
 // rememberSent records a message id the bot posted in this room.
@@ -105,11 +99,10 @@ func (c *conversation) flushBurst(ctx context.Context) {
 	}
 }
 
-// dispatchMail routes a message batch: mid-turn TEXT steers the running turn
-// (injected at the next round boundary — "stop, wrong file" redirects work in
-// flight instead of waiting behind it; a steer landing after the final
-// boundary is answered by startNextWork's catch-up turn), media queues, and
-// an idle bot runs the batch as one user turn.
+// dispatchMail routes a batch: mid-turn TEXT steers the running turn at the
+// next round boundary, so "stop, wrong file" redirects work in flight rather
+// than waiting behind it; media queues; an idle bot runs the batch as one
+// turn. A steer landing after the final boundary gets a catch-up turn.
 func (c *conversation) dispatchMail(ctx context.Context, batch []inMail) {
 	if len(batch) == 0 {
 		return
@@ -136,12 +129,12 @@ func (c *conversation) dispatchMail(ctx context.Context, batch []inMail) {
 		c.mu.Unlock()
 		return
 	}
-	// Take the turn slot before resolving the session so a wake landing during
-	// session creation queues instead of racing onto the slot.
+	// Slot before session, so a wake landing during creation queues instead
+	// of racing onto it.
 	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
 	if !ok {
-		// The global cap is full: queue rather than refuse. Sending always
-		// succeeds — the backlog drains as one batch turn when a slot frees.
+		// Cap full: queue rather than refuse. Sending always succeeds, and the
+		// backlog drains as one batch turn when a slot frees.
 		c.mailQueue = append(c.mailQueue, batch...)
 		c.mu.Unlock()
 		return
@@ -151,9 +144,9 @@ func (c *conversation) dispatchMail(ctx context.Context, batch []inMail) {
 	go c.runUserTurn(ctx, turnCtx, cancel, batch)
 }
 
-// runUserTurn runs one user-initiated turn over batch (one message, or the
-// queued backlog). The turn slot is held on entry; this goroutine owns
-// delivery, slot release, and starting the next queued work.
+// runUserTurn runs one user turn over batch — one message or the backlog. The
+// slot is held on entry; this goroutine owns delivery, release, and starting
+// the next queued work.
 func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, batch []inMail) {
 	last := batch[len(batch)-1]
 	sess, err := c.mainSession()
@@ -161,7 +154,7 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 		c.releaseSlot(cancel)
 		c.sendReply(ctx, "⚠️ could not start a session: "+err.Error())
 		// Work queued against the held slot during the failed creation would
-		// otherwise wait for the next event — drain it now.
+		// otherwise wait for the next event.
 		c.startNextWork(ctx)
 		return
 	}
@@ -187,32 +180,35 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 	finalText := composeText()
 	reply, _ := c.drainTurnProgress(ctx, sess.Send(turnCtx, finalText))
 	stopTyping()
-	// The NO_REPLY sentinel belongs to wake turns; a model over-generalizing
-	// it into a user turn must not post the literal string as its answer.
+	c.finishPostedTurn(ctx, sess, last.m.ID, reply, cancel)
+}
+
+// finishPostedTurn delivers a POSTED turn's reply and runs the housekeeping
+// both posted paths share, a user turn and a steer catch-up.
+//
+// A posted turn always answers ("" renders as "(no output)"). NO_REPLY belongs
+// to wake turns, so a model over-generalizing it must not post the literal
+// string, and a corrupt reply — raw tool-call markup — becomes a short notice
+// rather than protocol garbage.
+//
+// The slot is held through delivery, so nothing else can start a turn.
+func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Session, anchor, reply string, cancel context.CancelFunc) {
 	if strutil.IsNoReply(reply) {
 		reply = ""
 	}
-	// A corrupt reply (raw tool-call markup — the provider failed to parse
-	// its own template) is replaced by a short notice: the user learns the
-	// turn misfired instead of staring at protocol garbage.
 	if containsToolMarkup(reply) {
 		reply = malformedReplyNotice
 	}
-	// A user-initiated turn always answers ("" renders as "(no output)").
-	// The turn slot is held through delivery: while it is held no other
-	// goroutine can start a turn (a mid-delivery user message queues, a Wake
-	// queues, startNextWork waits).
-	c.postReply(ctx, sess, last.m.ID, reply)
+	c.postReply(ctx, sess, anchor, reply)
 	c.markCurrent(sess)
 	c.releaseSlot(cancel)
 	c.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
 	c.b.startNextWorkAll(ctx, c)
 }
 
-// mainSession returns THE conversation's session, creating it on first use:
-// the persisted current-marker resumes the previous run's session (so a
-// restart continues the same conversation); with no marker — or a marker the
-// janitor swept — a fresh session starts and is recorded as current.
+// mainSession is the room's session, created on first use: the persisted
+// marker resumes the previous run's, and with no marker — or one the janitor
+// swept — a fresh session starts and is recorded as current.
 func (c *conversation) mainSession() (*shell3.Session, error) {
 	c.mu.Lock()
 	if c.main != nil {
@@ -248,11 +244,9 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 	c.main = sess
 	c.mu.Unlock()
 	if err := c.index.SetCurrent(sess.ID()); err != nil {
-		// A failed write here used to vanish silently: mainSession's own
-		// in-memory marker (c.index.m) still agreed with sess, but a restart
-		// re-reads the marker from the STORE, not from memory — so a lost
-		// write here would resume a stale conversation on the next boot,
-		// with no trace of why. Now it is at least visible.
+		// The in-memory marker would still agree with sess, but a restart
+		// re-reads the STORE: a lost write here resumes a stale conversation
+		// on the next boot, so it must at least be visible.
 		c.b.log.Warn("current-session marker not persisted", "session", sess.ID(), "err", err)
 	}
 	return sess, nil
@@ -268,20 +262,17 @@ func (c *conversation) setAnchor(msgID string) {
 	c.mu.Unlock()
 }
 
-// afterTurn runs the end-of-turn housekeeping for a wake turn: re-mark the
-// current-session marker (see markCurrent), release the slot, then start the
-// next queued work (user mail first, then wakes). The main session never
-// retires — it IS the conversation.
+// afterTurn is a wake turn's housekeeping: re-mark the current session,
+// release the slot, start the next queued work. The session never retires.
 func (c *conversation) afterTurn(ctx context.Context, sess *shell3.Session, cancel context.CancelFunc) {
 	c.markCurrent(sess)
 	c.releaseSlot(cancel)
 	c.b.startNextWorkAll(ctx, c)
 }
 
-// startNextWork starts the next queued unit in THIS room once its slot is
-// free: queued user mail first (the user outranks background mail), then a
-// steer catch-up (a steer that missed its turn's last round boundary still
-// gets an answered turn), then pending wakes.
+// startNextWork starts this room's next queued unit once the slot frees: user
+// mail first, since the user outranks background mail, then a steer catch-up
+// for one that missed the last round boundary, then pending wakes.
 func (c *conversation) startNextWork(ctx context.Context) {
 	if c.drainNextMail(ctx) {
 		return
@@ -292,9 +283,9 @@ func (c *conversation) startNextWork(ctx context.Context) {
 	c.startNextWake(ctx)
 }
 
-// startSteerCatchup runs a POSTED turn over user steering that landed in the
-// session inbox after the previous turn's final round boundary. Unlike a wake
-// (quiet) turn, its reply is delivered — the queued text is the user talking.
+// startSteerCatchup runs a POSTED turn over steering that landed after the
+// previous turn's final round boundary. Unlike a quiet wake its reply is
+// delivered — the queued text is the user talking.
 func (c *conversation) startSteerCatchup(ctx context.Context) bool {
 	c.mu.Lock()
 	if c.turnActive || c.main == nil || !c.main.HasQueuedSteer() {
@@ -313,9 +304,8 @@ func (c *conversation) startSteerCatchup(ctx context.Context) bool {
 	return true
 }
 
-// takeSteerAnchorLocked consumes the pending steer anchor — the newest
-// steered user message id — falling back to the conversation anchor when no
-// steer recorded one. Caller must hold c.mu.
+// takeSteerAnchorLocked consumes the pending steer anchor, falling back to
+// the conversation anchor. Caller holds c.mu.
 func (c *conversation) takeSteerAnchorLocked() string {
 	anchor := c.steerAnchor
 	c.steerAnchor = ""
@@ -325,9 +315,8 @@ func (c *conversation) takeSteerAnchorLocked() string {
 	return anchor
 }
 
-// drainNextMail drains the WHOLE queued-mail backlog as one batch turn — it
-// is all the same conversation. Returns false when the queue is empty or a
-// turn is already running.
+// drainNextMail runs the WHOLE backlog as one batch turn — it is all the same
+// conversation. False when the queue is empty or a turn is running.
 func (c *conversation) drainNextMail(ctx context.Context) bool {
 	c.mu.Lock()
 	if c.turnActive || len(c.mailQueue) == 0 {
@@ -346,8 +335,8 @@ func (c *conversation) drainNextMail(ctx context.Context) bool {
 	return true
 }
 
-// releaseSlot clears the turn slot (turnActive/cancelTurn) and cancels the
-// turn ctx. Cancelling a turn whose model call already finished is harmless.
+// releaseSlot clears the turn slot and cancels its ctx, which is harmless
+// once the model call has finished.
 func (c *conversation) releaseSlot(cancel context.CancelFunc) {
 	c.mu.Lock()
 	c.cancelTurn = nil
@@ -357,22 +346,16 @@ func (c *conversation) releaseSlot(cancel context.CancelFunc) {
 	cancel()
 }
 
-// markCurrent re-persists the current-session marker for sess. Called at the
-// end of every turn, just before releaseSlot — covers the marker/session
-// divergence host-managed compaction causes: internal/chat's compactInto
-// rolls the live session onto a NEW runs-store row mid-conversation whenever
-// auto-compaction fires, and nothing on that side of the layering can update
-// telegram's marker directly (internal/chat and internal/shell3 must never
-// import internal/telegram). Re-marking here after every turn is idempotent
-// (SetCurrent is last-write-wins) and catches compaction's id roll — plus
-// resume, plus any future id-rolling change — with one mechanism instead of
-// a bespoke hook per cause.
+// markCurrent re-persists sess's marker at the end of every turn. It covers
+// the divergence compaction causes: compactInto rolls the live session onto a
+// NEW store row mid-conversation, and nothing on that side of the layering can
+// update telegram's marker (chat and shell3 must never import telegram).
+// Re-marking is idempotent and catches the id roll, resume, and any future
+// id-rolling change with one mechanism rather than a hook per cause.
 //
-// Must run while the turn slot is still held (turnActive true), i.e. BEFORE
-// releaseSlot: /new (commands.go's handleNewCommand) refuses outright while a
-// turn is active, so calling this first guarantees /new cannot clear the
-// marker until after this write has already landed — a write here can never
-// resurrect a marker /new just cleared.
+// Must run while the slot is still held, BEFORE releaseSlot: /new refuses
+// while a turn is active, so this write can never resurrect a marker /new
+// just cleared.
 func (c *conversation) markCurrent(sess *shell3.Session) {
 	if sess == nil {
 		return
@@ -386,28 +369,17 @@ func (c *conversation) markCurrent(sess *shell3.Session) {
 	}
 }
 
-// runPostedQueuedTurn is startSteerCatchup's turn body: drain the session
-// inbox and DELIVER the reply (the queued input includes the user speaking).
+// runPostedQueuedTurn drains the inbox and DELIVERS the reply — the queued
+// input includes the user speaking.
 func (c *conversation) runPostedQueuedTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, sess *shell3.Session, anchor string) {
 	stopTyping := c.keepTyping(ctx)
 	reply, _ := c.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
 	stopTyping()
-	if strutil.IsNoReply(reply) {
-		reply = ""
-	}
-	if containsToolMarkup(reply) {
-		reply = malformedReplyNotice
-	}
-	c.postReply(ctx, sess, anchor, reply)
-	c.markCurrent(sess)
-	c.releaseSlot(cancel)
-	c.applyPendingReload(ctx)
-	c.b.startNextWorkAll(ctx, c)
+	c.finishPostedTurn(ctx, sess, anchor, reply, cancel)
 }
 
-// startNextWake runs a pending wake turn on the main session if the slot is
-// free. Called after every turn ends. Queued user steering upgrades it to a
-// posted turn (see dispatchWake).
+// startNextWake runs a pending wake turn if the slot is free. Queued user
+// steering upgrades it to a posted turn.
 func (c *conversation) startNextWake(ctx context.Context) bool {
 	c.mu.Lock()
 	if c.turnActive || !c.wakePending || c.main == nil {
@@ -420,23 +392,29 @@ func (c *conversation) startNextWake(ctx context.Context) bool {
 		c.mu.Unlock()
 		return false // already drained by the turn that just ran
 	}
-	if sess.HasQueuedSteer() {
-		turnCtx, cancel, ok := c.takeSlotLocked(ctx)
-		if !ok {
-			c.wakePending = true // capped: try again when a slot frees
-			c.mu.Unlock()
-			return false
-		}
-		anchor := c.takeSteerAnchorLocked()
-		c.mu.Unlock()
-		go c.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
-		return true
-	}
+	return c.launchQueuedTurnLocked(ctx, sess)
+}
+
+// launchQueuedTurnLocked starts the turn draining sess's inbox and reports
+// whether one started. Steering in the inbox upgrades it to a POSTED turn, so
+// the reply is delivered and RunQueued drains the notices alongside it;
+// otherwise it is a quiet wake whose reply posts only as ✉️ mail.
+//
+// The caller holds c.mu; this ALWAYS releases it. A full cap re-arms
+// wakePending, so the next turn end comes back for this room.
+func (c *conversation) launchQueuedTurnLocked(ctx context.Context, sess *shell3.Session) bool {
+	steer := sess.HasQueuedSteer()
 	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
 	if !ok {
 		c.wakePending = true
 		c.mu.Unlock()
 		return false
+	}
+	if steer {
+		anchor := c.takeSteerAnchorLocked()
+		c.mu.Unlock()
+		go c.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
+		return true
 	}
 	c.turnQuiet = true
 	c.mu.Unlock()
@@ -447,14 +425,12 @@ func (c *conversation) startNextWake(ctx context.Context) bool {
 	return true
 }
 
-// takeSlotLocked marks a turn active in THIS room and returns its ctx +
-// cancel. Caller holds c.mu.
+// takeSlotLocked marks a turn active here and returns its ctx and cancel.
+// Caller holds c.mu.
 //
-// ok is false when the global cap is full or a reload is swapping the config
-// underneath: the caller must queue its work instead of running it. A room
-// whose message queues because the CAP was hit has no waker of its own —
-// startNextWorkAll, run whenever any room frees a slot, is what eventually
-// drains it.
+// ok is false when the global cap is full or a reload is swapping the config,
+// and the caller must queue instead. A room queued by the CAP has no waker of
+// its own — startNextWorkAll, run when any room frees a slot, drains it.
 func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	if !c.b.claimTurn() {
 		return nil, nil, false
@@ -466,37 +442,29 @@ func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, con
 	return turnCtx, cancel, true
 }
 
-// runWakeTurn runs one queued mail turn on sess. Its reply is the agent
-// speaking to the user and posts ✉️-prefixed — ONE channel, so the agent can
-// never send the same answer twice through two exits. NO_REPLY (or an empty
-// final segment — no narration fallback here: a wake turn that ends on a tool
-// call said nothing) keeps the turn silent. Under /quiet the post arrives
-// without a ping. The turn slot is held on entry and stays held on return —
-// the caller's afterTurn retires the session and releases the slot, in that
-// order, so the slot spans the turn + retirement (see retireAndRelease).
-// /stop can cancel it via the shared turn slot. Only ordinary threaded
-// sessions (a subagent/bash_bg completion) and fresh StartFreshTurn sessions
-// run wake turns; the pinned cron session is never woken.
+// runWakeTurn runs one queued mail turn. Its reply is the agent speaking to
+// the user and posts ✉️-prefixed — ONE channel, so the same answer can never
+// go out twice. NO_REPLY, or an empty final segment (no narration fallback: a
+// wake turn ending on a tool call said nothing), keeps it silent. The slot is
+// held on entry and stays held; afterTurn releases it, and /stop can cancel
+// through it. The pinned cron session is never woken.
 func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
-	reply, errText := c.drainTurn(sess.RunQueued(turnCtx), false)
-	// A wake turn with nothing to say stays silent even when its provider
-	// hiccuped — the turn error is in the transcript (the dash), and posting it
-	// would make every flaky tick ring the chat. Errors ride along only when
-	// the agent was going to speak anyway.
+	reply, errText, _ := c.drainTurn(ctx, sess.RunQueued(turnCtx), nil, false)
+	// Silent even on a provider hiccup: the error is in the transcript, and
+	// posting it would make every flaky tick ring the chat. Errors ride along
+	// only when the agent was going to speak anyway.
 	if strutil.IsNoReply(reply) {
 		return
 	}
-	// Corrupt output (raw tool-call markup) never posts as an update — the
-	// transcript keeps it for diagnosis; the chat is spared the garbage.
+	// Corrupt output never posts: the transcript keeps it for diagnosis.
 	if containsToolMarkup(reply) {
 		return
 	}
 	if errText != "" {
 		reply += "\n" + errText
 	}
-	// A mail identical to the previous one is dropped: a repeat carries no
-	// information (a changed situation produces changed text), and a model
-	// stuck in a narration loop must not fill the chat with copies.
+	// An identical repeat carries no information, and a model stuck in a
+	// narration loop must not fill the chat with copies.
 	c.mu.Lock()
 	if reply == c.lastAgentMail {
 		c.mu.Unlock()
@@ -504,15 +472,13 @@ func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Se
 	}
 	c.lastAgentMail = reply
 	c.mu.Unlock()
-	// Agent mail is ALWAYS silent and never a Telegram reply: it is mail, not
-	// a page — a background thought must not ring a sleeping phone (⚠️
-	// failure posts are the ones that ring), and a quote header on every ✉️
-	// reads as noise in the one conversation.
+	// Mail, not a page: always silent (⚠️ failures are what ring) and never a
+	// reply, since a quote header on every ✉️ is noise.
 	c.postReply(ctx, sess, "", "✉️ "+reply, SendOpt{Silent: true})
 }
 
-// keepTyping shows the "typing…" chat action and refreshes it every 4s (the
-// action expires after ~5s) until the returned stop is called.
+// keepTyping refreshes the "typing…" action every 4s — it expires after
+// ~5 — until stop is called.
 func (c *conversation) keepTyping(ctx context.Context) (stop func()) {
 	tctx, cancel := context.WithCancel(ctx)
 	go func() {
@@ -531,10 +497,9 @@ func (c *conversation) keepTyping(ctx context.Context) (stop func()) {
 	return cancel
 }
 
-// conv returns the conversation for chatID, creating it on first sight. A
-// room exists because an allowlisted sender addressed the bot there — the
-// caller has already made that decision (handleMsg), so creation here carries
-// no authorization meaning of its own.
+// conv returns the conversation for chatID, creating it on first sight.
+// handleMsg has already decided the sender may drive the agent, so creation
+// carries no authorization meaning of its own.
 func (b *Bot) conv(chatID int64) *conversation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -553,9 +518,8 @@ func (b *Bot) conv(chatID int64) *conversation {
 	return c
 }
 
-// peekConv returns the conversation for chatID if the room already exists,
-// without creating one. Routing peeks before it decides: a message that turns
-// out not to be for the bot must leave no trace.
+// peekConv returns an existing conversation without creating one: routing
+// peeks before it decides, and a message not for the bot must leave no trace.
 func (b *Bot) peekConv(chatID int64) *conversation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -573,8 +537,8 @@ func (b *Bot) allConvs() []*conversation {
 	return out
 }
 
-// convFor finds the LIVE room whose conversation is the given store session,
-// or nil. Used to route a completion back to the room that spawned it.
+// convFor finds the live room whose conversation is that store session, for
+// routing a completion back to where it was spawned.
 func (b *Bot) convFor(sessionID string) *conversation {
 	if sessionID == "" {
 		return nil
@@ -633,33 +597,7 @@ func (c *conversation) wake(ctx context.Context) {
 		c.mu.Unlock()
 		return
 	}
-	// User steering in the inbox upgrades the wake to a POSTED turn: the user
-	// spoke (perhaps a steer that raced the previous turn's end), so the reply
-	// must be delivered — RunQueued drains notices alongside it.
-	if sess.HasQueuedSteer() {
-		turnCtx, cancel, ok := c.takeSlotLocked(ctx)
-		if !ok {
-			c.wakePending = true
-			c.mu.Unlock()
-			return
-		}
-		anchor := c.takeSteerAnchorLocked()
-		c.mu.Unlock()
-		go c.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
-		return
-	}
-	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
-	if !ok {
-		c.wakePending = true
-		c.mu.Unlock()
-		return
-	}
-	c.turnQuiet = true
-	c.mu.Unlock()
-	go func() {
-		c.runWakeTurn(ctx, turnCtx, sess)
-		c.afterTurn(ctx, sess, cancel)
-	}()
+	c.launchQueuedTurnLocked(ctx, sess)
 }
 
 // claimTurn takes one of the global turn slots, or reports false when the cap

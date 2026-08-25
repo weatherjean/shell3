@@ -21,13 +21,13 @@ var mainDefaults = []string{"bash", "bash_bg", "edit", "history"}
 
 // Resolved is one agent's fully-resolved capability set: the built-ins it asked
 // for, the MCP servers it opted into, and every declared tool it can call
-// (its own plus those from the shared groups it imports).
+// (its own plus those from the shared groups it imports). Skills are FILES
+// (skills/*.md, scanned by config), never part of the kit.
 type Resolved struct {
 	Agent    Agent
 	Builtins []string
 	MCP      []string
 	Tools    []Tool
-	Skills   []Skill
 }
 
 // Resolve turns an agent's `use:` list into concrete capabilities. Entries
@@ -39,7 +39,7 @@ type Resolved struct {
 // without naming one, because you are steering it in real time. An employee
 // runs unattended, so its surface is exactly what someone declared.
 func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
-	r := Resolved{Agent: a, Tools: append([]Tool{}, a.Tools...), Skills: append([]Skill{}, a.Skills...)}
+	r := Resolved{Agent: a, Tools: append([]Tool{}, a.Tools...)}
 	if isMain {
 		r.Builtins = append(r.Builtins, mainDefaults...)
 	}
@@ -60,7 +60,6 @@ func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 			return Resolved{}, fmt.Errorf("agent %q (line %d): use: %q is not a built-in, an mcp: server, or a shared group in this kit", a.Name, a.Line, name)
 		}
 		r.Tools = append(r.Tools, g.Tools...)
-		r.Skills = append(r.Skills, g.Skills...)
 	}
 
 	seen := map[string]int{}
@@ -97,22 +96,6 @@ func (r Resolved) ToolDefs() []llm.ToolDefinition {
 	}
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
-}
-
-// SystemPrompt is the agent's prompt plus its skills, inlined. A kit's skills
-// are the agent's own knowledge and are small by construction, so they go into
-// the prompt rather than behind a read-it-yourself indirection.
-func (r Resolved) SystemPrompt() string {
-	var b strings.Builder
-	b.WriteString(strings.TrimSpace(r.Agent.Prompt))
-	if len(r.Skills) == 0 {
-		return b.String()
-	}
-	b.WriteString("\n\n## Skills\n")
-	for _, s := range r.Skills {
-		fmt.Fprintf(&b, "\n### %s\n\n%s\n", s.Name, strings.TrimSpace(s.Body))
-	}
-	return b.String()
 }
 
 // ToolByName finds a declared tool this agent can call.

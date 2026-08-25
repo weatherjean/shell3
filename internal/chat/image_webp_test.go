@@ -41,16 +41,3 @@ func TestLoadImagePart_WebP(t *testing.T) {
 		t.Errorf("part type = %q", part.Type)
 	}
 }
-
-func TestMediaPartFromBytes_WebP(t *testing.T) {
-	part, desc, err := MediaPartFromBytes(webpBytes(t), "image/webp")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if part.Type != llm.ContentPartTypeImageURL {
-		t.Errorf("part type = %q", part.Type)
-	}
-	if desc != "image 1x1" {
-		t.Errorf("desc = %q, want %q", desc, "image 1x1")
-	}
-}

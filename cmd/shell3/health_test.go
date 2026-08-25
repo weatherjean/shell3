@@ -233,8 +233,6 @@ sync_notion() { echo synced; }
 needs_arg() { echo "$url"; }
 `
 
-// writeKitHealthTree writes a kit-only config (no shell3.yaml, no agent.md —
-// a shell3.sh alone is a complete config) plus the given cron/*.md files.
 // writeKitHealthTree writes a config dir whose kit is healthKit plus the
 // given `cron:` declarations. Cron jobs are kit blocks, so a bad one is a
 // kit.Parse error — health surfaces it because health parses the kit.

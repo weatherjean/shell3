@@ -59,12 +59,10 @@ func newToolRunCommand() *cobra.Command {
 			"conversation. This is the probe half of the author's loop.",
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			k, tool, err := findTool(args[0], args[1])
+			tool, err := findTool(args[0], args[1])
 			if err != nil {
 				return err
 			}
-			_ = k
-
 			payload := map[string]any{}
 			if len(args) == 3 && args[2] != "" {
 				if err := json.Unmarshal([]byte(args[2]), &payload); err != nil {
@@ -121,7 +119,6 @@ func newToolTestCommand() *cobra.Command {
 	}
 }
 
-// loadKit reads and parses a kit file.
 func loadKit(path string) (*kit.Kit, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -137,14 +134,14 @@ func loadKit(path string) (*kit.Kit, error) {
 // findTool resolves a declared tool name across every agent and shared group in
 // the kit. Names are unique within a scope; the first match wins, which is what
 // a caller naming a tool means.
-func findTool(path, name string) (*kit.Kit, kit.Tool, error) {
+func findTool(path, name string) (kit.Tool, error) {
 	k, err := loadKit(path)
 	if err != nil {
-		return nil, kit.Tool{}, err
+		return kit.Tool{}, err
 	}
 	t, ok := k.ToolByName(name)
 	if !ok {
-		return nil, kit.Tool{}, fmt.Errorf("kit %s declares no tool %q", path, name)
+		return kit.Tool{}, fmt.Errorf("kit %s declares no tool %q", path, name)
 	}
-	return k, t, nil
+	return t, nil
 }

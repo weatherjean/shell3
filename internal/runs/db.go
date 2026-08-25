@@ -1,8 +1,7 @@
 // Package runs is the session store: one SQLite database per project at
-// .shell3_project/shell3.db holding sessions, messages, reminders, the
-// front-end thread indexes, and a full-text index over the conversation.
-// Background job logs stay plain files beside it (runs/<id>/jobs/) so the
-// completion mail can point at them by path.
+// .shell3_project/shell3.db, holding sessions, messages, reminders, the
+// front-end thread indexes and a full-text index. Job logs stay plain files
+// beside it, so completion mail can point at them by path.
 package runs
 
 import (
@@ -28,8 +27,7 @@ type Store struct {
 	db   *sql.DB
 }
 
-// Open ensures root exists, opens (creating if needed) root/shell3.db, and
-// applies the schema. root is the .shell3_project/ directory.
+// Open ensures root exists, opens root/shell3.db, and applies the schema.
 func Open(root string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("runs: open %s: %w", root, err)
@@ -49,40 +47,31 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// schemaVersion is stamped into the database via `PRAGMA user_version` once
-// the schema in this file has been applied. Bump it whenever schema.go's
-// table shapes change in a way older code wrote data incompatible with (a
-// new NOT NULL DEFAULT column is fine either way, but this repo bumps on any
-// shape change rather than trying to judge compatibility case by case).
+// schemaVersion is stamped via PRAGMA user_version once schema.go has been
+// applied. Bump it on ANY table-shape change, rather than judging
+// compatibility case by case. Past versions are not recorded: a mismatched
+// database is deleted and recreated, so no code ever reads an older shape.
 //
-// The history of past versions is not kept here: a mismatched database is
-// deleted and recreated (see openDB), so no code ever reads an older shape.
-// The current tables live in schema.go; when one changes, bump this.
+// v10 is: sessions/messages/reminders/messages_fts; threads(surface, session_id)
+// for each front-end's current conversation; cron_status(name, json);
+// outbox(id, kind, json) for the restart-durable completion queue; and
+// prompts(hash, text) + turn_prompts(session_id, seq, hash, ts), the
+// content-addressed record of what each turn's system prompt said. messages
+// carries ts, so a question about a WINDOW is answerable without inferring
+// time from the session's own start and end.
 //
-// Version 9 is the current shape: sessions/messages/reminders/messages_fts,
-// threads(surface PRIMARY KEY, session_id) for each front-end's current
-// conversation, cron_status(name, json) for cron's per-job run history, and
-// outbox(id, kind, json) for the restart-durable completion queue. Since v9
-// messages carries ts (RFC3339Nano, the same encTime shape sessions uses), so
-// a question about a window — how many task reports arrived last night, how
-// many were answered NO_REPLY — can be answered without inferring time from
-// the session's own start and end.
-// cron_status and outbox are their OWN tables rather than rows in threads:
-// threads.session_id is trusted elsewhere to be a real session id — runs.Sweep
-// prunes any threads row whose session_id doesn't name a live session — so a
-// job name or a JSON blob in that column would be deleted by the very next
-// startup's janitor pass, before it could be read back.
+// cron_status and outbox are their OWN tables, not rows in threads:
+// threads.session_id is trusted to name a real session — Sweep prunes any row
+// where it does not — so a job name or JSON blob there would be deleted by
+// the next startup's janitor before it could be read back.
 const schemaVersion = 10
 
-// openDB opens path, applying the schema fresh or recreating the file
-// outright when its stamped version doesn't match schemaVersion. Per the
-// project's no-migration-ceremony rule (shell3 data is disposable), a
+// openDB opens path, applying the schema fresh or recreating the file when
+// its stamp does not match schemaVersion. shell3 data is disposable, so a
 // mismatched database is never patched in place — it is deleted and rebuilt
-// empty, loudly, rather than silently limping along on a schema the running
-// binary doesn't fully understand (the failure mode this guards against:
-// CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so an
-// older database would otherwise keep missing every column added since,
-// and writes to them would fail row by row).
+// empty, loudly. The failure mode this guards: CREATE TABLE IF NOT EXISTS is
+// a no-op against an existing table, so an older database would keep missing
+// every column added since and fail writes row by row.
 func openDB(path string) (*sql.DB, error) {
 	db, err := openRaw(path)
 	if err != nil {
@@ -111,11 +100,9 @@ func openDB(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// user_version is a bare, unchecksummed 4-byte field in the sqlite
-	// header, so a corrupted byte can read back as an implausible version
-	// over completely intact tables. A version this binary could not have
-	// written means "we can't tell what this is" — an error, never grounds
-	// to delete someone's data.
+	// user_version is a bare unchecksummed field, so a corrupted byte reads
+	// back as an implausible version over intact tables. A version this
+	// binary could not have written is an error, never grounds to delete.
 	if version < 0 || version > schemaVersion {
 		_ = db.Close()
 		return nil, fmt.Errorf(
@@ -132,22 +119,17 @@ func openDB(path string) (*sql.DB, error) {
 		return db, nil
 	}
 
-	// A non-fresh database whose version is old but plausible: recreate
-	// rather than limp along on a shape this binary doesn't fully write.
-	// Move the old files aside instead of unlinking them outright — a rename
-	// is atomic, so a failure partway through building the new schema
-	// (ENOSPC, EIO, a read-only filesystem) never leaves the operator with
-	// no store at all, and the aside copy is there to recover by hand if
-	// this stamp somehow turns out to have mattered.
+	// Old but plausible: recreate rather than limp along on a shape this
+	// binary does not fully write. Move the old files aside rather than
+	// unlinking — a rename is atomic, so a failure partway through building
+	// the new schema never leaves the operator with no store at all.
 	//
-	// The stderr notice below is printed unconditionally and up front,
-	// before any renaming happens, so it must not promise a recovery path
-	// that may not survive: the success path below removes the aside copies
-	// once the new store is built, so a message claiming "old data moved
-	// aside to X" would be a lie in the common (successful) case. It states
-	// only the fact that IS true unconditionally — the store is being
-	// reset — and the aside path is mentioned only in the error returned
-	// from the failure branch, where the aside copy genuinely survives.
+	// The stderr notice prints before any renaming, so it must not promise a
+	// recovery path that may not survive: the success path removes the aside
+	// copies, which would make "old data moved aside to X" a lie in the
+	// common case. It states only what is unconditionally true — the store
+	// is being reset — and the aside path appears only in the error from the
+	// failure branch, where that copy genuinely survives.
 	oldSuffix := fmt.Sprintf(".old-v%d-%d", version, time.Now().UnixNano())
 	fmt.Fprintf(os.Stderr,
 		"runs store: schema v%d != v%d — resetting %s (shell3 data is disposable by design)\n",
@@ -155,9 +137,8 @@ func openDB(path string) (*sql.DB, error) {
 	if err := db.Close(); err != nil {
 		return nil, err
 	}
-	// -wal/-shm first, then the main file: if renaming a suffix fails
-	// partway through, the main database file (and its data) is still
-	// exactly where it was, untouched.
+	// -wal/-shm first: a suffix rename failing partway leaves the main
+	// database file, and its data, exactly where it was.
 	asided, err := moveOldFilesAside(path, oldSuffix)
 	if err != nil {
 		return nil, recreateErr(asided, err)

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 func writeFile(t *testing.T, dir, name, body string) {
@@ -47,8 +49,8 @@ EOF
 // (path → content, paths relative to dir, subdirs created).
 func writeTree(t *testing.T, dir string, extra map[string]string) {
 	t.Helper()
-	if _, ok := extra[KitFileName]; !ok {
-		writeFile(t, dir, KitFileName, minKit)
+	if _, ok := extra[kit.FileName]; !ok {
+		writeFile(t, dir, kit.FileName, minKit)
 	}
 	for name, body := range extra {
 		writeFile(t, dir, name, body)

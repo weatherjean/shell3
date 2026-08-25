@@ -1,23 +1,21 @@
-// Package config loads the shell3 config directory. Its centre is the kit,
-// shell3.sh (parsed by internal/kit): this package lifts the kit's `shell3:`
-// wiring block through the strict YAML parser, reads .env, and
-// owns the tool schemas, the skill scan, the `context:` resolver, and the
-// gate/note execution the kit declares. Presence of a file enables its
-// feature, and policy is a bash function — there is no embedded config
-// language.
+// Package config loads the shell3 config directory, whose centre is the kit
+// shell3.sh (parsed by internal/kit). It lifts the kit's `shell3:` wiring
+// block through the strict YAML parser, reads .env, and owns the tool
+// schemas, the skill scan, the `context:` resolver, and gate/note execution.
+// Policy is a bash function; there is no embedded config language.
 package config
+
+import "github.com/weatherjean/shell3/internal/kit"
 
 // Model is one declared model under the kit wiring's `models:`.
 type Model struct {
 	Name, BaseURL, APIKey, ModelID string
 	ContextWindow                  int
-	// CompactAt is the absolute prompt-token threshold at which the host
-	// auto-compacts conversation history before the next turn. 0 (unset)
-	// disables auto-compaction. See chat.maybeCompact.
+	// CompactAt is the prompt-token threshold for auto-compaction before the
+	// next turn; 0 disables it. See chat.maybeCompact.
 	CompactAt int
-	// KeepRecent is the verbatim tail (in prompt tokens) preserved across an
-	// auto-compaction. 0 (unset) derives a default from CompactAt. See
-	// chat.resolveKeepRecent.
+	// KeepRecent is the verbatim tail preserved across an auto-compaction, in
+	// prompt tokens; 0 derives it from CompactAt (chat.resolveKeepRecent).
 	KeepRecent int
 	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
 	// 0 disables. Must be below CompactAt (clamped to 0 if not).
@@ -26,67 +24,54 @@ type Model struct {
 	MaxTokens   int
 	Temperature *float64
 	Extra       map[string]any
-	// RunProxy, if set, is a shell command spawned (detached, fire-and-forget)
-	// the first time an agent activates this model — used to bring up a local
-	// proxy/translation shim in front of BaseURL. See internal/modelproxy.
+	// RunProxy is spawned detached the first time an agent activates this
+	// model, to bring up a local shim in front of BaseURL (internal/modelproxy).
 	RunProxy string
 }
 
-// Skill is one resolved *.md from the skills/ dir, surfaced as a one-line
-// entry in the ## Skills index; the agent reads the body at Path (absolute)
-// with `cat` when the skill applies.
+// Skill is one *.md from skills/, surfaced as a one-line entry in the
+// ## Skills index; the agent `cat`s the body at Path when it applies.
 type Skill struct{ Name, Description, Path string }
 
 // TelegramConfig is the parsed `telegram:` block: the bot's credentials and
 // where the agent's shell runs.
 type TelegramConfig struct {
-	// Present reports whether a telegram: block was declared at all. It tells
-	// "no front-end configured" (legitimate for an `shell3 ask`-only config)
-	// apart from "front-end declared but unusable" — the second is a config
-	// error worth failing `shell3 health` over, the first is not.
+	// Present separates "no front-end configured" (legitimate for an
+	// ask-only config) from "declared but unusable" — only the second fails
+	// `shell3 health`.
 	Present bool
-	// Token is the bot API token, secret-substituted from .env. Empty means a
-	// declared block left it blank (Present is the absence signal): `shell3
-	// boot` writes exactly that when the user defers the token, so the load
-	// succeeds and the front-end refuses to start instead.
+	// Token is the bot API token from .env. Empty means a declared block left
+	// it blank — what `shell3 boot` writes when the token is deferred, so the
+	// load succeeds and the front-end refuses to start instead.
 	Token  string
 	ChatID string
-	// AllowFrom lists the Telegram user ids permitted to drive the agent.
-	// Authorization is per SENDER, not per chat: chat_id says WHERE the bot
-	// talks, this says WHO it obeys, and in a group those are different
-	// questions — every member can see the chat, but membership must not
-	// confer an unrestricted shell.
-	//
-	// Empty means "the chat_id owner only", which is exactly the historical
-	// single-DM behaviour (in a DM the chat id IS the user id), so an existing
-	// config keeps working without naming anyone.
+	// AllowFrom is who may drive the agent. Authorization is per SENDER:
+	// chat_id says WHERE the bot talks, this says WHO it obeys — in a group
+	// every member sees the chat, and membership must not confer a shell.
+	// Empty means the chat_id owner only (in a DM the chat id is the user id).
 	AllowFrom []string
 	WorkDir   string
-	// MaxConcurrentTurns bounds concurrent turns across all chats. 0 leaves
-	// the front-end's default.
+	// MaxConcurrentTurns bounds turns across all chats; 0 = the default.
 	MaxConcurrentTurns int
-	// Chats is per-room configuration for chats that need something other
-	// than the defaults. It is not an allowlist and not an enrolment list:
-	// a room becomes known by an allowlisted person speaking in it.
+	// Chats is per-room tuning. Not an allowlist and not an enrolment list —
+	// a room becomes known when an allowlisted person speaks in it.
 	Chats []ChatConfig
 }
 
 // ChatConfig is one room's declared configuration from `telegram.chats`.
 type ChatConfig struct {
 	ID string
-	// UseDescription controls whether the group description feeds that room's
-	// prompt brief. nil = the default (on); false suppresses it — the escape
-	// hatch for a room whose admins are not the people the operator trusts to
-	// write standing context.
+	// UseDescription feeds the group description into the room's brief.
+	// nil = on; false is the escape hatch for a room whose admins are not
+	// trusted to write standing context.
 	UseDescription *bool
-	// Context lists files (resolved like the agent's own `context:`) appended
-	// to that room's brief — the trusted channel for a real project brief.
+	// Context appends files, resolved like the agent's own `context:`, to the
+	// room's brief — the trusted channel for a real project brief.
 	Context []string
 }
 
-// MCPServer is one declared server from the wiring's `mcp:` block.
-// Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
-// at load.
+// MCPServer is one server from the wiring's `mcp:` block. Exactly one of
+// Command (stdio) or URL (streamable HTTP) is set, enforced at load.
 type MCPServer struct {
 	Name        string
 	Command     []string          // stdio child argv; empty when URL is set
@@ -101,35 +86,26 @@ type MCPServer struct {
 type LoadedConfig struct {
 	Models  []Model
 	Secrets map[string]string
-	// BackgroundMaxConcurrent is the maximum number of concurrent background
-	// jobs (`background.max_concurrent`). 0 means unset; the runtime applies
-	// the default (8) at the read site.
+	// BackgroundMaxConcurrent caps concurrent background jobs; 0 = unset, and
+	// the runtime applies its default (8) at the read site.
 	BackgroundMaxConcurrent int
 
-	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a stored
-	// session (by its `last_at`) before sweeping it at `shell3 telegram`
-	// startup. Always populated at load — default 30; an explicit 0 means
-	// keep forever (the sweep is skipped entirely).
+	// RunsKeepDays is how long the startup janitor keeps a session, by its
+	// last_at. Always populated; default 30, an explicit 0 = keep forever.
 	RunsKeepDays int
 
-	// MediaKeepDays is `media_keep_days`: how long the janitor keeps a file
-	// under the media dir (attachments) before sweeping it at `shell3
-	// telegram` startup. Always populated at load —
-	// default 0 = keep forever: delivered files and attachments are user
-	// data, so deletion is opt-in rather than assumed.
+	// MediaKeepDays is the same for the media dir. Default 0 = keep forever:
+	// attachments are user data, so deletion is opt-in.
 	MediaKeepDays int
 
-	// DashPort is `dash_port`: where the read-only web dash listens on
-	// 127.0.0.1. Always populated at load — default 7333; an explicit 0
-	// disables the listener (and /dash says so).
+	// DashPort is where the dash listens on 127.0.0.1. Default 7333; an
+	// explicit 0 disables the listener, and /dash says so.
 	DashPort int
 
-	// ReviewModel is `review_model`: the declared model the gate's {review}
-	// reviewer runs on. "" = use the main agent's model. Validated at load
-	// against the models map.
+	// ReviewModel is the model the gate's {review} reviewer runs on, "" = the
+	// main agent's. Validated at load against the models map.
 	ReviewModel string
-	// ReviewPolicy is `review_policy`: operator rule text appended to the
-	// reviewer's system prompt (the trusted channel). "" = none.
+	// ReviewPolicy is operator rule text for the reviewer's system prompt.
 	ReviewPolicy string
 
 	// kitMainAgent is the kit's first agent when a kit installed its gates
@@ -150,9 +126,13 @@ type LoadedConfig struct {
 	// dir is the absolute config directory this config was loaded from.
 	dir string
 
-	// warnings accumulates non-fatal config issues found at load time (e.g. a
-	// skipped invalid skill file, or an orphan hook file). The caller drains
-	// them via Warnings(); `shell3 health` hardens them into failures.
+	// kit is the parsed shell3.sh the wiring above was lifted from. Kept so
+	// agents, tools, skills and cron jobs come from the SAME parse the wiring
+	// did, rather than every consumer re-reading and re-parsing the file.
+	kit *kit.Kit
+
+	// warnings are non-fatal load issues (a skipped invalid skill file, …),
+	// drained via Warnings(); `shell3 health` hardens them into failures.
 	warnings []string
 }
 
@@ -162,6 +142,10 @@ func (c *LoadedConfig) Warnings() []string { return c.warnings }
 
 // Dir returns the absolute config directory this config was loaded from.
 func (c *LoadedConfig) Dir() string { return c.dir }
+
+// Kit returns the parsed kit this config was loaded from (never nil after a
+// successful Load — a directory without a kit does not load).
+func (c *LoadedConfig) Kit() *kit.Kit { return c.kit }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {
@@ -185,9 +169,8 @@ func (c *LoadedConfig) HasMCPServer(name string) bool {
 // Telegram returns the parsed `telegram:` block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
-// MCPServers returns the declared MCP servers sorted by name (YAML map order
-// is unspecified; sorting keeps connect order and status listings
-// deterministic across loads).
+// MCPServers copies the declared servers. Parse sorts them by name (YAML map
+// order is unspecified), keeping connect order and listings deterministic.
 func (c *LoadedConfig) MCPServers() []MCPServer {
 	out := make([]MCPServer, len(c.mcpServers))
 	copy(out, c.mcpServers)

@@ -102,7 +102,7 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 	})
 
-	// A chat id reaches shell3.yaml verbatim and is parsed as an int64 by the
+	// A chat id reaches the kit verbatim and is parsed as an int64 by the
 	// front-end at startup, far from where it was typed — so boot rejects a
 	// non-numeric one here, and lets a blank through (fill it in later).
 	t.Run("chat id validated", func(t *testing.T) {

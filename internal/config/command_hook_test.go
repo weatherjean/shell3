@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // cmdCfg writes a kit declaring main plus the given commands and installs
@@ -33,12 +35,12 @@ EOF
 			fn + "() {\n" + body + "\n}\n")
 	}
 	dir := t.TempDir()
-	writeTree(t, dir, map[string]string{KitFileName: b.String()})
+	writeTree(t, dir, map[string]string{kit.FileName: b.String()})
 	c, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main", KitHooks{Commands: fns})
+	c.SetKitHooks(filepath.Join(dir, kit.FileName), "main", KitHooks{Commands: fns})
 	return c
 }
 

@@ -16,22 +16,18 @@ func (m *jobManager) isClosing() bool {
 	return m.closing
 }
 
-// Completion delivery is mail. Every finished background task (bash_bg,
-// subagent, lingering follow-up, cron) becomes a CompletionEvent and routes
-// deterministically — no triage turn, no judge model:
+// Completion delivery is mail: every finished background task becomes a
+// CompletionEvent and routes deterministically — no triage turn, no judge:
 //
-//   - failed: the ⚠️ floor post always reaches the user, and a live owning
-//     session is additionally mailed (woken) so the agent can react. An
-//     ownerless failure (cron) does NOT start a fresh turn: a broken schedule
-//     firing every tick must not burn a main-model turn per tick — the floor
-//     post IS the delivery.
-//   - direct: the raw result posts straight to the user (the spawner said the
-//     user is waiting). The owning session gets the notice queued WITHOUT a
-//     wake, so the next turn has it in context without spending one now.
-//   - default: the completion is mail TO THE AGENT — the owning session is
-//     woken with it, or a fresh main-agent session runs it when no owner is
-//     live (cron, orphans). The wake turn's reply posts to the user as ✉️
-//     agent mail; the model replies NO_REPLY to stay silent.
+//   - failed: the ⚠️ floor post always reaches the user, and a live owner is
+//     additionally mailed so the agent can react. An ownerless failure (cron)
+//     starts NO fresh turn — a broken schedule must not burn a main-model
+//     turn per tick, and the floor post IS the delivery.
+//   - direct: the raw result posts straight to the user, and the owner gets
+//     the notice queued WITHOUT a wake, so the next turn has it for free.
+//   - default: mail TO THE AGENT — the owning session is woken with it, or a
+//     fresh main-agent session runs it when no owner is live. That turn's
+//     reply posts as ✉️ mail; NO_REPLY keeps it silent.
 
 // CompletionKind discriminates what finished.
 type CompletionKind int
@@ -74,22 +70,19 @@ type CompletionEvent struct {
 	Elapsed time.Duration
 	OwnerID string // owning root session's store id ("" when gone/cron)
 	RunID   string // subagent/cron: the child session's store id ("" for commands)
-	// Direct marks a job spawned with direct:true (task/bash_bg arg, cron
-	// frontmatter): the raw result goes straight to the user, no agent turn.
+	// Direct sends the raw result straight to the user, with no agent turn.
 	Direct bool
-	// Detached marks an aside (/btw): deliver to the user and tell the owning
-	// session nothing at all. Direct still queues a notice so the agent's next
-	// turn knows what happened; a detached job must leave no trace, which is
-	// the whole reason to ask it outside the conversation.
+	// Detached is an aside (/btw): deliver to the user and tell the owning
+	// session nothing. Direct still queues a notice; a detached job must
+	// leave no trace, which is the point of asking outside the conversation.
 	Detached bool
 
 	// notice is the pre-built raw notification for the direct and host-nil
-	// delivery paths.
+	// paths.
 	notice notify.Notification
-	// owner is the owning root session handle (nil when gone). Used by the
-	// host-nil fallback and the direct no-wake queue; host-mediated agent mail
-	// goes through CompletionHost.WakeOwner so the front-end can check
-	// liveness under its own lock.
+	// owner is the owning root session, nil when gone, for the host-nil
+	// fallback and the direct no-wake queue. Host-mediated mail goes through
+	// WakeOwner instead, so the front-end checks liveness under its own lock.
 	owner *Session
 }
 
@@ -101,15 +94,14 @@ func (e CompletionEvent) post(text string) CompletionPost {
 	}
 }
 
-// Failed reports whether the underlying job failed (nonzero exit or a run
-// error) — such an event may never end silent (hard rule 1).
+// Failed reports a nonzero exit or run error. Such an event is never silent.
 func (e CompletionEvent) Failed() bool {
 	return e.ErrText != "" || (e.Exit != nil && *e.Exit != 0)
 }
 
 // label names the event in floor posts: the cron job name, or "bg3 (title)".
-// A command title is collapsed to one whitespace-normalized line — a heredoc
-// script must never dump its body into a chat post's label.
+// A command title collapses to one line — a heredoc script must never dump
+// its body into a chat post.
 func (e CompletionEvent) label() string {
 	if e.CronJob != "" {
 		return e.CronJob
@@ -121,9 +113,8 @@ func (e CompletionEvent) label() string {
 	return fmt.Sprintf("%s (%s)", e.JobID, title)
 }
 
-// traceStatus is the one-word outcome carried in mailText's summary line (and
-// therefore in the persisted trace): enough for the agent to later recall
-// whether the report it answered was routine or a failure.
+// traceStatus is the one-word outcome in mailText's summary line, and so in
+// the persisted trace: enough to recall later whether a report was a failure.
 func (e CompletionEvent) traceStatus() string {
 	if e.Failed() {
 		return "FAILED"
@@ -131,53 +122,45 @@ func (e CompletionEvent) traceStatus() string {
 	return "clean"
 }
 
-// CompletionPost is one user-facing completion post: the text plus where it
-// came from, so the front-end can offer a way INTO the work — the job, the
-// stored run — instead of a bare notice.
+// CompletionPost is one user-facing post plus its provenance, so the
+// front-end can offer a way INTO the work rather than a bare notice.
 type CompletionPost struct {
 	CronJob string // cron job name ("" for non-cron)
 	OwnerID string // owning root session's store id ("" when gone/cron)
 	JobID   string // background job id (bg3/sub2; "" when unknown)
 	RunID   string // stored child-session id ("" for bash_bg commands)
 	Text    string
-	// Aside marks a /btw answer: it is a reply to a question, not a report on
-	// a job, so the host renders it plainly (💬) rather than as "sub1 (…)
-	// finished:".
+	// Aside is a /btw answer — a reply, not a job report — so the host
+	// renders it plainly rather than as "sub1 (…) finished:".
 	Aside bool
 }
 
 // CompletionHost is the front-end delivery surface a Runtime host plugs in via
 // SetCompletionHost. All methods may be called from job-runtime goroutines.
 type CompletionHost interface {
-	// PostCompletion posts p.Text to the user and reports whether the send
-	// reached the transport: a non-nil error means the user did NOT see it
-	// (network outage, API rejection after retries), and the router keeps
-	// the completion's outbox row for redelivery instead of deleting it.
-	// The send runs synchronously on the calling job-runtime goroutine —
-	// milliseconds normally, a few seconds of retry during an outage — which
-	// is fine there and never stalls a conversation turn.
-	// p.CronJob != "" marks a cron origin (the host prefixes "⏰ <cronJob>:"),
-	// otherwise "🔔". p.OwnerID, when it names a live threaded session, lets
-	// the host thread+anchor the post; "" (or an unknown id) posts
-	// standalone. JobID/RunID, when set, let the host link the post to the
-	// job and its stored run.
+	// PostCompletion posts p.Text and reports whether it reached the
+	// transport: a non-nil error means the user did NOT see it, and the
+	// router keeps the outbox row for redelivery. The send is synchronous on
+	// the job-runtime goroutine — milliseconds normally, seconds of retry in
+	// an outage — which never stalls a conversation turn.
+	//
+	// p.CronJob marks a cron origin (host prefix "⏰ <job>:", else "🔔");
+	// p.OwnerID threads the post onto a live session; JobID/RunID let the
+	// host link into the job and its stored run.
 	PostCompletion(p CompletionPost) error
-	// WakeOwner delivers mail into the owning session (queue + wake) iff the
-	// host still considers ownerID live, returning false when it is gone —
-	// the caller then falls back to StartFreshTurn. Hosts implement the
-	// liveness check and delivery under their own lock (Session.NotifyText is
-	// the delivery primitive). The resulting wake turn's reply posts to the
-	// user as ✉️ agent mail unless the model replies NO_REPLY.
+	// WakeOwner queues and wakes the owning session iff the host still
+	// considers ownerID live, false when it is gone and the caller falls back
+	// to StartFreshTurn. Hosts do the liveness check and delivery under their
+	// own lock. That turn's reply posts as ✉️ mail unless it is NO_REPLY.
 	WakeOwner(ownerID, note string) bool
-	// StartFreshTurn runs a fresh main-agent turn over note (a completion
-	// with no live owner — cron, orphans). Implementations must serialize on
-	// their single-turn gate and never drop the note. Quiet, like WakeOwner.
+	// StartFreshTurn runs a fresh main-agent turn over note, for a completion
+	// with no live owner. Implementations serialize on their single-turn gate
+	// and never drop the note. Quiet, like WakeOwner.
 	StartFreshTurn(note string)
 }
 
-// SetCompletionHost installs the front-end delivery surface for background
-// completions. nil (the default) keeps the library fallback: raw notices are
-// delivered straight to the owning session.
+// SetCompletionHost installs the front-end delivery surface. nil keeps the
+// library fallback: raw notices straight to the owning session.
 func (rt *Runtime) SetCompletionHost(h CompletionHost) {
 	rt.mu.Lock()
 	rt.completionH = h
@@ -190,8 +173,8 @@ func (rt *Runtime) completionHost() CompletionHost {
 	return rt.completionH
 }
 
-// NotifyText queues a host notice on this session and wakes it if idle — the
-// delivery primitive a CompletionHost's WakeOwner uses.
+// NotifyText queues a host notice and wakes the session if idle — the
+// primitive WakeOwner is built on.
 func (s *Session) NotifyText(text string) {
 	s.sess.InterjectNotice(text)
 	if !s.isBusy() {
@@ -199,14 +182,14 @@ func (s *Session) NotifyText(text string) {
 	}
 }
 
-// NotifyTextNoWake queues a host notice WITHOUT waking the session — the next
-// turn sees it in context without spending one now (/superstop's summary).
+// NotifyTextNoWake queues a notice WITHOUT waking, so the next turn sees it
+// without spending one now.
 func (s *Session) NotifyTextNoWake(text string) {
 	s.sess.InterjectNotice(text)
 }
 
-// commandEvent builds the completion event for a finished bash_bg job. owner
-// is the root session the event threads at (nil when gone).
+// commandEvent builds a finished bash_bg job's event; owner is the root
+// session it threads at, nil when gone.
 func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) CompletionEvent {
 	e := exit
 	ev := CompletionEvent{
@@ -223,20 +206,14 @@ func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) Com
 	return ev
 }
 
-// capSummary head-caps an agent-written summary for the completion event,
-// marking the cut so a truncated capture never ends mid-word with no signal
-// (the full result stays readable via task_status / the run transcript).
+// capSummary head-caps an agent-written summary, marking the cut so it never
+// ends mid-word unsignalled; the full result stays in task_status.
 func capSummary(summary string) string {
-	head, cut := strutil.CutRunes(summary, agentDoneResultCap)
-	if cut {
-		head += "…"
-	}
-	return head
+	return strutil.Ellipsize(summary, agentDoneResultCap)
 }
 
-// subagentEvent builds the completion event for a finished subagent (task tool
-// or cron dispatch). Cron events carry no owner: the pinned cron parent never
-// runs turns, so agent mail starts a fresh main-agent turn instead.
+// subagentEvent builds a finished subagent's event. Cron events carry no
+// owner — the pinned parent runs no turns — so mail starts a fresh turn.
 func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 	tail := capSummary(summary)
 	ev := CompletionEvent{
@@ -256,8 +233,7 @@ func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 	return ev
 }
 
-// followUpEvent builds the completion event for one lingering-subagent
-// follow-up turn's result. Same owner rule as subagentEvent.
+// followUpEvent builds one follow-up turn's event. Owner rule as above.
 func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) CompletionEvent {
 	tail := capSummary(summary)
 	ev := CompletionEvent{
@@ -286,42 +262,36 @@ func joinNote(a, b string) string {
 	return a + "; " + b
 }
 
-// dispatchCompletion routes one finished background task deterministically —
-// see the package comment at the top of this file. Called from the finish
-// sites (outside jobManager.mu) for EVERY completed job, direct included.
+// dispatchCompletion routes one finished task as the file comment describes.
+// Called from the finish sites, outside jobManager.mu, for EVERY job.
 func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if m.suppressed(ev.JobID) {
 		return // killed by superstop: the summary already told everyone
 	}
 	if m.rt == nil {
-		// Bare unit-test job manager: no host, no runtime. Keep the direct
-		// contract at least queueing on the owner so nothing is lost.
+		// Bare unit-test manager: no host, no runtime. Keep the direct
+		// contract queueing on the owner so nothing is lost.
 		if ev.Direct && !ev.Detached && ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
 		return
 	}
-	// Persist before routing: a death between a job's finish and its delivery
-	// must not lose the completion. The row is deleted only after the hand-off
-	// below returns — at-least-once, so a crash inside the window duplicates
-	// the report at the next boot rather than losing it (see outbox.go).
+	// Persist before routing, and delete only after the hand-off returns:
+	// at-least-once, so a crash inside that window duplicates the report at
+	// the next boot rather than losing it.
 	rowID := m.persistEvent(ev)
 	if m.isClosing() {
-		// Shutdown. A job cancelAll itself killed reports at the next boot via
-		// its running marker ("was still running when shell3 stopped") — its
-		// manufactured "context canceled" failure is noise, so its event row
-		// goes too. A real completion that raced SIGTERM keeps its row and is
-		// redelivered at boot instead of dropped.
+		// Shutdown. A job cancelAll killed reports at the next boot from its
+		// running marker, so its manufactured "context canceled" failure is
+		// noise and its event row goes too. A real completion that raced
+		// SIGTERM keeps its row and is redelivered.
 		if m.shutdownCancelled(ev.JobID) {
 			m.deleteOutboxRow(rowID)
 		}
 		return
 	}
-	// A post the transport rejected keeps its row: the ⚠️/⏰/🔔 never reached
-	// the user, so the row stays for the redelivery pass (a periodic
-	// RedeliverUndelivered tick, or the next boot's RecoverCompletions).
-	// In-process delivery (WakeOwner, StartFreshTurn, notice queues) cannot
-	// fail this way, so those paths always delete.
+	// A rejected post keeps its row for the redelivery pass — the user never
+	// saw it. In-process delivery cannot fail this way, so those paths delete.
 	undelivered := false
 	defer func() {
 		if undelivered {
@@ -332,19 +302,17 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	}()
 	host := m.rt.completionHost()
 	if host == nil {
-		// Library fallback (no front-end host — shell3 ask, tests): raw notice
-		// straight to the owner, waking it. ask's verbose view sees everything.
-		// A detached job has no owner to tell by construction.
+		// No front-end host (shell3 ask, tests): raw notice straight to the
+		// owner, waking it — ask's verbose view sees everything.
 		if ev.owner != nil && !ev.Detached {
 			ev.owner.injectNotification(m.rt, ev.notice)
 		}
 		return
 	}
 	if ev.Detached {
-		// The user asked outside the conversation, so the answer goes to the
-		// user and stops there. A failure still surfaces — silence would look
-		// like the question was swallowed — but it is never mailed to the
-		// agent, because there is no conversation waiting on it.
+		// Asked outside the conversation, so the answer stops at the user. A
+		// failure still surfaces — silence would look like the question was
+		// swallowed — but is never mailed, since nothing waits on it.
 		text := strings.TrimSpace(ev.Tail)
 		if ev.Failed() {
 			text = floorText(ev)
@@ -355,13 +323,11 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		return
 	}
 	if ev.Failed() {
-		// Hard floor: a failure is never silent. The owner, if still live, is
-		// additionally mailed so the agent can react; an ownerless failure
-		// (cron) stops at the post — no fresh turn per broken tick.
-		// A failed ⚠️ post keeps the row even when the owner mail landed:
-		// redelivery re-runs the whole event, so the owner may see the mail
-		// twice — at-least-once, and the floor post is the piece that must
-		// never be lost.
+		// A failure is never silent. A live owner is additionally mailed;
+		// an ownerless one stops at the post, no fresh turn per broken tick.
+		// A failed ⚠️ post keeps its row even when the mail landed, so
+		// redelivery may show the owner the mail twice — at-least-once, and
+		// the floor post is what must never be lost.
 		undelivered = host.PostCompletion(ev.post(floorText(ev))) != nil
 		if ev.OwnerID != "" {
 			host.WakeOwner(ev.OwnerID, mailText(ev))
@@ -369,27 +335,23 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		return
 	}
 	if ev.Direct {
-		// The spawner said the user is waiting: post the raw result now, and
-		// queue it on the owning session (no wake) so the agent's next turn
-		// has it in context without spending one here. The post uses the
-		// user-facing rendering — the notice text is written FOR the agent
-		// ("relay this", "call task_status") and must not leak into the chat.
+		// The user is waiting: post the raw result now and queue it unwoken,
+		// so the next turn has it for free. The post uses the user-facing
+		// rendering — the notice is written FOR the agent ("call
+		// task_status") and must not leak into the chat.
 		undelivered = host.PostCompletion(ev.post(directText(ev))) != nil
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
 		return
 	}
-	// A clean run whose whole result is the no-post sentinel has nothing for
-	// the agent to judge. Mailing it anyway buys a main-agent turn at full
-	// conversation context to read "NO_REPLY" and reply "NO_REPLY" — the
-	// dominant cost of a frequent idempotent job. Failures and direct posts
-	// are handled above and never reach here.
+	// A clean run whose whole result is the sentinel has nothing to judge.
+	// Mailing it buys a main-agent turn at full context to read "NO_REPLY"
+	// and answer "NO_REPLY" — the dominant cost of a frequent idempotent job.
 	//
-	// The empty check is load-bearing and NOT redundant: strutil.IsNoReply("")
-	// is true (an empty model reply is silence), but an empty ev.Tail means
-	// "no output captured", which is the normal shape of a successful
-	// bash_bg — a build that prints nothing must still wake its owner.
+	// The empty check is load-bearing: IsNoReply("") is true, but an empty
+	// ev.Tail means "no output captured", the normal shape of a successful
+	// bash_bg, and a build that prints nothing must still wake its owner.
 	if t := strings.TrimSpace(ev.Tail); t != "" && strutil.IsNoReply(t) {
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
@@ -403,22 +365,19 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	}
 }
 
-// directBodyCap bounds a direct post's result text (runes for agent
-// summaries, bytes for command tails). Sized above agentDoneResultCap so an
-// agent summary that survived capture posts whole — the front-end chunks
-// long messages anyway.
+// directBodyCap bounds a direct post's result: runes for agent summaries,
+// bytes for command tails. Above agentDoneResultCap, so a summary that
+// survived capture posts whole; the front-end chunks long messages anyway.
 const directBodyCap = 2500
 
 // directText renders a direct completion for the USER's chat: what ran and
-// its result — none of the agent-facing instructions the queued notice
-// carries. Cron posts get the job name from the host's ⏰ prefix, so they
-// lead with the result itself.
+// its result, none of the agent-facing instructions. Cron posts get the job
+// name from the ⏰ prefix, so they lead with the result.
 //
-// Truncation direction follows what produced the text: a command's output is
-// read from the END (the exit lines are the signal), an agent-written summary
-// from the START (the model leads with the point). Getting this wrong stacked
-// on the head-capped capture (agentDoneResultCap) posted a middle window with
-// BOTH ends amputated — observed live on a long subagent report.
+// Truncation direction follows what produced the text: a command's output
+// from the END, where the exit lines are, an agent summary from the START,
+// where the model leads with the point. Getting this wrong, stacked on the
+// head-capped capture, posted a middle window with BOTH ends amputated.
 func directText(ev CompletionEvent) string {
 	body := directBody(ev)
 	if ev.CronJob != "" {
@@ -443,11 +402,7 @@ func directBody(ev CompletionEvent) string {
 	if ev.Kind == EvBashBg {
 		return strutil.Tail(tail, directBodyCap)
 	}
-	head, cut := strutil.CutRunes(tail, directBodyCap)
-	if cut {
-		head += "…"
-	}
-	return head
+	return strutil.Ellipsize(tail, directBodyCap)
 }
 
 // floorErrCap bounds the error text carried by a failure-floor post.

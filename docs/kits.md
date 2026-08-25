@@ -20,7 +20,7 @@ A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 |---|---|
 | **agent** | a prompt + a capability list + a workdir |
 | **tool** | a declared verb: name, description, typed params, shell body |
-| **skill** | knowledge the agent reads on demand |
+| **skill** | knowledge the agent reads on demand — a `skills/*.md` file, not a kit block |
 | **gate** | what an agent may not do — runs before every tool call |
 | **note** | a remark attached to a tool's result — advice, never a refusal |
 | **command** | a `/verb` the front-end answers by running a shell function — no model turn, no tokens |
@@ -42,8 +42,8 @@ declared name is what the model sees; the function name is an implementation
 detail. That is what lets a dozen agents share one flat bash namespace.
 
 Scoping is positional: an `agent:` or `shared:` block opens a scope, and every
-`tool:`, `skill:`, and `test:` block after it belongs to that scope until the
-next one opens.
+`tool:` and `test:` block after it belongs to that scope until the next one
+opens.
 
 `gate:`, `note:` and `event:` are the exception — they **name** the agents they
 govern and may sit anywhere in the file. One function usually governs several
@@ -108,15 +108,6 @@ bm_page_kind() {
   elif grep -q 'add-to-cart'          <<<"$html"; then echo shop
   elif grep -q '<article'             <<<"$html"; then echo article
   else echo dead; fi
-}
-
-#---
-# skill: qualify
-#---
-bm_skill_qualify() { cat <<'EOF'
-Worth keeping: it says something specific, it names its author, it still
-loads. Drop parked domains, link farms, and signup walls.
-EOF
 }
 
 #---
@@ -185,12 +176,14 @@ unset.
 
 ## Skills
 
-A skill is prose, and it is **inlined into the agent's system prompt** under
-`## Skills`. Kit skills are the agent's own knowledge and are small by
-construction, so there is no read-it-yourself indirection and no `skill` tool.
+A skill is a **file**, never a kit block: every `*.md` in `skills/` (and in
+`projects/<agent>/skills/` for an employee) is one skill, indexed in the prompt
+by name, description and absolute path. The agent `cat`s the body when it
+applies — there is no `skill` tool. See
+[configuration.md](configuration.md#skills--skills).
 
-Skill and prompt bodies are read **statically** from their heredocs. shell3
-never runs a kit to find out what it says.
+Prompt bodies are read **statically** from their heredocs. shell3 never runs a
+kit to find out what it says.
 
 ## Execution
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,28 +14,20 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// errNoSuchKitAgent marks "this kit does not declare that agent", which is a
-// fall-through signal (try the markdown config) rather than a failure.
+// errNoSuchKitAgent marks "this kit does not declare that agent".
 var errNoSuchKitAgent = errors.New("agentsetup: no such kit agent")
 
-// LoadKit reads and parses a kit file, attaching it to these Parts. Agents
-// declared in the kit then resolve through KitAgentRuntime, and their declared
-// tools dispatch through KitHostTool.
-//
-// Wiring (models, telegram, dash_port, …) comes from the kit's `shell3:`
-// block, re-marshalled through the YAML parser by config.readWiring.
+// LoadKit attaches the kit config.Load already parsed: its agents resolve
+// through KitAgentRuntime and their tools dispatch through KitHostTool. path
+// is where it was read from — a cron tool job sources it. The wiring comes
+// from the same parse, lifted by config.readWiring.
 func (p *Parts) LoadKit(path string) error {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read kit: %w", err)
+	k := p.lc.Kit()
+	if k == nil {
+		return fmt.Errorf("no kit loaded from %s", path)
 	}
-	k, err := kit.Parse(src)
-	if err != nil {
-		return err
-	}
-	// Cross-reference: an agent opting into an MCP server the wiring does not
-	// declare is a typo that would otherwise present as silently missing
-	// tools.
+	// An agent opting into an undeclared MCP server is a typo that would
+	// otherwise present as silently missing tools.
 	for _, a := range k.Agents {
 		if a.MCPAll {
 			continue
@@ -48,9 +39,8 @@ func (p *Parts) LoadKit(path string) error {
 		}
 	}
 	p.kit, p.kitPath = k, path
-	// The kit's hook blocks: `gate:` / `note:` govern tool calls and tool
-	// results, `event:` observes the session event stream, and `command:`
-	// answers a host command with no model turn.
+	// gate:/note: govern tool calls and results, event: observes the stream,
+	// command: answers a host command with no model turn.
 	if h := KitHooksOf(k); !h.Empty() {
 		main := ""
 		if len(k.Agents) > 0 {
@@ -61,9 +51,9 @@ func (p *Parts) LoadKit(path string) error {
 	return nil
 }
 
-// KitHooksOf projects a parsed kit's hook declarations into the shape
-// config installs. It lives here rather than in internal/kit so the kit
-// package keeps knowing nothing about how hooks are run.
+// KitHooksOf projects a kit's hook declarations into the shape config
+// installs, here rather than in internal/kit so the kit package keeps knowing
+// nothing about how hooks are run.
 func KitHooksOf(k *kit.Kit) config.KitHooks {
 	h := config.KitHooks{Gates: k.Gates, Notes: k.Notes}
 	if len(k.Events) > 0 {
@@ -84,16 +74,13 @@ func KitHooksOf(k *kit.Kit) config.KitHooks {
 // Kit returns the loaded kit, or nil when none was loaded.
 func (p *Parts) Kit() *kit.Kit { return p.kit }
 
-// KitPath returns the path the loaded kit was read from ("" when no kit is
-// loaded) — a cron tool job's ToolRunner needs it to source the kit before
-// running a tool's shell function.
+// KitPath is where the loaded kit was read from, "" when none is; a cron tool
+// job's ToolRunner sources it before running a tool's function.
 func (p *Parts) KitPath() string { return p.kitPath }
 
-// KitToolByName finds a declared tool anywhere in the loaded kit, regardless
-// of which agent's scope declares it. A cron tool job names no agent — there
-// is no per-agent Resolved capability set to search — so this searches the
-// whole kit, the operator's own declaration being the trust boundary. false
-// when no kit is loaded.
+// KitToolByName finds a tool anywhere in the kit, whatever scope declares it.
+// A cron tool job names no agent, so there is no Resolved set to search and
+// the operator's own declaration is the trust boundary.
 func (p *Parts) KitToolByName(name string) (kit.Tool, bool) {
 	if p.kit == nil {
 		return kit.Tool{}, false
@@ -101,9 +88,8 @@ func (p *Parts) KitToolByName(name string) (kit.Tool, bool) {
 	return p.kit.ToolByName(name)
 }
 
-// KitAgent resolves one agent declared in the loaded kit into its full
-// capability set. The first declared agent is the main agent — it gets every
-// built-in; everyone else gets exactly what they declare.
+// KitAgent resolves one declared agent into its capability set. The first
+// declared agent gets every built-in; everyone else gets what they declare.
 func (p *Parts) KitAgent(name string) (kit.Resolved, error) {
 	if p.kit == nil {
 		return kit.Resolved{}, errNoSuchKitAgent
@@ -116,10 +102,8 @@ func (p *Parts) KitAgent(name string) (kit.Resolved, error) {
 	return kit.Resolved{}, fmt.Errorf("%w: kit %s declares no agent %q", errNoSuchKitAgent, p.kitPath, name)
 }
 
-// KitAgentRuntime assembles the chat runtime for a kit-declared agent: its
-// model client, a persona whose prompt carries the agent's skills inline, and a
-// tool list that is the built-ins it asked for plus every declared tool it can
-// call.
+// KitAgentRuntime assembles a kit agent's runtime: model client, persona, and
+// the built-ins it asked for plus every declared tool it can call.
 func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	r, err := p.KitAgent(name)
 	if err != nil {
@@ -139,9 +123,9 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 
 	defs := append(config.ToolDefs(r.Builtins), r.ToolDefs()...)
 
-	// Delegation: the main agent gets the task tool with every other kit agent
-	// as an allowed target. Employees never get it — delegation is one level,
-	// structurally, not by convention.
+	// The main agent gets the task tool with every other agent as a target.
+	// Employees never get it: delegation is one level structurally, not by
+	// convention.
 	var employees []string
 	if isMain(p.kit, r.Agent.Name) {
 		refs := make([]config.SubagentRef, 0, len(p.kit.Agents))
@@ -157,9 +141,8 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		}
 	}
 
-	// Declared tools must route to the host-tool dispatcher, not the built-in
-	// tool handler. The `mcp:` opt-in adds its servers' tools to the same
-	// dispatch path.
+	// Declared tools route to the host-tool dispatcher, not the built-in
+	// handler; the mcp: opt-in joins the same path.
 	hostNames := p.kitHostToolNames(r)
 	if p.mcp != nil && (r.Agent.MCPAll || len(r.Agent.MCP) > 0) {
 		mcpDefs := p.mcp.Tools(r.Agent.MCP, r.Agent.MCPAll)
@@ -176,11 +159,10 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		names = append(names, d.Name)
 	}
 
-	// Skills are FILES, indexed by name + description + path — never inlined.
-	// Inlining every skill body cost thousands of tokens on every turn and
-	// removed the agent's ability to choose which one to read. The prompt
-	// itself (skills index + `context:` bodies, re-read at every turn start)
-	// comes from kitPrompt, shared with RefreshPromptFor.
+	// Skills are FILES, indexed by name, description and path — never
+	// inlined, which cost thousands of tokens per turn and removed the
+	// agent's choice of which to read. The prompt comes from kitPrompt,
+	// shared with RefreshPromptFor.
 	skills := config.ScanSkills(p.kitAgentSkillDir(r.Agent.Name))
 	skillNames := make([]string, 0, len(skills))
 	for _, sk := range skills {
@@ -219,13 +201,33 @@ func expandHomePath(p, home string) string {
 	return p
 }
 
+// AgentContextBase is where an agent's context: paths resolve: its OWN
+// workdir when it declares one (~/ expanded, a relative one against the config
+// dir), the config dir otherwise. Without it every employee's
+// `context: [memory.md]` would load the main agent's memory. Exported because
+// `shell3 health` must inspect the same files the agent loads — a second copy
+// of this rule would let health pass on a file nothing reads.
+//
+// TODO: SubagentWorkdir expands ~/ but leaves a RELATIVE workdir alone, so the
+// shell runs it against the process cwd while context: resolves it against the
+// config dir. One of the two is wrong; decide which.
+func AgentContextBase(configDir, home, workdir string) string {
+	if workdir == "" {
+		return configDir
+	}
+	if p := expandHomePath(workdir, home); p != workdir || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(configDir, workdir)
+}
+
 // isMain reports whether name is the kit's first-declared agent.
 func isMain(k *kit.Kit, name string) bool {
 	return len(k.Agents) > 0 && k.Agents[0].Name == name
 }
 
-// kitHostToolNames is the set of declared tool names that must route to the
-// host-tool dispatcher for this agent.
+// kitHostToolNames are this agent's declared tools, which route to the host
+// dispatcher.
 func (p *Parts) kitHostToolNames(r kit.Resolved) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range r.Tools {
@@ -234,12 +236,11 @@ func (p *Parts) kitHostToolNames(r kit.Resolved) map[string]bool {
 	return out
 }
 
-// KitHostTool builds the dispatcher for an agent's declared tools. A call
-// arrives as the model's JSON arguments, is validated against the manifest, and
-// runs as the tool's shell function with each param exported.
-//
-// A name this agent cannot call returns chat.ErrHostToolNotFound so the caller
-// falls through to its normal unknown-tool handling rather than failing the turn.
+// KitHostTool dispatches an agent's declared tools: the model's JSON arguments
+// are validated against the manifest, then run as the tool's shell function
+// with each param exported. A name this agent cannot call returns
+// chat.ErrHostToolNotFound, so the caller falls through to its own unknown-tool
+// handling rather than failing the turn.
 func (p *Parts) KitHostTool(r kit.Resolved, workDir string) func(context.Context, string, string) (string, error) {
 	path := p.kitPath
 	return func(ctx context.Context, name, argsJSON string) (string, error) {
@@ -257,9 +258,9 @@ func (p *Parts) KitHostTool(r kit.Resolved, workDir string) func(context.Context
 	}
 }
 
-// defaultModelName is the model an agent that declares none runs on: the kit's
-// main agent's model, falling back to the first model the wiring declares (a
-// one-model config need name it nowhere).
+// defaultModelName is what an agent declaring none runs on: the main agent's
+// model, else the first the wiring declares, so a one-model config names it
+// nowhere.
 func (p *Parts) defaultModelName() string {
 	if p.kit != nil && len(p.kit.Agents) > 0 && p.kit.Agents[0].Model != "" {
 		return p.kit.Agents[0].Model
@@ -279,21 +280,13 @@ func (p *Parts) kitAgentSkillDir(name string) string {
 	return filepath.Join(p.configDir, "projects", name, "skills")
 }
 
-// kitContextBase is where an agent's `context:` paths resolve: its OWN
-// workdir when it declares one, the config dir otherwise. Without this every
-// employee's `context: [memory.md]` would silently load the main agent's
-// memory instead of its own.
 func (p *Parts) kitContextBase(a kit.Agent) string {
-	if a.Workdir != "" {
-		return expandHomePath(a.Workdir, p.home)
-	}
-	return p.configDir
+	return AgentContextBase(p.configDir, p.home, a.Workdir)
 }
 
-// kitPrompt renders a kit agent's system prompt: its authored body, the
-// skills index, and the `context:` files read fresh. The single source shared
-// by KitAgentRuntime and RefreshPromptFor, so a refreshed prompt can never
-// drift from the one the session was built with.
+// kitPrompt renders an agent's system prompt — authored body, skills index,
+// context: files read fresh. Shared by KitAgentRuntime and RefreshPromptFor,
+// so a refreshed prompt cannot drift from the one the session was built with.
 func (p *Parts) kitPrompt(r kit.Resolved) string {
 	skills := config.ScanSkills(p.kitAgentSkillDir(r.Agent.Name))
 	return r.Agent.Prompt + config.RenderSkills(skills) +

@@ -23,9 +23,5 @@ func stamp(t time.Time) string {
 // oneLine flattens text to a single line for list rows.
 func oneLine(s string, max int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
-	cut, trimmed := strutil.CutRunes(s, max)
-	if trimmed {
-		return cut + "…"
-	}
-	return cut
+	return strutil.Ellipsize(s, max)
 }

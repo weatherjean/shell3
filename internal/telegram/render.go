@@ -10,23 +10,22 @@ import (
 	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 )
 
-// tgMaxMessage is the chunking budget in UTF-16 code units — the unit
-// Telegram actually counts (its hard cap is 4096; 4000 leaves headroom for
-// the HTML entities mdhtml adds).
+// tgMaxMessage is the chunking budget in UTF-16 code units, what Telegram
+// counts. Its cap is 4096; 4000 leaves headroom for mdhtml's entities.
 const tgMaxMessage = 4000
 
-// drainTurn consumes a turn's event channel and returns the assistant text.
-// Only the turn's FINAL assistant message is the reply: text emitted before a
-// tool call is progress narration ("Let me check…"), so each ToolCall resets
-// the segment. narrationFallback keeps the last non-empty pre-tool segment as
-// a fallback for turns that end on a tool call — user turns want it (the user
-// should get SOMETHING); wake turns pass false, where an empty final segment
-// means silence and a stale fragment must not post as agent mail. Errors
-// return separately so the caller decides whether they surface (a wake turn
-// that has nothing to say stays silent even when its provider hiccuped —
-// otherwise every flaky cron wake posts ✉️ ⚠️ noise). Channel close is the
-// authoritative end-of-turn signal.
-func (c *conversation) drainTurn(ch <-chan shell3.Event, narrationFallback bool) (reply, errText string) {
+// drainTurn consumes a turn's events and returns the assistant text. Only the
+// FINAL assistant message is the reply — text before a tool call is progress
+// narration, so each ToolCall resets the segment. narrationFallback keeps the
+// last pre-tool segment for turns that end on a tool call: posted turns want
+// it, wake turns pass false, where an empty final segment means silence and a
+// stale fragment must not post as mail. Errors return separately so the caller
+// decides whether they surface — otherwise every flaky cron wake posts noise.
+// Channel close is the authoritative end-of-turn signal.
+//
+// A non-nil p is driven as the progress bubble and resolved at the end, kept
+// as a breadcrumb only if the turn errored; nil drains with no bubble.
+func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p *progressBubble, narrationFallback bool) (reply, errText string, sawError bool) {
 	var seg strings.Builder // current assistant segment
 	var last string         // last non-empty completed segment
 	var errs strings.Builder
@@ -39,8 +38,17 @@ func (c *conversation) drainTurn(ch <-chan shell3.Event, narrationFallback bool)
 				last = s
 			}
 			seg.Reset()
+			if p != nil {
+				p.add(ctx, toolLine(ev.ToolName, ev.ToolInput))
+			}
+		case shell3.ToolResult:
+			if ev.ToolError && p != nil {
+				p.markError()
+				p.flush(ctx, false)
+			}
 		case shell3.Error:
 			if ev.Err != nil {
+				sawError = true
 				errs.WriteString("\n⚠️ " + ev.Err.Error())
 				if h := shell3.RecoveryHint(ev.Err); h != "" {
 					errs.WriteString("\n💡 " + h)
@@ -48,11 +56,14 @@ func (c *conversation) drainTurn(ch <-chan shell3.Event, narrationFallback bool)
 			}
 		}
 	}
+	if p != nil {
+		p.finish(ctx, sawError)
+	}
 	reply = strings.TrimSpace(seg.String())
 	if reply == "" && narrationFallback {
 		reply = last
 	}
-	return reply, strings.TrimSpace(errs.String())
+	return reply, strings.TrimSpace(errs.String()), sawError
 }
 
 // utf16Len is the length Telegram bills a string at: UTF-16 code units
@@ -69,10 +80,9 @@ func utf16Len(s string) int {
 	return n
 }
 
-// chunk splits s into pieces no longer than tgMaxMessage UTF-16 code units —
-// the unit Telegram actually enforces its 4096 cap in (byte or rune counting
-// under-splits emoji/CJK text and loses the chunk to a 400) — preferring
-// newline boundaries and never cutting mid-rune.
+// chunk splits s at tgMaxMessage UTF-16 code units, the unit Telegram enforces
+// its cap in — byte or rune counting under-splits emoji and CJK and loses the
+// chunk to a 400 — preferring newlines and never cutting mid-rune.
 func chunk(s string) []string {
 	if utf16Len(s) <= tgMaxMessage {
 		return []string{s}
@@ -105,34 +115,32 @@ func chunk(s string) []string {
 	return out
 }
 
-// sendReply posts text to the chat, chunked and unthreaded. Used for notices
-// (errors, acks, media captions) that are not a thread's turn reply.
+// sendReply posts chunked, unthreaded text: notices that are not a turn reply.
 func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendOpt) {
 	if text == "" {
 		text = "(no output)"
 	}
 	for _, part := range chunk(text) {
-		// Render the agent's Markdown to Telegram-safe HTML so bold/italics/code
-		// show up. If Telegram still rejects it, fall back to the raw text.
+		// Markdown to Telegram-safe HTML so formatting shows, falling back to
+		// raw text if Telegram still rejects it.
 		html := mdhtml.ToTelegramHTML(part)
 		id, err := c.b.client.SendHTML(ctx, c.chatID, html, opts...)
 		if err != nil {
 			id, _ = c.b.client.Send(ctx, c.chatID, part, opts...)
 		}
-		// A notice is still a message from the bot: remembering its id lets a
-		// user reply to it in a group instead of retyping an @mention.
+		// Still a message from the bot: remembering its id lets a user reply
+		// in a group instead of retyping an @mention.
 		c.rememberSent(id)
 	}
 }
 
-// postReply posts a thread's turn reply, chunked. When replyTo != 0 each chunk
-// is a Telegram reply to it (threading the conversation); every sent message id
-// is recorded against sess so the thread's anchor advances and follow-up wakes
-// reply to the latest message. replyTo == "" (the adopted cron session with no
-// inbound message) posts plain.
-// replyMaxChunks caps how many chat bubbles one reply may occupy. A longer
-// reply posts its first chunk plus the full text as a reply.md document — the
-// chat stays readable and the phone gets one ping, not twenty-five.
+// postReply posts a turn's reply, chunked and threaded onto replyTo when there
+// is one, recording every sent id so the anchor advances and later wakes reply
+// to the newest message. An empty replyTo posts plain.
+//
+// replyMaxChunks caps the bubbles one reply may occupy; a longer one posts its
+// first chunk plus the whole text as a reply.md document, so the chat stays
+// readable and the phone gets one ping rather than twenty-five.
 const replyMaxChunks = 2
 
 func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {

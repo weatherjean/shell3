@@ -103,10 +103,10 @@ func resolveReview(ctx context.Context, cfg ToolConfig, name, command, reason st
 
 // gateNonBashTool runs the tool-call hook chain for a non-bash tool (edit_file,
 // read_media, host tools, …) before it dispatches.
-// The chain sees the real t.name and a nil t.command (only bash tools carry a
-// command), so handlers gate these by t.name / t.args. Only nil / block / ask are
-// meaningful here: a {command=...} or {argv=...} verdict can't apply to a non-bash
-// tool, so it fails closed. Returns a block message when the call must not run.
+// The gate sees the real name and a nil command (only bash tools carry one), so
+// it decides by name / args. Only a pass or a block is meaningful here: a
+// {command=...} or {argv=...} verdict cannot apply to a non-bash tool, so it
+// fails closed. Returns a block message when the call must not run.
 func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string) (blockMsg string, blocked bool) {
 	if cfg.RunToolCall == nil {
 		return "", false // no hooks: ungated
@@ -125,11 +125,10 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 		logGateVerdict(cfg, "blocked", name, "", v.Reason)
 		return msg, true
 	}
-	// A pure pass (no handler produced a command/argv verdict) is the only Run
+	// A pure pass (the gate produced no command/argv verdict) is the only Run
 	// that applies to a non-bash tool. An actual {command=...}/{argv=...} verdict
 	// — including a {command=""} rewrite, indistinguishable from a pass by argv
-	// shape — is bash-only and fails closed here. (An ask-approved call is
-	// exempt: the human explicitly approved this exact invocation.)
+	// shape — is bash-only and fails closed here.
 	if v.Action == ActionRun && !v.Passthrough {
 		logGateVerdict(cfg, "blocked", name, "", "a command/argv rewrite verdict applies only to bash tools")
 		return "error: blocked by tool-call hook: a {command=...} or {argv=...} verdict " +

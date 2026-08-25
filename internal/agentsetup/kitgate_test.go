@@ -11,7 +11,7 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 )
 
-// A kit-declared `gate:` must reach the same execution path a hooks/*.sh file
+// A kit-declared `gate:` must reach the tool-call gate execution path
 // reaches. Testing the shell function directly proves the RULES; only going
 // through RunToolCall proves the WIRING — that the declaration was parsed,
 // installed onto the LoadedConfig, and is actually consulted before a tool

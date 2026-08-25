@@ -11,58 +11,49 @@ import (
 type EventKind int
 
 const (
-	// EventSessionStart is the zero value of EventKind. Nothing emits it any
-	// more; it stays so a zero Event is never mistaken for a real one.
+	// EventSessionStart is the zero value. Nothing emits it; it stays so a
+	// zero Event is never mistaken for a real one.
 	EventSessionStart EventKind = iota
-	// EventSessionEnd fires once at session teardown. Meta["status"] is
-	// "ok" or an error label.
+	// EventSessionEnd fires at teardown; Meta["status"] is "ok" or an error.
 	EventSessionEnd
-	// EventUserMessage fires when the user submits input. Role and Text
-	// are populated.
+	// EventUserMessage fires on user input. Role, Text.
 	EventUserMessage
-	// EventAssistantToken fires for each streamed assistant token. Text
-	// is the token delta; high-volume.
+	// EventAssistantToken fires per streamed token, Text the delta.
+	// High-volume.
 	EventAssistantToken
-	// EventAssistantMessage fires once per assistant turn after streaming
-	// completes. Role is "assistant" and Text is the full message.
+	// EventAssistantMessage fires once streaming completes, Text the whole
+	// message.
 	EventAssistantMessage
-	// EventToolCall fires when the assistant invokes a tool. ToolName,
-	// ToolInput, and ToolCallID are populated.
+	// EventToolCall fires on invocation. ToolName, ToolInput, ToolCallID.
 	EventToolCall
-	// EventToolResult fires after a tool returns. ToolName, ToolOutput,
-	// ToolCallID, and ToolError are populated.
+	// EventToolResult fires on return. ToolName, ToolOutput, ToolCallID,
+	// ToolError.
 	EventToolResult
-	// EventError fires when a non-fatal error occurs (stream failure,
-	// hook denial, etc.). Text holds the error message.
+	// EventError fires on a non-fatal error (stream failure, gate denial),
+	// Text the message.
 	EventError
-	// EventUsage fires when the provider reports per-stream token usage.
-	// Usage is populated.
+	// EventUsage fires on a provider usage report. Usage.
 	EventUsage
-	// EventAssistantReasoning fires for reasoning/thinking tokens on
-	// providers that surface them separately. Text holds the reasoning
-	// delta or block.
+	// EventAssistantReasoning fires for thinking tokens where a provider
+	// surfaces them separately, Text the delta or block.
 	EventAssistantReasoning
-	// EventTurnDone fires once when a full user→assistant turn (including
-	// any tool roundtrips) completes. Usage carries cumulative totals.
+	// EventTurnDone fires once a whole turn, tool rounds included, completes.
+	// Usage carries cumulative totals.
 	EventTurnDone
-	// EventSystemReminder fires when the package injects a
-	// <system-reminder> block (model change, context usage threshold).
-	// Text contains the rendered reminder.
+	// EventSystemReminder fires on an injected <system-reminder>, Text the
+	// rendered block.
 	EventSystemReminder
-	// EventRetry fires when a transient request failure is about to be
-	// retried. Text holds a human-readable summary (reason + attempt count).
+	// EventRetry fires before a transient failure is retried, Text the reason
+	// and attempt count.
 	EventRetry
-	// EventCompacted fires once when the host auto-compacts the conversation
-	// (the compact_at token threshold tripped and a summary was substituted).
-	// Text holds a human-readable note with the pre-compaction token count;
-	// Usage carries the estimated post-compaction prompt-token size so a UI can
-	// reflect the freed context immediately.
+	// EventCompacted fires when the host auto-compacts. Text notes the
+	// pre-compaction count; Usage carries the estimated post-compaction size,
+	// so a UI can reflect the freed context immediately.
 	EventCompacted
 
-	// numEventKinds is the count sentinel. It must stay LAST: it bounds the
-	// iteration in kit_events_test.go, which pins these kinds against
-	// kit.EventNames. A hardcoded upper bound there would leave a kind added
-	// below it invisible to the very check that exists to catch drift.
+	// numEventKinds must stay LAST: it bounds kit_events_test.go's iteration,
+	// and a hardcoded bound there would leave a kind added below it invisible
+	// to the check that exists to catch drift.
 	numEventKinds
 )
 
@@ -100,57 +91,39 @@ func (k EventKind) String() string {
 	return "unknown"
 }
 
-// Event is a single observable occurrence during a chat session. Consumers
-// (front-ends, JSONL sink) receive each Event via the SessionOpts.Sink
-// callback. Most fields are optional and only populated for certain Kinds; see
-// the EventKind constants for which fields each kind sets.
+// Event is one observable occurrence, delivered through SessionOpts.Sink.
+// Most fields are set only for certain Kinds — see the EventKind constants.
 type Event struct {
-	// Kind discriminates the event; consumers switch on it.
 	Kind EventKind
-	// Time is when the event was emitted.
 	Time time.Time
-	// SessionID is the runs session id ("" if no store is configured).
+	// SessionID is the runs session id, "" with no store.
 	SessionID string
 
-	// Text is the message payload for token, message, reasoning, error,
-	// and system-reminder events.
+	// Text is the payload for token, message, reasoning, error and reminder.
 	Text string
-	// Err is the underlying typed error on EventError, so consumers can use
-	// errors.Is/errors.As. Text holds its message for display. Not serialized
-	// (the JSONL sink uses Text).
-	Err error `json:"-"`
-	// Role is "user" or "assistant" for message events.
-	Role string
-	// ToolName is set on tool_call and tool_result.
+	// Err is the typed error on EventError, for errors.Is/As; Text holds its
+	// message. Not serialized.
+	Err      error `json:"-"`
+	Role     string
 	ToolName string
-	// ToolInput is the raw JSON args on tool_call.
-	ToolInput string
-	// ToolOutput is the tool's return string on tool_result.
+	// ToolInput is the raw JSON args.
+	ToolInput  string
 	ToolOutput string
-	// ToolError is true when the tool result represents an error.
-	ToolError bool
-	// ToolCallID is the sequential id linking a tool_call to its
-	// tool_result.
+	ToolError  bool
+	// ToolCallID links a tool_call to its tool_result.
 	ToolCallID string
-	// Usage carries token accounting on usage and turn_done events.
-	Usage *EventUsageData
-	// Meta carries small key/value extras (e.g. session_end status,
-	// session_start metadata).
+	Usage      *EventUsageData
+	// Meta carries small extras, such as session_end's status.
 	Meta map[string]string
 }
 
-// EventUsageData captures token accounting reported by the provider. Set on
-// EventUsage (per-stream) and EventTurnDone (cumulative across a turn's
-// roundtrips).
+// EventUsageData is the provider's token accounting: per-stream on EventUsage,
+// cumulative on EventTurnDone.
 type EventUsageData struct {
-	// PromptTokens counts tokens sent to the model.
-	PromptTokens int
-	// CompletionTokens counts tokens generated by the model.
+	PromptTokens     int
 	CompletionTokens int
-	// TotalTokens is PromptTokens + CompletionTokens, as reported.
-	TotalTokens int
-	// CachedTokens is the cache-hit share of PromptTokens, when the provider
-	// reports one (0 otherwise).
+	TotalTokens      int
+	// CachedTokens is the cache-hit share of PromptTokens, 0 if unreported.
 	CachedTokens int
 }
 
@@ -198,20 +171,24 @@ func emitUserMessage(s *Session, text string) {
 	emit(s, Event{Kind: EventUserMessage, Time: time.Now(), SessionID: s.id, Role: "user", Text: text})
 }
 
-// emitError emits the turn's terminal error event. err must be non-nil: Text
-// carries its message for display, Err carries the value itself so front-ends
-// can errors.Is/errors.As it.
+// emitError emits the terminal error event. err must be non-nil: Text carries
+// its message, Err the value itself.
 func emitError(s *Session, err error) {
 	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
 }
 
 func emitUsage(s *Session, u llm.Usage) {
-	emit(s, Event{
-		Kind:      EventUsage,
-		Time:      time.Now(),
-		SessionID: s.id,
-		Usage:     &EventUsageData{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CachedTokens: u.CachedTokens},
-	})
+	emit(s, Event{Kind: EventUsage, Time: time.Now(), SessionID: s.id, Usage: usageData(u)})
+}
+
+// usageData is the one mapping onto the event payload, shared by both.
+func usageData(u llm.Usage) *EventUsageData {
+	return &EventUsageData{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+		CachedTokens:     u.CachedTokens,
+	}
 }
 
 func emitAssistantReasoning(s *Session, text string) {
@@ -219,16 +196,15 @@ func emitAssistantReasoning(s *Session, text string) {
 }
 
 func emitSystemReminder(s *Session, text string) {
-	// Record before emitting so History() can interleave the
-	// reminder as a system-role entry (a live front-end consumes the event instead).
+	// Record before emitting, so History() can interleave the reminder as a
+	// system-role entry; a live front-end consumes the event instead.
 	s.recordReminder(text)
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
 }
 
-// emitCompacted announces an auto-compaction. prevTokens is the prompt-token
-// count that tripped the threshold; newTokens is the estimated prompt-token size
-// of the rewritten (compacted) history. Carrying newTokens lets a UI drop its
-// context meter immediately, before the next provider usage report lands.
+// emitCompacted announces an auto-compaction: prevTokens tripped the
+// threshold, newTokens estimates the rewritten history, which lets a UI drop
+// its context meter before the next usage report lands.
 func emitCompacted(s *Session, prevTokens, newTokens int) {
 	emit(s, Event{
 		Kind:      EventCompacted,
@@ -245,12 +221,7 @@ func emitRetry(s *Session, n *llm.RetryNotice) {
 }
 
 func emitTurnDone(s *Session, u llm.Usage) {
-	emit(s, Event{
-		Kind:      EventTurnDone,
-		Time:      time.Now(),
-		SessionID: s.id,
-		Usage:     &EventUsageData{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CachedTokens: u.CachedTokens},
-	})
+	emit(s, Event{Kind: EventTurnDone, Time: time.Now(), SessionID: s.id, Usage: usageData(u)})
 }
 
 // emit delivers an event to the session sink. Delivery is synchronous and

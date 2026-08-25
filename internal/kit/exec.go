@@ -143,8 +143,7 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 		sh = "bash"
 	}
 
-	script := fmt.Sprintf("set -uo pipefail; source %s; %s", ShellQuote(r.Path), t.Func)
-	cmd := exec.CommandContext(ctx, sh, "-c", script)
+	cmd := exec.CommandContext(ctx, sh, "-c", SourceScript(r.Path, t.Func))
 	cmd.Dir = r.Dir
 	cmd.Env = append(r.baseEnv(os.LookupEnv), env...)
 
@@ -160,10 +159,18 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 	return stdout.String(), nil
 }
 
-// ShellQuote single-quotes a path for safe interpolation into the source line.
-// Exported because config runs the gate the same way this package runs a tool
-// — `source <kit>; <fn>` — and a second copy of the quoting rule is a second
-// place for it to be wrong.
+// SourceScript is the bash one-liner every kit invocation runs: source the
+// kit, then run cmd against it. Sourcing is safe because a kit is
+// definitions-only — Parse rejects any top-level statement, so nothing executes
+// on source. Exported because config runs gates, notes, commands and event
+// subscribers exactly this way, and a second copy of the rule is a second place
+// for it to be wrong.
+func SourceScript(kitPath, cmd string) string {
+	return fmt.Sprintf("set -uo pipefail; source %s; %s", ShellQuote(kitPath), cmd)
+}
+
+// ShellQuote single-quotes a path (or a function name) for safe interpolation
+// into a shell command.
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

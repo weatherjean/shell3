@@ -25,7 +25,6 @@ const (
 	declAgent declKind = iota
 	declShared
 	declTool
-	declSkill
 	declTest
 	declGate
 	declNote
@@ -43,8 +42,6 @@ func (k declKind) String() string {
 		return "shared"
 	case declTool:
 		return "tool"
-	case declSkill:
-		return "skill"
 	case declTest:
 		return "test"
 	case declGate:
@@ -116,7 +113,6 @@ type blockYAML struct {
 	Agent  string   `yaml:"agent"`
 	Shared string   `yaml:"shared"`
 	Tool   string   `yaml:"tool"`
-	Skill  string   `yaml:"skill"`
 	Test   string   `yaml:"test"`
 	Gate   nameList `yaml:"gate"`
 	Note   nameList `yaml:"note"`
@@ -128,8 +124,7 @@ type blockYAML struct {
 
 	// Cron names a scheduled job. It is the one block where agent: and tool:
 	// are payload rather than a kind key — a job dispatches an agent or runs
-	// a tool, and writing that as `cron: nightly` + `agent: assistant` is the
-	// shape the old cron/<name>.md frontmatter already had.
+	// a tool.
 	Cron string `yaml:"cron"`
 
 	Schedule string `yaml:"schedule"`
@@ -168,7 +163,7 @@ func decodeBlock(b block) (decl, error) {
 		n string
 	}{
 		{declAgent, y.Agent}, {declShared, y.Shared},
-		{declTool, y.Tool}, {declSkill, y.Skill}, {declTest, y.Test},
+		{declTool, y.Tool}, {declTest, y.Test},
 		{declCommand, y.Command}, {declCron, y.Cron},
 	}
 	// On a cron block, agent: and tool: name the job's target rather than
@@ -206,14 +201,14 @@ func decodeBlock(b block) (decl, error) {
 	}
 	switch {
 	case found > 1:
-		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/command/cron/gate/note/event", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/test/command/cron/gate/note/event", b.line)
 	case found == 1:
 		return d, nil
 	case y.Shell3 != nil:
 		d.kind = declWiring
 		return d, nil
 	default:
-		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/command/cron/gate/note/event", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/test/command/cron/gate/note/event", b.line)
 	}
 }
 

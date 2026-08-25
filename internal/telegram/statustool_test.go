@@ -41,7 +41,10 @@ func TestStatusListsLiveRooms(t *testing.T) {
 	}
 	ctx := context.Background()
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot hi"})
-	waitFor(t, func() bool { return b.conv(-100).session() != nil })
+	// Wait for the room to be IDLE, not merely to exist: the turn this message
+	// started reports "BUSY (mid-turn)" until it ends, and asserting on "idle"
+	// while it runs is a race the -race build loses reliably.
+	waitFor(t, func() bool { return b.conv(-100).session() != nil && !b.conv(-100).busy() })
 
 	sess := decoratedSession(t, b, rt)
 	out, err := b.statusToolHandler(ctx, sess, "")

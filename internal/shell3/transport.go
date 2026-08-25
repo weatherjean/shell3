@@ -32,9 +32,6 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 	}
 }
 
-// renderNotification renders a notification as the short pointer string injected
-// into the agent's next turn. Each Kind names where the detail lives so the
-// agent can read it on demand.
 // agentDoneResultCap bounds (in runes) how much of a subagent's final summary is
 // injected into the parent's context on completion, so a long final message can't
 // blow up the parent. The full result stays available via `task_status <id>` and
@@ -66,6 +63,9 @@ func renderAgentNotice(n notify.Notification, verb, defaultStatus, label string)
 	return msg
 }
 
+// renderNotification renders a notification as the short pointer string injected
+// into the agent's next turn. Each Kind names where the detail lives so the
+// agent can read it on demand.
 func renderNotification(n notify.Notification) string {
 	// Defense in depth: these fields carry untrusted text (command output,
 	// subagent summaries, error strings). chat.reminderBlock neutralizes again

@@ -12,9 +12,9 @@ import (
 )
 
 // newFakeRuntime builds a real Runtime backed by a fakellm that always replies
-// with replyText, plus one convenience chat session. It uses the public test
-// seam in pkg/shell3. Most bot tests want the runtime and build their own
-// sessions (fresh-turn model), but handler-level tests take the session too.
+// with replyText, plus one convenience chat session. Most bot tests want only
+// the runtime and build their own sessions (fresh-turn model); handler-level
+// tests take the session too.
 func newFakeRuntime(t *testing.T, replyText string) (*shell3.Runtime, *shell3.Session) {
 	t.Helper()
 	rt := shell3test.NewRuntimeForTest(t, replyText)

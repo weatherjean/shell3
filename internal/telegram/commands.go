@@ -13,24 +13,22 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// KitCommand is one command the kit declares: a verb the bot answers by
-// running a shell function, with no model turn and no tokens spent.
+// KitCommand is a verb the bot answers by running a shell function, with no
+// model turn.
 type KitCommand struct {
 	Name, Desc string
 }
 
-// SetKitCommands installs the kit's declared commands. run executes one and
-// returns its output; nil run means the commands are advertised but not
-// answerable (health checks, tests that only inspect the menu).
+// SetKitCommands installs the kit's commands. A nil run advertises them
+// without making them answerable, for health checks and menu tests.
 func (b *Bot) SetKitCommands(cmds []KitCommand, run func(ctx context.Context, name, arg string) (string, error)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.kitCommands, b.kitCommandRun = cmds, run
 }
 
-// BotCommands is this bot's full command menu: the built-ins plus whatever the
-// kit declares, in that order. Registered with Telegram for the "/"
-// autocomplete menu.
+// BotCommands is the built-ins plus the kit's, in that order — what is
+// registered as Telegram's "/" autocomplete menu.
 func (b *Bot) BotCommands() []Command {
 	out := BotCommands()
 	b.mu.Lock()
@@ -41,9 +39,8 @@ func (b *Bot) BotCommands() []Command {
 	return out
 }
 
-// BotCommands is the canonical BUILT-IN command list. Kept next to
-// handleCommand so they stay in sync. The views (/status, /jobs, /runs) live
-// in the web dash — /dash opens it; what remains here are actions.
+// BotCommands is the canonical BUILT-IN list, next to handleCommand so the
+// two stay in sync. The views live in the web dash; these are actions.
 func BotCommands() []Command {
 	return []Command{
 		{"ask", "Talk to the agent in a group: /ask <message>"},
@@ -65,18 +62,15 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		return
 	}
 	arg := strings.TrimSpace(strings.TrimPrefix(m.Text, fields[0]))
-	// Telegram appends "@yourbot" to a command typed in a group (and some
-	// clients do so after an autocomplete tap), so route on the bare verb.
+	// Telegram appends "@yourbot" in a group, so route on the bare verb.
 	cmd, _, _ := strings.Cut(fields[0], "@")
 	switch cmd {
 	case "/ask":
-		// The group entry point. Telegram's privacy mode never delivers a
-		// plain "@bot do X" to a bot, but it DOES deliver "/ask@thisbot …"
-		// and every reply to one of the bot's own messages — so /ask opens a
-		// thread and ordinary replies continue it, with no BotFather toggle
-		// and no admin rights. In a chat where the bot already hears
-		// everything (a DM, or privacy off) it is simply a longer way to
-		// type the same message.
+		// The group entry point. Privacy mode never delivers a plain
+		// "@bot do X", but DOES deliver "/ask@thisbot …" and every reply to
+		// the bot's own messages — so /ask opens a thread and replies
+		// continue it, with no BotFather toggle and no admin rights. Where
+		// the bot already hears everything it is just a longer way to type.
 		q := strings.TrimSpace(arg)
 		if q == "" {
 			c.sendReply(ctx, "usage: `/ask <message>` — then just reply to my messages to continue")
@@ -88,9 +82,8 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 	case "/help":
 		c.sendReply(ctx, c.helpText())
 	case "/stop":
-		// Turn-only: cancel the active main turn. Background jobs are NEVER killed
-		// here — a subagent or bash_bg keeps running and will wake its session on
-		// completion. /superstop kills those too.
+		// Turn-only. Background jobs are NEVER killed here: they keep running
+		// and wake their session on completion. /superstop kills those too.
 		c.mu.Lock()
 		cancel := c.cancelTurn
 		c.mu.Unlock()
@@ -121,13 +114,10 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		}
 		c.sendReply(ctx, "▶️ fired job "+name)
 	case "/btw":
-		// An aside: a one-off turn in its own child session, dispatched to the
-		// job runtime. It never touches the conversation — not the transcript,
-		// not the queue — so asking "what's the syntax for X" mid-project does
-		// not become something the agent carries forward forever.
-		//
-		// Because it is a background dispatch it also bypasses the turn slot,
-		// so it answers WHILE a long turn is still running.
+		// An aside: a one-off turn in its own child session. It touches
+		// neither the transcript nor the queue, so "what's the syntax for X"
+		// mid-project is not carried forward forever — and being a background
+		// dispatch it bypasses the turn slot, answering while a long turn runs.
 		q := strings.TrimSpace(arg)
 		if q == "" {
 			c.sendReply(ctx, "usage: /btw `<question>` — answered outside the conversation")
@@ -147,16 +137,16 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		}
 		c.sendReply(ctx, "💬 asked on the side — the answer won't enter this conversation")
 	case "/reload":
-		// runReload takes the turn slot (and Reload fail-fasts on a busy
-		// session), so a /reload during a live turn is refused, not raced.
+		// runReload takes the turn slot, so a /reload during a live turn is
+		// refused rather than raced.
 		c.runReload(ctx)
 	case "/quiet":
 		c.handleQuietCommand(ctx, arg)
 	case "/new":
 		c.handleNewCommand(ctx)
 	default:
-		// Built-ins are matched above, so they always win; a kit command
-		// named after one is rejected at load rather than shadowing here.
+		// Built-ins matched above always win; a kit command named after one is
+		// rejected at load rather than shadowing here.
 		if c.runKitCommand(ctx, strings.TrimPrefix(cmd, "/"), arg) {
 			return
 		}
@@ -164,12 +154,10 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 	}
 }
 
-// handleSuperstop is the everything-off switch: cancel the running turn, then
-// kill every background job — subagents, bash_bg, in-flight cron dispatches —
-// with completion routing suppressed. One summary replaces the per-job posts:
-// a ⚠️ reply to the user, and the same text queued (unwoken) into the main
-// conversation so the agent's next turn knows what happened without spending
-// a turn now.
+// handleSuperstop is the everything-off switch: cancel the turn, then kill
+// every background job with completion routing suppressed. One summary
+// replaces the per-job posts — a ⚠️ reply, plus the same text queued unwoken
+// so the next turn knows without spending one now.
 func (c *conversation) handleSuperstop(ctx context.Context) {
 	c.mu.Lock()
 	cancel := c.cancelTurn
@@ -180,7 +168,7 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 		cancel()
 	}
 	var killed []shell3.KilledJob
-	if sess := c.b.anyLiveSession(); sess != nil {
+	if sess := c.b.LiveSession(); sess != nil {
 		killed = sess.KillAllForStop()
 	}
 	if !turnStopped && len(killed) == 0 {
@@ -204,10 +192,9 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 	}
 }
 
-// handleDashCommand answers a bare /dash with a freshly tokened dashboard
-// URL (host-side, zero tokens spent). /dash with an argument is a request for
-// help — most commonly exposing the dash beyond localhost — and becomes a
-// normal agent turn pointed at the dash-exposing skill.
+// handleDashCommand answers a bare /dash with a freshly tokened URL, host-side
+// and free. /dash with an argument is a request for help — usually exposing
+// the dash — and becomes an agent turn pointed at the exposing skill.
 func (c *conversation) handleDashCommand(ctx context.Context, m Msg, arg string) {
 	if arg != "" {
 		prompt := fmt.Sprintf("The user wants help with the web dash: %q. "+
@@ -229,12 +216,10 @@ func (c *conversation) handleDashCommand(ctx context.Context, m Msg, arg string)
 		return
 	}
 	reply := "🖥 " + link + "\n\nlink valid ~1h — /dash mints a fresh one"
-	// The base URL comes from dash_url.txt, which the exposure agent (and thus
-	// anything that can prompt-inject it) can rewrite. A fresh valid token is
-	// appended to whatever host that file names, so a planted host would be
-	// handed a live read-token. Never silently: when the destination is not
-	// loopback, name the host and warn, so the operator sees where the token
-	// is about to go before tapping.
+	// The base URL comes from dash_url.txt, which the exposure agent — and so
+	// anything that can prompt-inject it — can rewrite, and a fresh token is
+	// appended to whatever host it names. So a non-loopback destination is
+	// named and warned about, never handed over silently.
 	if host := urlHost(link); host != "" && !isLoopbackHost(host) {
 		reply += "\n\n⚠️ this link points at `" + host + "` (not this machine) — " +
 			"the token grants read access to your transcripts and config. " +
@@ -252,8 +237,7 @@ func urlHost(rawURL string) string {
 	return u.Hostname()
 }
 
-// isLoopbackHost reports whether host is the local machine — the only
-// destination a /dash link reaches without an operator-set tunnel.
+// isLoopbackHost: the only destination a /dash link reaches without a tunnel.
 func isLoopbackHost(host string) bool {
 	if host == "localhost" {
 		return true
@@ -264,11 +248,10 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-// handleNewCommand starts a fresh conversation: the current main session is
-// detached (and Closed when it has no running jobs — jobs keep running and
-// their completions re-route to the new conversation), the current-marker is
-// cleared, and the next message lazily creates the replacement. Refused while
-// a turn is running — /stop first.
+// handleNewCommand starts a fresh conversation: detach the current session,
+// closing it when no jobs are running (they keep going and re-route to the new
+// one), clear the marker, and let the next message create the replacement.
+// Refused mid-turn — /stop first.
 func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.mu.Lock()
 	if c.turnActive {
@@ -277,9 +260,8 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 		return
 	}
 	c.mu.Unlock()
-	// Clear the marker BEFORE detaching: a completion's StartFreshTurn racing
-	// this would otherwise see main==nil with the old marker still set and
-	// resurrect the conversation being detached.
+	// Clear the marker BEFORE detaching, or a StartFreshTurn racing this sees
+	// main==nil with the old marker set and resurrects what is being detached.
 	if err := c.index.SetCurrent(""); err != nil {
 		c.b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
 	}
@@ -291,18 +273,16 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.lastAgentMail = ""
 	c.wakePending = false
 	c.mu.Unlock()
-	// Close only a fully-idle old session: running jobs keep it open (their
-	// completions re-route to the new conversation), and undrained agent mail
-	// stays inspectable in the dash instead of being torn down undelivered.
+	// Close only a fully-idle session: running jobs keep it open, and undrained
+	// mail stays inspectable in the dash rather than torn down undelivered.
 	if old != nil && !c.b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
 	c.sendReply(ctx, "🧵 fresh conversation — the old one stays in the dash and history")
 }
 
-// handleQuietCommand reports or sets the /quiet toggle: quiet on sends
-// agent-initiated posts (⏰/🔔/✉️) without a notification ping; replies to
-// the user's own messages and ⚠️ failures always ring.
+// handleQuietCommand reports or sets /quiet: on, agent-initiated posts arrive
+// without a ping. Replies to the user and ⚠️ failures always ring.
 func (c *conversation) handleQuietCommand(ctx context.Context, arg string) {
 	state := func() string {
 		if c.b.isQuiet() {
@@ -331,11 +311,10 @@ func (c *conversation) handleQuietCommand(ctx context.Context, arg string) {
 	}
 }
 
-// runKitCommand answers one kit-declared command, reporting whether it claimed
-// the verb. The function's stdout is the reply; empty output posts nothing, so
-// an idempotent command with nothing to say stays silent. A failure is
-// reported rather than swallowed — a command grants nothing and blocks
-// nothing, so there is no fail-closed question, only an answer.
+// runKitCommand answers one kit command, reporting whether it claimed the
+// verb. Stdout is the reply and empty posts nothing, so an idempotent command
+// stays silent. A failure is reported, not swallowed: a command grants and
+// blocks nothing, so there is no fail-closed question.
 func (c *conversation) runKitCommand(ctx context.Context, name, arg string) bool {
 	c.mu.Lock()
 	run := c.b.kitCommandRun
@@ -360,11 +339,9 @@ func (c *conversation) runKitCommand(ctx context.Context, name, arg string) bool
 	return true
 }
 
-// helpText explains the parts of this bot that are not guessable from the
-// command list: that each chat is its own conversation, and what a group
-// needs before the bot can hear anything. Both are things an operator
-// configures once and then forgets, so the answer lives one /help away
-// instead of in a document.
+// helpText covers what the command list cannot show: that each chat is its own
+// conversation, and what a group needs before the bot hears anything. Both are
+// configured once and forgotten, so the answer lives one /help away.
 func (c *conversation) helpText() string {
 	var sb strings.Builder
 	sb.WriteString("**shell3** — your agent, one conversation per chat.\n\n")

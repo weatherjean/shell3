@@ -67,8 +67,8 @@ bot loop with no credentials and no network: a plain line is a fresh message,
 
 ### Commands
 
-Answered by the bot itself: no model call, no tokens. What used to be the
-view commands (`/status`, `/jobs`, `/runs`) is now the **web dash** — a
+Answered by the bot itself: no model call, no tokens. There are no view
+commands — everything you would look at lives in the **web dash**, a
 read-only page on `127.0.0.1` that `/dash` links you to (see
 [the dash](#the-web-dash) below).
 

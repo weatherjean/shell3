@@ -9,6 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // itemKind classifies a transcript item.
@@ -33,7 +34,7 @@ const (
 	noticeInfo // host chrome: resume marker, job waits, config warnings
 )
 
-// item is one transcript block. Tool and reasoning blocks are foldable.
+// item is one transcript block; tool and reasoning blocks fold.
 type item struct {
 	Kind       itemKind
 	Text       string
@@ -47,11 +48,10 @@ type item struct {
 	Folded     bool
 	Steer      bool // a mid-turn steering message (user item, marked)
 
-	// Cached glamour render of an assistant block, so refresh() (fired on every
-	// key/scroll event) doesn't re-run the expensive markdown renderer when
-	// nothing changed. Assistant text is append-only, so (width, len) is a sound
-	// cache key — plus mdEpoch, which bumps on a palette switch so a light/dark
-	// change recolors already-rendered blocks.
+	// Cached glamour render, so refresh() — fired on every key and scroll —
+	// does not re-run the renderer unchanged. Assistant text is append-only,
+	// so (width, len) is a sound key, plus mdEpoch, which bumps on a palette
+	// switch to recolor already-rendered blocks.
 	mdWidth int
 	mdLen   int
 	mdEpoch uint64
@@ -63,8 +63,8 @@ func (it *item) foldable() bool {
 		(it.Kind == itemNotice && it.Notice == noticeReminder)
 }
 
-// toolRender describes how a tool's block is presented. A richly-rendered tool
-// is one table entry rather than edits scattered across several functions.
+// toolRender presents one tool's block: a table entry rather than edits
+// scattered across several functions.
 type toolRender struct {
 	style          lipgloss.Style
 	expand         bool                // start unfolded
@@ -106,22 +106,21 @@ func (t *transcript) addUser(text string) {
 	t.items = append(t.items, &item{Kind: itemUser, Text: text})
 }
 
-// addInfo appends a host-chrome line (resume marker, background-job wait,
-// config warning) as an info block.
+// addInfo appends a host-chrome line as an info block.
 func (t *transcript) addInfo(text string) {
 	t.closeStreaming()
 	t.items = append(t.items, &item{Kind: itemNotice, Notice: noticeInfo, Text: text})
 }
 
-// addCanceled appends a clean, dim "canceled" marker for a Ctrl+C-stopped turn
-// (the raw context.Canceled error would otherwise render as a red ✗ error).
+// addCanceled marks a Ctrl+C-stopped turn dimly, where the raw
+// context.Canceled would render as a red ✗ error.
 func (t *transcript) addCanceled() {
 	t.closeStreaming()
 	t.items = append(t.items, &item{Kind: itemNotice, Notice: noticeReminder, Text: "⊘ canceled"})
 }
 
-// addSteer appends a steering message the user sent mid-turn. It renders as a
-// user prompt with a "steer" marker so it's distinguishable from a fresh turn.
+// addSteer renders a mid-turn steer as a user prompt with a "steer" marker,
+// so it is distinguishable from a fresh turn.
 func (t *transcript) addSteer(text string) {
 	t.closeStreaming()
 	t.items = append(t.items, &item{Kind: itemUser, Steer: true, Text: text})
@@ -141,8 +140,8 @@ func (t *transcript) apply(ev shell3.Event) bool {
 	case shell3.Reasoning:
 		t.openAssistant = -1
 		if t.openReasoning < 0 {
-			// Show thinking live (unfolded) as it streams; foldOpenReasoning
-			// collapses it once the block completes.
+			// Live and unfolded while streaming; foldOpenReasoning collapses
+			// it once the block completes.
 			t.items = append(t.items, &item{Kind: itemReasoning, Folded: false})
 			t.openReasoning = len(t.items) - 1
 		}
@@ -178,8 +177,8 @@ func (t *transcript) apply(ev shell3.Event) bool {
 		}
 		return t.addNotice(noticeError, msg)
 	case shell3.Done:
-		// Return true when closeStreaming flushes reminder chrome held back
-		// during streaming, so the view refreshes to show it.
+		// True when closeStreaming flushed held-back chrome, so the view
+		// refreshes to show it.
 		hadPending := len(t.pendingNotices) > 0
 		t.closeStreaming()
 		return hadPending
@@ -190,14 +189,11 @@ func (t *transcript) apply(ev shell3.Event) bool {
 }
 
 func (t *transcript) addNotice(kind noticeKind, text string) bool {
-	// System reminders start folded — they're frequent host chrome, shown as a
-	// compact one-line indicator the user can expand.
+	// Reminders start folded: frequent host chrome, one expandable line.
 	n := &item{Kind: itemNotice, Notice: kind, Text: text, Folded: kind == noticeReminder}
-	// A reminder must never split a streaming assistant answer. If one arrives
-	// while the answer block is still open, hold it and flush it when the block
-	// closes (closeStreaming) so it renders right after the finished answer.
-	// Only noticeReminder is held; errors/retries stay inline so they remain
-	// visible mid-stream.
+	// A reminder must never split a streaming answer: one arriving while the
+	// block is open is held and flushed when it closes. Only reminders —
+	// errors and retries stay inline so they are visible mid-stream.
 	if kind == noticeReminder && t.openAssistant >= 0 {
 		t.pendingNotices = append(t.pendingNotices, n)
 		return false
@@ -207,8 +203,7 @@ func (t *transcript) addNotice(kind noticeKind, text string) bool {
 	return true
 }
 
-// reminderBody strips the <system-reminder> wrapper for display, leaving just
-// the reminder content.
+// reminderBody strips the <system-reminder> wrapper for display.
 func reminderBody(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "<system-reminder>")
@@ -218,27 +213,25 @@ func reminderBody(s string) string {
 
 func (t *transcript) closeStreaming() {
 	t.foldOpenReasoning()
-	// Drop a streaming assistant block that carries no visible content. Models
-	// often emit a stray space/newline into content right before a tool call;
-	// glamour renders it to nothing, leaving an empty block that reads as a
-	// blank gap above the tool. The open assistant is always the last item (only
-	// Token appends to it, and every other event calls closeStreaming first), so
-	// it is safe to trim.
+	// Drop an assistant block with no visible content: models often emit a
+	// stray newline right before a tool call, which glamour renders to
+	// nothing, leaving a blank gap above the tool. The open assistant is
+	// always the last item, so trimming is safe.
 	if t.openAssistant >= 0 && t.openAssistant == len(t.items)-1 &&
 		strings.TrimSpace(t.items[t.openAssistant].Text) == "" {
 		t.items = t.items[:t.openAssistant]
 	}
 	t.openAssistant = -1
-	// Flush reminder chrome held back while the answer streamed (addNotice), so
-	// it renders right after the completed block instead of splitting it.
+	// Flush chrome held back while the answer streamed, so it lands after the
+	// completed block instead of splitting it.
 	if len(t.pendingNotices) > 0 {
 		t.items = append(t.items, t.pendingNotices...)
 		t.pendingNotices = nil
 	}
 }
 
-// foldOpenReasoning collapses the currently-streaming thinking block (if any)
-// and marks it closed, so a finished thinking block shows as a folded summary.
+// foldOpenReasoning closes the streaming thinking block, so a finished one
+// shows as a folded summary.
 func (t *transcript) foldOpenReasoning() {
 	if t.openReasoning >= 0 && t.openReasoning < len(t.items) {
 		t.items[t.openReasoning].Folded = true
@@ -264,9 +257,8 @@ func (t *transcript) foldAll(folded bool) {
 	}
 }
 
-// toggleFold flips the fold of item i if foldable; returns true if it changed.
-// Click-to-fold is the per-block path the keyboard deliberately does not have
-// (ctrl+o is all-or-nothing).
+// toggleFold flips item i's fold if foldable. Click-to-fold is the per-block
+// path the keyboard deliberately lacks — ctrl+o is all-or-nothing.
 func (t *transcript) toggleFold(i int) bool {
 	if i < 0 || i >= len(t.items) || !t.items[i].foldable() {
 		return false
@@ -275,9 +267,8 @@ func (t *transcript) toggleFold(i int) bool {
 	return true
 }
 
-// anyUnfolded reports whether at least one foldable block is currently open —
-// what ctrl+o toggles against, so the first press always collapses a noisy
-// transcript rather than expanding it further.
+// anyUnfolded is what ctrl+o toggles against, so the first press collapses a
+// noisy transcript rather than expanding it further.
 func (t *transcript) anyUnfolded() bool {
 	for _, it := range t.items {
 		if it.foldable() && !it.Folded {
@@ -289,20 +280,18 @@ func (t *transcript) anyUnfolded() bool {
 
 func (t *transcript) count() int { return len(t.items) }
 
-// renderBlocks renders all items to viewport content, wrapping each to width.
-// starts[i] is the first content line of item i; total is the line count. The
-// caller maps a mouse Y to a block (via starts) for click-to-fold and drag
-// selection. Lines in selLo..selHi are highlighted unless excluded.
+// renderBlocks renders every item to viewport content, wrapped to width.
+// starts[i] is item i's first content line, so the caller can map a mouse Y to
+// a block. Lines in selLo..selHi highlight unless excluded.
 func (t *transcript) renderBlocks(w int, selLo, selHi int) (content string, starts []int, total int, excluded []bool) {
 	inner := w - 2
 	if inner < 1 {
 		inner = 1
 	}
 	wrap := lipgloss.NewStyle().Width(inner)
-	// excluded is parallel to the rendered lines: true = a meta line never
-	// highlighted (and so never copied — selection copy consults the same mask).
-	// A blank top margin so the first block doesn't sit flush against the
-	// viewport's top edge; it scrolls with the content and never copies.
+	// excluded runs parallel to the rendered lines: a meta line never
+	// highlighted, and so never copied — copy consults the same mask. The
+	// blank top margin keeps the first block off the viewport edge.
 	all := []string{""}
 	excluded = []bool{true}
 	starts = make([]int, len(t.items))
@@ -311,9 +300,9 @@ func (t *transcript) renderBlocks(w int, selLo, selHi int) (content string, star
 		var rendered string
 		switch it.Kind {
 		case itemAssistant:
-			// Assistant text is markdown (glamour wraps it itself, so bypass the
-			// lipgloss wrapper that would mangle its ANSI). Cached by (width,len)
-			// so a refresh that didn't change the text — e.g. scrolling — reuses
+			// Glamour wraps markdown itself, so bypass the lipgloss wrapper
+			// that would mangle its ANSI. Cached by (width,len) so a refresh
+			// that changed no text — scrolling — reuses
 			// the render instead of re-running glamour.
 			if it.mdOut == "" || it.mdWidth != inner || it.mdLen != len(it.Text) || it.mdEpoch != mdEpoch {
 				it.mdOut = renderMarkdown(it.Text, inner)
@@ -505,14 +494,7 @@ func toolSummary(it *item) string {
 // summaryBudget is the folded block summary's rune budget (ellipsis excluded).
 const summaryBudget = 60
 
-// truncateSummary clamps a one-line summary to summaryBudget runes: anything
-// over becomes the first summaryBudget runes plus an ellipsis.
-func truncateSummary(s string) string {
-	if r := []rune(s); len(r) > summaryBudget {
-		return string(r[:summaryBudget]) + "…"
-	}
-	return s
-}
+func truncateSummary(s string) string { return strutil.Ellipsize(s, summaryBudget) }
 
 func countLines(s string) int {
 	s = strings.TrimRight(s, "\n")

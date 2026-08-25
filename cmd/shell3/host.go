@@ -20,8 +20,7 @@ import (
 // openRuntime resolves the --config value and builds a Runtime anchored to
 // the config directory — the runtime root determines where runs/ + history
 // live (runs.Open under <workdir>/.shell3_project), so tying it to the config
-// dir keeps a hosted agent self-contained. Returns the resolved config dir,
-// the host's home.
+// dir keeps a hosted agent self-contained.
 func openRuntime(ctx context.Context, configDir string) (*shell3.Runtime, string, error) {
 	resolved, err := resolveConfig(configDir)
 	if err != nil {
@@ -70,14 +69,20 @@ func armCron(disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, l
 	return sched, nil
 }
 
-// kitTools adapts the loaded kit to cron.ToolRunner. parts is resolved PER
-// CALL, not captured once: /reload swaps *shell3.Runtime's Parts generation
-// wholesale (see Runtime.Reload), and a snapshot taken at armCron time would
-// keep dispatching against the pre-reload kit forever after. A cron tool job
-// runs in the config dir by default — it belongs to the install, not to any
-// agent's workdir — but honours workdir: like a prompt job does.
-type kitTools struct {
+// partsRef resolves the current Parts generation PER CALL, never capturing a
+// snapshot: /reload swaps *shell3.Runtime's Parts wholesale (see
+// Runtime.Reload), so anything held from before it — the kit, the store
+// handle, the log file — belongs to a generation whose teardown has since run.
+// The cron adapters below all embed it.
+type partsRef struct {
 	parts func() *agentsetup.Parts
+}
+
+// kitTools adapts the loaded kit to cron.ToolRunner. A cron tool job runs in
+// the config dir by default — it belongs to the install, not to any agent's
+// workdir — but honours workdir: like a prompt job does.
+type kitTools struct {
+	partsRef
 }
 
 func (k kitTools) RunTool(ctx context.Context, name, workDir string, args map[string]any) (string, error) {
@@ -92,12 +97,9 @@ func (k kitTools) RunTool(ctx context.Context, name, workDir string, args map[st
 	return kit.Runner{Path: p.KitPath(), Dir: workDir}.Run(ctx, t, args)
 }
 
-// storeRunStore adapts the runs store to cron.RunStore, resolving Parts
-// fresh per call — like kitTools, a /reload swaps the whole Parts
-// generation wholesale, and a store handle captured once would keep
-// reading/writing a database Runtime.Reload has since closed.
+// storeRunStore adapts the runs store to cron.RunStore.
 type storeRunStore struct {
-	parts func() *agentsetup.Parts
+	partsRef
 }
 
 func (s storeRunStore) LoadStatus() (map[string]cron.JobStatus, error) {
@@ -116,13 +118,9 @@ func (s storeRunStore) SaveStatus(status cron.JobStatus) error {
 	return cron.StoreRunStore{Store: st}.SaveStatus(status)
 }
 
-// partsLogger adapts the app log to applog.Logger, resolving Parts fresh per
-// call — like kitTools and storeRunStore, a /reload swaps the whole Parts
-// generation (and with it, the underlying log file handle) wholesale, so a
-// logger captured once could end up writing to a handle the old generation's
-// teardown has since closed.
+// partsLogger adapts the app log to applog.Logger.
 type partsLogger struct {
-	parts func() *agentsetup.Parts
+	partsRef
 }
 
 func (l partsLogger) Debug(msg string, fields ...any) { l.parts().Log().Debug(msg, fields...) }

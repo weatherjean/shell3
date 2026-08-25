@@ -15,38 +15,34 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/mediadir"
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
-// safeOpen resolves path and opens it for sending, refusing everything that
-// is not a plain file the user meant to receive. It is the whole security
-// argument for send_media_telegram, so it states exactly what each step does
-// and does not close:
+// safeOpen resolves path and opens it for sending, refusing anything that is
+// not a plain file the user meant to receive. It is the whole security
+// argument for send_media_telegram, so each step states what it does and does
+// NOT close:
 //
-//  1. The requested name, and then the symlink-resolved name, are checked
-//     against the dotenv pattern (catches the obvious case and a symlink
-//     whose own name is clean but whose target is not).
-//  2. The resolved path is checked against the config directory by path
-//     (catches a symlink into the config tree), exempting the media
-//     directory — it lives under the config dir but holds exactly the
-//     generated images and attachments this tool exists to send back.
-//  3. The file is opened with O_NOFOLLOW|O_NONBLOCK. O_NOFOLLOW refuses only
-//     if the FINAL path component is itself a symlink at open time — parent
-//     directories are still followed, and a hardlink (a different name for
-//     the same inode) is not a symlink at all, so this does not make the
-//     sequence race-free by itself. O_NONBLOCK keeps a FIFO with no writer
-//     from parking the turn forever (host tools have no timeout of their
-//     own — the 120s cap is bash's).
-//  4. From here everything reads the opened fd, not the path, so nothing can
-//     be swapped underneath these checks: the type must be a regular file
-//     (rejects FIFOs, devices, sockets), and the fd's (dev, ino) is compared
-//     against every regular file anywhere in the config tree (skipping only
-//     the media dir). A hardlink's resolved path lies outside the config dir
-//     by construction but is never a different inode, so this inode walk —
-//     not the path check in step 2 — is what actually closes the hardlink
-//     route to `.env` or the kit itself.
+//  1. The requested name, then the symlink-resolved name, are matched against
+//     the dotenv pattern — catching the obvious case, and a symlink whose own
+//     name is clean but whose target is not.
+//  2. The resolved path is checked against the config directory, catching a
+//     symlink into the config tree, exempting the media dir: it lives under
+//     the config dir but holds exactly what this tool exists to send back.
+//  3. Opened O_NOFOLLOW|O_NONBLOCK. O_NOFOLLOW refuses only if the FINAL
+//     component is a symlink at open time — parents are still followed, and a
+//     hardlink is not a symlink at all — so this alone is not race-free.
+//     O_NONBLOCK stops a writerless FIFO parking the turn forever; host tools
+//     have no timeout of their own.
+//  4. From here everything reads the fd, not the path, so nothing can be
+//     swapped underneath: the type must be a regular file, and the fd's
+//     (dev, ino) is compared against every regular file in the config tree,
+//     media dir aside. A hardlink's resolved path lies outside the config dir
+//     by construction but is never a different inode, so this walk — not step
+//     2 — is what closes the hardlink route to .env or the kit.
 //
-// The caller bounds the read itself (readLimited): the size a pre-read Stat
-// reports can be stale, and is 0 for a character device like /dev/zero.
+// The caller bounds the read itself: a pre-read Stat's size can be stale, and
+// is 0 for a character device.
 func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 	if !filepath.IsAbs(path) {
 		if workDir == "" {
@@ -54,24 +50,21 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 		}
 		path = filepath.Join(workDir, path)
 	}
-	// Refuse the `.env` beside the kit and dotenv siblings (.env.local,
-	// …); mirrors the credential-file guard the config loader applies. This
-	// check on the unresolved name catches the obvious case, but a symlink
-	// can point anywhere — resolved below, and checked again there, before
-	// anything is read.
-	if isDotenvName(filepath.Base(path)) {
+	// The .env beside the kit and its siblings, mirroring the loader's guard.
+	// On the unresolved name this catches the obvious case; a symlink is
+	// resolved and re-checked below, before anything is read.
+	if paths.IsCredentialFile(filepath.Base(path)) {
 		return nil, nil, errors.New("refusing to send a credentials file")
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot read file: %w", err)
 	}
-	if isDotenvName(filepath.Base(resolved)) {
+	if paths.IsCredentialFile(filepath.Base(resolved)) {
 		return nil, nil, errors.New("refusing to send a credentials file")
 	}
 
-	// mediadir.Dir() also creates the directory, so this both resolves it and
-	// guarantees EvalSymlinks below can succeed.
+	// mediadir.Dir() creates the directory too, so EvalSymlinks can succeed.
 	mediaResolved := ""
 	if mdir, merr := mediadir.Dir(); merr == nil {
 		if r, rerr := filepath.EvalSymlinks(mdir); rerr == nil {
@@ -85,17 +78,14 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 	if configDir != "" {
 		r, cerr := filepath.EvalSymlinks(configDir)
 		if cerr != nil {
-			// configDir was supplied but could not be resolved — every check
-			// below depends on it, so running with it silently skipped would
-			// let a file through with both the path containment check and the
-			// inode walk disabled. Fail closed like every other error here.
+			// Every check below depends on it, so skipping would let a file
+			// through with both containment and the inode walk disabled.
 			return nil, nil, fmt.Errorf("cannot verify file safety: config directory could not be resolved: %w", cerr)
 		}
 		cfgResolved = r
-		// If $SHELL3_MEDIA_DIR has been pointed at (or above) the config dir
-		// itself — a misconfiguration, not the normal <configDir>/media
-		// layout — exempting it would make the whole config tree sendable.
-		// Refuse to trust the exemption in that case.
+		// $SHELL3_MEDIA_DIR pointed at or above the config dir is a
+		// misconfiguration, and exempting it would make the whole tree
+		// sendable, so the exemption is not trusted there.
 		mediaCoversCfg := mediaResolved != "" && pathWithin(cfgResolved, mediaResolved)
 		inMedia := mediaResolved != "" && pathWithin(resolved, mediaResolved)
 		if pathWithin(resolved, cfgResolved) && (mediaCoversCfg || !inMedia) {
@@ -139,13 +129,6 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 	return in, info, nil
 }
 
-// isDotenvName reports whether a filename is `.env` or a dotenv sibling
-// (.env.local, .env.production, …), case-insensitively.
-func isDotenvName(name string) bool {
-	lb := strings.ToLower(name)
-	return lb == ".env" || strings.HasPrefix(lb, ".env.")
-}
-
 // pathWithin reports whether path is p itself or lies under directory p.
 func pathWithin(path, p string) bool {
 	rel, err := filepath.Rel(p, path)
@@ -155,20 +138,17 @@ func pathWithin(path, p string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// configTreeInodeMatch walks cfgResolved looking for a regular file whose
-// (dev, ino) matches target — the fd about to be sent. It skips only the
-// media directory (generated images and saved attachments legitimately live
-// there and must not be flagged); everything else under the config dir,
-// .shell3_project included, is compared. Symlinks are not followed: their own
-// inode can never match a regular file's, and following them risks escaping
-// the tree or looping. isDotenv reports whether the matched file's own name
-// is dotenv-shaped, so the caller can give the more specific refusal. A walk
-// error fails closed, except an entry that vanished mid-walk — gone is proof
-// it isn't the file being matched.
+// configTreeInodeMatch walks cfgResolved for a regular file whose (dev, ino)
+// matches the fd about to be sent. Only the media dir is skipped — generated
+// images and attachments legitimately live there — and everything else,
+// .shell3_project included, is compared. Symlinks are not followed: their
+// inode can never match a regular file's, and following risks escaping or
+// looping. isDotenv lets the caller give the more specific refusal. A walk
+// error fails closed, except an entry that vanished — gone is proof it is not
+// the file being matched.
 func configTreeInodeMatch(cfgResolved, mediaResolved string, target *syscall.Stat_t) (matched, isDotenv bool, err error) {
-	// skip is only ever the media dir's own subtree. If it equals or contains
-	// cfgResolved, WalkDir's first callback would SkipDir the whole tree, so
-	// refuse the exemption and walk everything.
+	// skip is only ever the media subtree. Equal to or containing cfgResolved,
+	// WalkDir's first callback would SkipDir everything, so walk it all.
 	skip := filepath.Clean(mediaResolved)
 	if mediaResolved == "" || pathWithin(cfgResolved, mediaResolved) {
 		skip = ""
@@ -202,7 +182,7 @@ func configTreeInodeMatch(cfgResolved, mediaResolved string, target *syscall.Sta
 		}
 		if st.Dev == target.Dev && st.Ino == target.Ino {
 			matched = true
-			isDotenv = isDotenvName(d.Name())
+			isDotenv = paths.IsCredentialFile(d.Name())
 			return filepath.SkipAll
 		}
 		return nil
@@ -213,11 +193,10 @@ func configTreeInodeMatch(cfgResolved, mediaResolved string, target *syscall.Sta
 	return matched, isDotenv, nil
 }
 
-// readLimited reads in fully, honouring ctx — a stalled read (a FIFO opened
-// non-blocking whose writer stalls mid-stream) is cancellable by /stop rather
-// than parking the turn — and refusing more than limit bytes regardless of
-// what a pre-read Stat reported: a file can grow between the two, and a
-// character device reports size 0 while never reaching EOF.
+// readLimited reads in fully under ctx, so a stalled read — a non-blocking
+// FIFO whose writer stalls — is cancellable rather than parking the turn, and
+// refuses more than limit bytes whatever a pre-read Stat said: a file can grow
+// between the two, and a character device reports 0 and never reaches EOF.
 func readLimited(ctx context.Context, in *os.File, limit int64) ([]byte, error) {
 	var out []byte
 	buf := make([]byte, 32*1024)

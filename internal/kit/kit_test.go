@@ -39,14 +39,6 @@ bm_page_kind() {
 }
 
 #---
-# skill: qualify
-#---
-bm_skill_qualify() { cat <<'EOF'
-a real shop has a cart
-EOF
-}
-
-#---
 # shared: web
 #---
 #---
@@ -83,10 +75,6 @@ func TestParseAssembles(t *testing.T) {
 		bm.Tools[0].Func != "bm_page_kind" {
 		t.Fatalf("bm tools = %+v", bm.Tools)
 	}
-	if len(bm.Skills) != 1 || bm.Skills[0].Func != "bm_skill_qualify" {
-		t.Fatalf("bm skills = %+v", bm.Skills)
-	}
-
 	if len(k.Shared) != 1 || k.Shared[0].Name != "web" {
 		t.Fatalf("shared = %+v", k.Shared)
 	}
@@ -183,7 +171,7 @@ func TestParseParamShadowingPathFails(t *testing.T) {
 	}
 }
 
-func TestParsePromptAndSkillBodies(t *testing.T) {
+func TestParsePromptBodies(t *testing.T) {
 	k, err := Parse([]byte(sample))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -193,9 +181,6 @@ func TestParsePromptAndSkillBodies(t *testing.T) {
 	}
 	if k.Agents[1].Prompt != "find shops" {
 		t.Fatalf("bm prompt = %q", k.Agents[1].Prompt)
-	}
-	if k.Agents[1].Skills[0].Body != "a real shop has a cart" {
-		t.Fatalf("skill body = %q", k.Agents[1].Skills[0].Body)
 	}
 }
 

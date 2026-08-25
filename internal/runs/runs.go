@@ -18,29 +18,24 @@ type Meta struct {
 	Model     string `json:"model"`
 	Status    string `json:"status"` // "live" | "ended"
 	ParentID  string `json:"parent_id,omitempty"`
-	// Agent is the name of the agent that ran this session. It is what makes
-	// "show me what bookmarks did" answerable — auditing an employee needs its
-	// runs findable by name, not just by id.
+	// Agent is who ran this session — what makes an employee's runs findable
+	// by name rather than only by id.
 	Agent string `json:"agent,omitempty"`
-	// CronJob is the name of the cron job that started this session ("" for
-	// a front-end or task-tool session). It is what makes "what did this job
-	// do" answerable without guessing from session duration.
+	// CronJob is what started this session, "" for a front-end or task-tool
+	// one — what makes "what did this job do" answerable without guessing.
 	CronJob   string    `json:"cron_job,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	LastAt    time.Time `json:"last_at"`
-	// LastPromptTokens is the provider-reported prompt-token count from the most
-	// recent turn. Persisted so a resume restores the accurate context gauge
-	// instead of re-deriving it with the chars/4 estimate (which underestimates
-	// token-dense content, letting the prompt overflow the model window without
-	// ever tripping prune/compaction). Zero on old sessions written before this
-	// field existed; resume then falls back to the estimate.
+	// LastPromptTokens is the latest turn's provider-reported count, persisted
+	// so a resume restores the accurate gauge rather than the chars/4
+	// estimate, which under-counts token-dense content and lets the prompt
+	// overflow the window without ever tripping compaction. Zero falls back.
 	LastPromptTokens int `json:"last_prompt_tokens,omitempty"`
-	// TotalPromptTokens and TotalCompletionTokens are a cumulative ledger of
-	// every turn's provider-reported usage for this session — distinct from
-	// LastPromptTokens, which is overwritten each turn and answers "how full is
-	// the context now". These only grow (see Store.AddUsage) and answer "what
-	// did this session cost", the question Store.CronRollup totals per cron job.
+	// TotalPromptTokens and TotalCompletionTokens are the cumulative ledger,
+	// unlike LastPromptTokens, which is overwritten each turn and gauges how
+	// full the context is now. These only grow, and answer what a session
+	// cost — the question CronRollup totals per job.
 	TotalPromptTokens     int64 `json:"total_prompt_tokens,omitempty"`
 	TotalCompletionTokens int64 `json:"total_completion_tokens,omitempty"`
 }
@@ -60,8 +55,8 @@ func (s *Store) NewSession(m Meta) (string, error) {
 	return id, nil
 }
 
-// AppendMessage appends one message to the session, bumps its recency, and
-// indexes any searchable text. One transaction; crash-safe by construction.
+// AppendMessage appends a message, bumps recency and indexes searchable text
+// in one transaction.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -78,8 +73,8 @@ func (s *Store) AppendMessage(id string, m llm.Message) error {
 	).Scan(&seq); err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}
-	// One clock reading for both the row and the session's recency, so a
-	// message can never look newer than the session that holds it.
+	// One clock reading for both, so a message can never look newer than the
+	// session holding it.
 	now := time.Now()
 	if _, err := tx.Exec(
 		`INSERT INTO messages (session_id, seq, json, ts) VALUES (?,?,?,?)`,
@@ -129,10 +124,9 @@ func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 	return out, rows.Err()
 }
 
-// EndSession marks the session ended. A session that stored nothing — no
-// message, no job log — leaves no trace: its row is deleted instead, so the
-// pinned cron dispatch parent and aborted front-end sessions don't litter the
-// store.
+// EndSession marks the session ended, or deletes its row when it stored
+// nothing at all, so the pinned cron parent and aborted sessions leave no
+// trace.
 func (s *Store) EndSession(id string) error {
 	if !s.HasMessages(id) && !hasJobLogs(s.jobsDir(id)) {
 		return s.deleteSessions([]string{id})
@@ -146,8 +140,7 @@ func (s *Store) EndSession(id string) error {
 	return nil
 }
 
-// HasMessages reports whether the session has stored at least one message —
-// the cheap "worth listing/replaying" probe.
+// HasMessages is the cheap "worth listing or replaying" probe.
 func (s *Store) HasMessages(id string) bool {
 	var one int
 	err := s.db.QueryRow(
@@ -155,9 +148,7 @@ func (s *Store) HasMessages(id string) bool {
 	return err == nil
 }
 
-// SetLastPromptTokens records the provider-reported prompt-token count for the
-// session (see Meta.LastPromptTokens) so a later resume restores the accurate
-// context gauge.
+// SetLastPromptTokens records the count a later resume restores its gauge from.
 func (s *Store) SetLastPromptTokens(id string, n int) error {
 	_, err := s.db.Exec(
 		`UPDATE sessions SET last_prompt_tokens=? WHERE id=? AND last_prompt_tokens<>?`, n, id, n)
@@ -167,9 +158,8 @@ func (s *Store) SetLastPromptTokens(id string, n int) error {
 	return nil
 }
 
-// LastPromptTokens returns the persisted provider-reported prompt-token count
-// for the session, or 0 when the session is unknown or predates the field.
-// Callers treat 0 as "no persisted value" and fall back to the estimate.
+// LastPromptTokens is the persisted count, 0 for an unknown session. Callers
+// treat 0 as "no persisted value" and fall back to the estimate.
 func (s *Store) LastPromptTokens(id string) int {
 	var n int
 	if err := s.db.QueryRow(
@@ -179,13 +169,11 @@ func (s *Store) LastPromptTokens(id string) int {
 	return n
 }
 
-// AddUsage accumulates one turn's provider-reported token usage onto the
-// session's cumulative ledger (see Meta.TotalPromptTokens). LastPromptTokens
-// answers "how full is the context now"; this answers "what did this session
-// cost", a different question an operator running unattended cron work needs
-// answered — see Store.CronRollup. Unknown session ids error rather than
-// silently no-op, since a cost that never lands anywhere is worse than a loud
-// failure naming the id at fault.
+// AddUsage accumulates one turn onto the session's cumulative ledger. Where
+// LastPromptTokens gauges context fullness, this answers what the session
+// cost — the question an operator running unattended cron work needs. An
+// unknown id errors rather than no-ops: a cost that lands nowhere is worse
+// than a loud failure naming the id.
 func (s *Store) AddUsage(id string, prompt, completion int) error {
 	res, err := s.db.Exec(`UPDATE sessions
 		SET total_prompt_tokens = total_prompt_tokens + ?,
@@ -200,9 +188,7 @@ func (s *Store) AddUsage(id string, prompt, completion int) error {
 	return nil
 }
 
-// metaColumns is the column list shared by every query that scans a full
-// Meta row (ListSessions, SessionMeta) — kept in one
-// place so the SELECT list and the Scan call below can never drift apart.
+// metaColumns keeps the SELECT list and scanMeta's Scan from drifting apart.
 const metaColumns = `id, workdir, config_dir, model, status, parent_id, agent, cron_job,
 		started_at, ended_at, last_at, last_prompt_tokens,
 		total_prompt_tokens, total_completion_tokens`
@@ -220,9 +206,8 @@ func scanMeta(row interface{ Scan(...any) error }) (Meta, error) {
 	return m, nil
 }
 
-// querySessions runs a metaColumns query and scans every row, for the
-// several list queries that differ only
-// in their WHERE/ORDER BY/LIMIT clause.
+// querySessions runs a metaColumns query for the list queries that differ
+// only in their WHERE/ORDER BY/LIMIT.
 func (s *Store) querySessions(query string, args ...any) ([]Meta, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -259,8 +244,7 @@ func (s *Store) SessionMeta(id string) (Meta, error) {
 	return m, nil
 }
 
-// ReminderLine is one persisted system-reminder, anchored to the message index
-// it precedes (mirrors chat.ReminderRecord) for faithful session replay.
+// ReminderLine mirrors chat.ReminderRecord for faithful replay.
 type ReminderLine struct {
 	Seq  int    `json:"seq"`
 	Text string `json:"text"`
@@ -294,8 +278,8 @@ func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
 	return out, rows.Err()
 }
 
-// TruncateReminders removes the session's reminders, for a session whose
-// history has been replaced (see chat.Session.SetMessages).
+// TruncateReminders clears the reminders of a session whose history was
+// replaced.
 func (s *Store) TruncateReminders(id string) error {
 	if _, err := s.db.Exec(`DELETE FROM reminders WHERE session_id=?`, id); err != nil {
 		return fmt.Errorf("runs: truncate reminders: %w", err)
@@ -325,9 +309,8 @@ func (s *Store) deleteSessions(ids []string) error {
 			}
 		}
 	}
-	// Prompt bodies are shared between sessions (an unchanged prompt is one
-	// row however many conversations used it), so they are collected once the
-	// last reference is gone rather than deleted per session.
+	// Prompt bodies are shared between sessions, so they are collected once
+	// the last reference is gone rather than deleted per session.
 	if _, err := tx.Exec(
 		`DELETE FROM prompts WHERE hash NOT IN (SELECT hash FROM turn_prompts)`); err != nil {
 		return fmt.Errorf("runs: collect prompts: %w", err)
@@ -341,11 +324,9 @@ func (s *Store) deleteSessions(ids []string) error {
 	return nil
 }
 
-// JobLogPath returns the on-disk log path for a background job owned by
-// session id — runs/<id>/jobs/<jobID>.log — creating the dir so the caller
-// can open the file directly. Job logs stay plain files (not database rows)
-// so the completion mail can point at them by path. Returns "" when the dir
-// cannot be created (the caller then simply keeps no on-disk log).
+// JobLogPath is runs/<id>/jobs/<jobID>.log, with the dir created so the caller
+// can open it directly. Job logs stay plain files, not rows, so completion
+// mail can point at them by path. "" when the dir cannot be created.
 func (s *Store) JobLogPath(id, jobID string) string {
 	if jobID == "" || jobID != filepath.Base(jobID) {
 		return ""
@@ -360,10 +341,9 @@ func (s *Store) JobLogPath(id, jobID string) string {
 	return filepath.Join(dir, jobID+".log")
 }
 
-// runDir resolves a session's on-disk directory (job logs only — the
-// conversation lives in the database). IDs arrive from user-controlled
-// surfaces, so anything that is not a plain path component is rejected —
-// "../../../etc" must never escape the store.
+// runDir resolves a session's on-disk directory — job logs only, the
+// conversation is in the database. IDs come from user-controlled surfaces, so
+// anything that is not a plain path component is rejected.
 func (s *Store) runDir(id string) string {
 	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
 		return ""

@@ -87,8 +87,8 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: %s already exists — pass --force to overwrite", cfgPath)
 	}
 
-	// The huh form needs a terminal on both ends: it reads keys from stdin and
-	// renders its TUI to stdout (a piped stdout would capture control codes).
+	// The form reads keys from stdin and renders to stdout, so a piped stdout
+	// would capture control codes.
 	tty := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 	a, err := collectAnswers(f, tty)
 	if err != nil {
@@ -125,9 +125,8 @@ func runBoot(f *bootFlags) error {
 	return nil
 }
 
-// showBootSuccess reprints the post-boot summary for the existing config —
-// the same message boot ends on, re-derived from what's on disk (nothing is
-// written or asked). Handy after the original ran off the top of the terminal.
+// showBootSuccess reprints boot's closing summary, re-derived from disk with
+// nothing written or asked — for when the original scrolled away.
 func showBootSuccess() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -140,10 +139,9 @@ func showBootSuccess() error {
 		return fmt.Errorf("boot --show: no config at %s — run `shell3 boot` first", cfgPath)
 	}
 
-	// Re-derive the message variant from disk: an uncommented run_proxy line
-	// means a proxy is wired. The kit's wiring block is YAML inside a comment
-	// fence, so every line starts with "#" — strip exactly one before matching,
-	// which leaves a commented-out "# run_proxy:" example still unmatched.
+	// An uncommented run_proxy line means a proxy is wired. The wiring block
+	// is YAML inside a comment fence, so strip exactly one "#" before
+	// matching — which leaves a commented-out example unmatched.
 	proxyWired := false
 	for _, line := range strings.Split(string(yaml), "\n") {
 		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
@@ -156,8 +154,7 @@ func showBootSuccess() error {
 	return nil
 }
 
-// bootAnswers is the resolved configuration input: flags merged with either
-// the interactive huh form (TTY) or defaults (non-TTY).
+// bootAnswers is flags merged with the interactive form, or with defaults.
 type bootAnswers struct {
 	url, model, name, key string
 	proxy                 string
@@ -167,9 +164,8 @@ type bootAnswers struct {
 	vision                bool
 }
 
-// collectAnswers resolves every boot input. Flags always win; on a TTY the
-// remaining fields are asked via a huh form, otherwise they take defaults
-// (model is required — boot refuses to guess it headlessly).
+// collectAnswers resolves every input. Flags win; on a TTY the rest are
+// asked, otherwise defaulted — except model, which boot refuses to guess.
 func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 	a := bootAnswers{
 		url: f.url, model: f.model, name: f.name, key: f.key,
@@ -194,8 +190,7 @@ func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 	if a.name == "" {
 		a.name = "main"
 	}
-	// A flag-supplied chat id skipped the form's validator; catch it here so a
-	// bad value never reaches the kit.
+	// A flag-supplied chat id skipped the form's validator.
 	a.tgChatID = strings.TrimSpace(a.tgChatID)
 	if err := validateChatID(a.tgChatID); err != nil {
 		return a, fmt.Errorf("boot: chat id %q: %w", a.tgChatID, err)
@@ -214,9 +209,8 @@ func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
-// runBootForm asks for every field not already provided as a flag, one huh
-// group per topic. It mutates a (and the two int fields' string staging) in
-// place; a Ctrl-C surfaces as a plain "aborted" error.
+// runBootForm asks for every field no flag supplied, one group per topic,
+// mutating a in place. Ctrl-C surfaces as a plain "aborted" error.
 func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error {
 	var groups []*huh.Group
 
@@ -235,8 +229,8 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 		model = append(model, huh.NewInput().Title("Name").
 			Description("shell3's handle for this model.").Value(&a.name))
 	}
-	// Secrets echo visibly on purpose: boot runs on a local terminal, and a
-	// long pasted token you can't see is a truncated paste waiting to happen.
+	// Secrets echo on purpose: boot runs on a local terminal, and a long
+	// pasted token you cannot see is a truncated paste waiting to happen.
 	if f.key == "" {
 		model = append(model, huh.NewInput().Title("API key").
 			Description("Blank if your proxy handles auth.").Value(&a.key))
@@ -281,8 +275,6 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 		groups = append(groups, huh.NewGroup(extras...).Title("Extras"))
 	}
 
-	// Secrets echo visibly here too: a bot token is long, and a paste you
-	// cannot see is a truncated paste waiting to happen.
 	var tg []huh.Field
 	if f.tgToken == "" {
 		tg = append(tg, huh.NewInput().Title("Bot token").
@@ -326,9 +318,8 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 const envTelegramToken = "TELEGRAM_TOKEN"
 
 // validateChatID keeps a mistyped chat id out of the kit: the front-end
-// parses it (parseChatID, the shared definition) and refuses to start
-// otherwise, and that failure lands far from where the value was typed. Blank
-// is allowed — it's the "fill it in later" answer.
+// refuses to start on one, and that failure lands far from where it was
+// typed. Blank is the "fill it in later" answer.
 func validateChatID(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -339,9 +330,8 @@ func validateChatID(s string) error {
 	return nil
 }
 
-// validatePositiveInt validates a form int field via the same parse the
-// final positiveInt pass uses; blankOK admits "" (the caller substitutes a
-// default).
+// validatePositiveInt uses the same parse the final pass does; blankOK admits
+// "", which the caller defaults.
 func validatePositiveInt(blankOK bool) func(string) error {
 	return func(s string) error {
 		if strings.TrimSpace(s) == "" {
@@ -357,10 +347,8 @@ func validatePositiveInt(blankOK bool) func(string) error {
 	}
 }
 
-// positiveInt parses a staged int value: blank takes def, anything else must
-// be a positive integer (flag values arrive unvalidated by the form). The
-// single definition of "valid" for both the form validator above and the
-// final parse.
+// positiveInt parses a staged value — blank takes def, anything else must be
+// positive — and is the one definition of valid for the form and the parse.
 func positiveInt(s string, def int, label string) (int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -373,11 +361,8 @@ func positiveInt(s string, def int, label string) (int, error) {
 	return n, nil
 }
 
-// atomicWriteFile writes data to path via a temp file in the same directory
-// followed by a rename, so a crash mid-write cannot truncate or corrupt an
-// existing file — it either has the old contents or the new ones. Used for the
-// .env credentials file. The temp file is created 0600; mode is applied before
-// the rename. The deferred Remove is a no-op once the rename succeeds.
+// atomicWriteFile writes through a temp file and a rename, so a crash cannot
+// truncate the .env: it holds either the old contents or the new.
 func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
@@ -393,8 +378,8 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 		_ = f.Close()
 		return err
 	}
-	// Sync before rename, or a power loss can leave the renamed file empty on
-	// some filesystems — exactly the corruption this helper promises to prevent.
+	// Sync first, or a power loss leaves the renamed file empty on some
+	// filesystems — the corruption this helper exists to prevent.
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err

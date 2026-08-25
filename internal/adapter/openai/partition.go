@@ -2,48 +2,39 @@ package openai
 
 import "strings"
 
-// tagPartitioner splits a streamed content channel into answer text and
-// reasoning text by tracking <think>…</think> wrappers, incrementally and
-// across arbitrary chunk boundaries.
+// tagPartitioner splits streamed content into answer and reasoning text by
+// tracking <think>…</think>, incrementally and across chunk boundaries.
 //
 // It exists because MiniMax does not reliably keep reasoning out of `content`.
-// The cheap rule in visibleContent catches the common shape (a content delta
-// byte-identical to its sibling reasoning field), but when the model's own
-// output quotes think-tags the provider's server-side de-duplication breaks
-// down and whole paragraphs of chain-of-thought arrive in `content` with NO
-// reasoning field beside them, wrapped in the tags. Only a tag scanner can
-// separate those.
+// visibleContent's cheap rule catches the common shape — a content delta
+// byte-identical to its sibling reasoning field — but when the model's own
+// output quotes think-tags the provider's de-duplication breaks down, and
+// whole paragraphs of chain-of-thought arrive in `content` wrapped in tags
+// with no reasoning field beside them. Only a scanner separates those.
 //
-// The hard part is that text ABOUT think-tags must survive: a reply explaining
-// `<think>` inside backticks, or a fenced code block containing one, is answer
-// text and not a delimiter. So the scanner tracks Markdown code context and
-// ignores any tag inside it — the same rule openclaw's reasoning-tag
-// partitioner uses (isInsideCode). Without it, asking the agent to explain a
-// regex silently truncates its reply at the first quoted tag.
+// The hard part is that text ABOUT think-tags must survive: `<think>` inside
+// backticks, or in a fenced block, is answer text and not a delimiter. So the
+// scanner tracks Markdown code context and ignores any tag inside it. Without
+// that, asking the agent to explain a regex truncates its reply at the first
+// quoted tag.
 type tagPartitioner struct {
-	// pending holds a trailing fragment that might still become a tag or a
-	// fence marker once more of the stream arrives ("<thi", "``").
+	// pending is a trailing fragment that may still become a tag or fence
+	// marker once more arrives: "<thi", "``".
 	pending string
 	inThink bool
 	inFence bool // inside a ``` fenced block
 	inCode  bool // inside a single-backtick span
-	// started records whether any answer text has been emitted yet, so the
-	// leading-whitespace trim also covers a reply that opens with newlines
-	// before any think block at all.
+	// started makes the leading-whitespace trim cover a reply that opens with
+	// newlines before any think block at all.
 	started bool
-	// strict is latched once the stream is seen to carry a native reasoning
-	// field. From then on, text found inside a <think> block in `content` is
-	// known to be a duplicate of reasoning already delivered through that
-	// field — possibly on an EARLIER chunk, which is why this is stream-level
-	// state and not a per-delta comparison — so it is dropped rather than
-	// filed a second time. The tags are still tracked: they are what keeps the
-	// duplicate out of the answer. (openclaw calls this markStrict.)
+	// strict latches once the stream is seen to carry a native reasoning
+	// field. From then on, text inside a <think> block in `content` duplicates
+	// reasoning already delivered — possibly on an EARLIER chunk, which is why
+	// this is stream-level state, not a per-delta comparison — so it is
+	// dropped. The tags are still tracked: they keep the duplicate out of the
+	// answer.
 	strict bool
 }
-
-// markStrict records that this stream delivers reasoning through a native
-// field, so reasoning recovered from content tags is redundant.
-func (p *tagPartitioner) markStrict() { p.strict = true }
 
 const (
 	thinkOpen  = "<think>"
@@ -51,28 +42,25 @@ const (
 	fence      = "```"
 )
 
-// pushDelta consumes one content delta together with the reasoning fragment
-// that arrived on the same delta, and returns the text to show the user and the
-// text to file as reasoning.
+// pushDelta consumes one content delta with the reasoning fragment that
+// arrived beside it, returning what to show and what to file as reasoning.
 //
-// The two signals must be combined, not chained. The delta whose content
-// duplicates the reasoning field is usually the very one carrying the opening
-// "<think>" wrapper, so dropping it wholesale — as a dedup pass running before
-// the scanner would — leaves the scanner blind to the block it needed to see,
-// and the rest of the chain-of-thought (which arrives with no reasoning field
-// beside it) sails through as answer text. So: always scan for tags to keep the
-// state machine honest, and use the duplicate check only to decide where this
-// delta's text is routed.
+// The two signals combine, they do not chain. The delta whose content
+// duplicates the reasoning field is usually the one carrying the opening
+// "<think>", so dropping it wholesale — as a dedup pass before the scanner
+// would — blinds the scanner to the block it needed, and the rest of the
+// chain-of-thought, arriving with no reasoning field, sails through as answer.
+// So: always scan for tags, and let the duplicate check decide only routing.
 func (p *tagPartitioner) pushDelta(content, reasoning string) (visible, reasoningOut string) {
 	if reasoning != "" {
-		p.markStrict()
+		p.strict = true
 	}
 	dup := reasoning != "" && visibleContent(content, reasoning) == ""
 	vis, rea := p.push(content)
 	if dup {
-		// Duplicated reasoning: the scan has done its real job (updating the
-		// tag state), and both halves of its output are dropped. The caller
-		// emits the reasoning FIELD for this delta, so returning the scanned
+		// Duplicated reasoning: the scan's real job was updating the tag
+		// state, and both halves of its output are dropped. The caller emits
+		// the reasoning FIELD for this delta, so returning the scanned
 		// copy too would file the same thought twice.
 		return "", ""
 	}

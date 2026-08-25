@@ -38,7 +38,7 @@ func TestConfigDir_ResolvesEmptySpec(t *testing.T) {
 	if err := os.MkdirAll(shell3Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeBaseTree(t, shell3Dir, nil) // creates ~/.shell3/shell3.yaml
+	writeBaseTree(t, shell3Dir, nil) // creates ~/.shell3/shell3.sh
 
 	dir := t.TempDir()
 	writeBaseTree(t, dir, nil) // a cwd config tree that must be ignored

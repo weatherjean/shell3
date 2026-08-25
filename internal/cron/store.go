@@ -21,7 +21,7 @@ type RunStore interface {
 
 // StoreRunStore is the runs-store-backed RunStore. Each job's JobStatus is
 // JSON-encoded into its own row in the dedicated cron_status table (see
-// runs.CronStatusSave/CronStatusLoadAll, and schemaVersion's v5 note in
+// runs.CronStatusSave/CronStatusLoadAll, and schemaVersion in
 // internal/runs/db.go for why this is NOT a row in the shared threads
 // table: threads.session_id is load-bearing for runs.Sweep's "does this
 // thread's session still exist" check, and a job name or JSON blob there

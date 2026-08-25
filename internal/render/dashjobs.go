@@ -100,7 +100,7 @@ func CronDetailHTML(statuses []cron.JobStatus, costs map[string]runs.JobCost, na
 	}
 	kv(&b, "last run", cronLastRun(st))
 	kv(&b, "outcome", cronOutcome(st))
-	kv(&b, "cost", strings.TrimPrefix(cronCostSuffix(st, costs), " · "))
+	kv(&b, "cost", cronCost(st, costs))
 	b.WriteString("</dl>\n")
 	if strings.TrimSpace(st.Prompt) != "" {
 		b.WriteString("<h2>prompt</h2>\n")

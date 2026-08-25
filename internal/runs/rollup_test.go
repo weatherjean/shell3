@@ -74,7 +74,7 @@ func TestCronRollup_SinceFiltersOldSessions(t *testing.T) {
 }
 
 // TestCronRollup_ReportTurnExcluded pins the deliberate, documented
-// undercount described on cronCostSuffix (internal/render/cron.go): the
+// undercount described on cronCost (internal/render/cron.go): the
 // main-agent session that later reads a cron job's task report and answers
 // it runs with cron_job="" (it is the main conversation, not the dispatched
 // child), so its usage must NOT be attributed to the job that triggered it —

@@ -1,19 +1,15 @@
-// Package edittool ports the opencode str-replace edit algorithm to Go:
-// replacer strategies tried in order (see replacers), each yielding candidate substrings of
-// the file content that match the requested old_string. The first replacer
-// that yields a uniquely-locatable match wins.
+// Package edittool ports opencode's str-replace edit algorithm: replacer
+// strategies tried in order, each yielding candidate substrings matching the
+// requested old_string, and the first uniquely-locatable match wins.
 //
-// Credit: this is a direct Go port of opencode's edit tool, licensed under
-// opencode's terms. See:
+// A direct Go port of opencode's edit tool, under opencode's terms:
 //
 //	https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/edit.ts
 //
-// opencode in turn cites:
-//   - https://github.com/cline/cline (diff-apply)
-//   - https://github.com/google-gemini/gemini-cli (editCorrector)
+// opencode in turn cites cline (diff-apply) and gemini-cli (editCorrector).
 //
-// Error strings here are model-facing tool output, deliberately unprefixed
-// (no "edittool:" wrapping) — they are shown to the LLM verbatim as guidance.
+// Error strings here are model-facing tool output, deliberately unprefixed —
+// they are shown to the LLM verbatim as guidance.
 package edittool
 
 import (
@@ -33,16 +29,13 @@ var (
 // Candidates may differ from find (e.g. with original whitespace restored).
 type replacer func(content, find string) []string
 
-// replace applies the replacer cascade and returns the modified content.
-// Tries each replacer in order; the first candidate that resolves to exactly
-// one occurrence in the source (or any occurrence when replaceAll is true)
-// wins. If no replacer yields a candidate, returns errNotFound. If candidates
-// were found but every one was ambiguous, returns errMultipleMatch.
+// replace runs the replacer cascade: the first candidate resolving to exactly
+// one occurrence wins. No candidate at all is errNotFound; candidates that
+// were all ambiguous are errMultipleMatch.
 //
-// When replaceAll is true the first replacer with any occurring candidate wins
-// and ALL of its distinct occurring candidates are replaced; ambiguity is
-// expected, so this path returns only success or errNotFound (never
-// errMultipleMatch).
+// With replaceAll the first replacer with any occurring candidate wins and ALL
+// its distinct occurring candidates are replaced. Ambiguity is expected there,
+// so that path never returns errMultipleMatch.
 func replace(content, oldString, newString string, replaceAll bool) (string, error) {
 	if oldString == newString {
 		return "", errNoChange
@@ -51,10 +44,9 @@ func replace(content, oldString, newString string, replaceAll bool) (string, err
 	for _, r := range replacers {
 		candidates := r(content, oldString)
 		if replaceAll {
-			// Replace-all must apply EVERY distinct candidate this replacer found
-			// that occurs in content — not just the first. Fuzzy replacers return
-			// several distinct substrings (e.g. blocks at different indentation);
-			// using only the first silently leaves the others unreplaced.
+			// EVERY distinct occurring candidate, not just the first: fuzzy
+			// replacers return several substrings — blocks at different
+			// indentation — and the rest would be silently left unreplaced.
 			var occurring []string
 			for _, search := range candidates {
 				if strings.Contains(content, search) {
@@ -85,11 +77,10 @@ func replace(content, oldString, newString string, replaceAll bool) (string, err
 	return "", errMultipleMatch
 }
 
-// replaceAllOccurrences replaces every occurrence of every distinct candidate
-// substring with newString in one left-to-right pass over content. Overlapping
-// matches are resolved earliest-first (a later span that starts inside an
-// already-replaced span is skipped), and the replacement text is never itself
-// rescanned, so no double-replacement can occur.
+// replaceAllOccurrences rewrites every occurrence of every candidate in one
+// left-to-right pass. Overlaps resolve earliest-first — a span starting inside
+// an already-replaced one is skipped — and the replacement is never rescanned,
+// so nothing can be replaced twice.
 func replaceAllOccurrences(content string, candidates []string, newString string) string {
 	type span struct{ start, end int }
 	var spans []span
@@ -112,9 +103,8 @@ func replaceAllOccurrences(content string, candidates []string, newString string
 	if len(spans) == 0 {
 		return content
 	}
-	// Total order: earliest start first, and on a tie the longest span wins.
-	// A total order (not just start) keeps the result deterministic when two
-	// distinct candidates begin at the same offset.
+	// Earliest start first, longest span on a tie: a total order, so two
+	// candidates beginning at the same offset stay deterministic.
 	sort.Slice(spans, func(i, j int) bool {
 		if spans[i].start != spans[j].start {
 			return spans[i].start < spans[j].start
@@ -151,8 +141,8 @@ func simpleReplacer(_ string, find string) []string {
 	return []string{find}
 }
 
-// lineTrimmedReplacer matches lines after .trim() — handles trailing/leading
-// whitespace differences per line. Returns the original (un-trimmed) substring.
+// lineTrimmedReplacer matches lines after trimming, returning the original
+// un-trimmed substring.
 func lineTrimmedReplacer(content, find string) []string {
 	originalLines := strings.Split(content, "\n")
 	searchLines := strings.Split(find, "\n")
@@ -182,11 +172,9 @@ func lineTrimmedReplacer(content, find string) []string {
 	return out
 }
 
-// lineOffsets returns the byte offset of each line start in the "\n"-joined
-// lines, plus one final sentinel entry one past a would-be trailing newline —
-// so the slice [offsets[i], offsets[j]-1) is lines i..j-1 without the last
-// newline. Computed once per call so candidate emission is O(1), not a
-// per-candidate rescan from line zero.
+// lineOffsets is each line's start offset in the joined text, plus a sentinel
+// one past a would-be trailing newline, so [offsets[i], offsets[j]-1) is lines
+// i..j-1. Computed once per call, so candidate emission is O(1).
 func lineOffsets(lines []string) []int {
 	offsets := make([]int, len(lines)+1)
 	for i, l := range lines {
@@ -195,12 +183,10 @@ func lineOffsets(lines []string) []int {
 	return offsets
 }
 
-// With multiple candidates, require ≥30% average middle-line similarity to
-// disambiguate; otherwise the match is too speculative. A single candidate
-// (one place in the file where both first and last anchor lines match) is
-// always accepted: the anchor pair is already a strong signal, and the
-// common case is the model getting the framing lines right while rewriting
-// everything in between.
+// With several candidates, ≥30% average middle-line similarity is required to
+// disambiguate. A single candidate is always accepted: the anchor pair is
+// already a strong signal, and the common case is a model that got the framing
+// lines right while rewriting everything between them.
 const multipleCandidatesThreshold = 0.3
 
 // blockAnchorReplacer matches multi-line blocks where first and last lines
@@ -286,13 +272,11 @@ func whitespaceNormalizedReplacer(content, find string) []string {
 	normalizedFind := norm(find)
 	var out []string
 
-	// The fuzzy-match regexp depends only on find, not on any line, so compile
-	// it once up front. re stays nil when find has no words, which disables the
-	// per-line Contains branch below, exactly as the per-line guards did.
-	// QuoteMeta escapes regex metacharacters, but it cannot rescue invalid
-	// UTF-8 in find — regexp rejects those bytes — so compile defensively and
-	// leave re nil on failure (disabling the fuzzy branch) rather than panicking
-	// on an adversarial old_string. The nil guard below already handles it.
+	// The regexp depends only on find, so compile once. nil when find has no
+	// words, disabling the per-line branch below. QuoteMeta escapes
+	// metacharacters but cannot rescue invalid UTF-8, which regexp rejects, so
+	// compile defensively and leave re nil rather than panicking on an
+	// adversarial old_string.
 	var re *regexp.Regexp
 	if words := strings.Fields(strings.TrimSpace(find)); len(words) > 0 {
 		parts := make([]string, len(words))

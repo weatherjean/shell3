@@ -58,9 +58,8 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	}
 
 	sess := NewSession(SessionOpts{StoreID: origID, Store: st})
-	// Mirrors Session.RunParts's persist closure: RunTurn itself does not
-	// flush to the store, the caller's beforeDone does (see turn.go's doc
-	// comment on beforeDone).
+	// RunTurn itself does not flush to the store; the caller's beforeDone
+	// does (see turn.go's doc comment on beforeDone).
 	persist := func() { saveHistory(cfg.Store, LogOrNoop(nil), sess, sess.ID()) }
 
 	// Turn 1: adds usage to the ORIGINAL session row (below CompactAt, no roll).

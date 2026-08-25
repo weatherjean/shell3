@@ -8,9 +8,7 @@ import (
 )
 
 // ErrIsDir is returned by ReadTextFile when the path is a directory. Callers
-// detect it with errors.Is(err, ErrIsDir). Exported along with ReadTextFile
-// because chat's read tool needs the same two, and this package owns the
-// agent's file I/O.
+// detect it with errors.Is(err, ErrIsDir).
 var ErrIsDir = errors.New("is a directory")
 
 // ReadTextFile reads absPath's full contents. Returns os.ErrNotExist if the

@@ -106,8 +106,8 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 	return ids, threadsDropped + int(n), nil
 }
 
-// sweepOrphanDirs removes runs/<id>/ directories with no session row —
-// pre-database JSONL leftovers and crash debris. Grace-windowed so a dir a
+// sweepOrphanDirs removes runs/<id>/ directories with no session row: crash
+// debris. Grace-windowed so a dir a
 // live process created moments ago (a job log ahead of its first write)
 // survives; best-effort per dir.
 func (s *Store) sweepOrphanDirs(now time.Time) {

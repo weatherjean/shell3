@@ -165,8 +165,8 @@ A token in a URL is a bearer secret, and it now grants more than transcripts:
 a live link lets its holder read your whole configuration tree through the
 files browser — the kit (`shell3.sh`), skills, and any wrapper
 scripts under `lib/`, plus the tail of every background job's output. The one
-thing it can never surface is a credential: `.env`, its dotenv siblings
-(`.env.*`), and any `ai-do-not-read*` file are listed but reported redacted,
+thing it can never surface is a credential: `.env` and its dotenv siblings
+(`.env.*`) are listed but reported redacted,
 and their bytes are never read off disk to build the page. Binary and
 oversized files are flagged rather than dumped. Treat a `/dash` link the way
 you would treat read access to `~/.shell3` itself, and let it expire.

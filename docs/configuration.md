@@ -3,7 +3,7 @@
 Your config is a **directory** (default `~/.shell3/`), and its centre is ONE
 file: `shell3.sh`, the **kit**. It holds the wiring, every agent, their tools
 and the gate. [kits.md](kits.md) is the kit's own reference — its block
-grammar, its `agent:`/`shared:`/`tool:`/`skill:`/`test:`/`command:`/`event:`
+grammar, its `agent:`/`shared:`/`tool:`/`test:`/`command:`/`event:`
 declarations, and the authoring loop; this page documents what you can put in the kit's `shell3:`
 wiring block and the directories beside it.
 
@@ -400,7 +400,7 @@ main_gate() {
 }
 ```
 
-Unlike `tool:`/`skill:`, `gate:`, `note:` and `event:` are **named, not
+Unlike `tool:`, `gate:`, `note:` and `event:` are **named, not
 positional** —
 one function usually governs several agents, and a copy per agent is how two
 rule sets drift apart. An agent no block names runs **ungated**; there is no
@@ -895,7 +895,7 @@ skill when a tunnel is set up). The dashboard shows the live conversation
 (linked to its folding transcript), background jobs with their captured
 output logs, cron schedules and per-job detail, stored run replays, and a
 read-only browser of the config directory — the kit, skills, and cron
-prompts. Credential files (`.env`, `.env.*`, `ai-do-not-read*`) appear in the
+prompts. Credential files (`.env`, `.env.*`) appear in the
 listing but their contents are always redacted, never read from disk. A port outside 0–65535 is a load error; a
 bind failure at startup is a warning, and `/dash` reports the dash as down.
 In a kit, `dash_port` goes in the `shell3:` wiring block like every other

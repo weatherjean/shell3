@@ -29,14 +29,6 @@ EOF
 worker_local() { echo local; }
 
 #---
-# skill: house-rules
-#---
-worker_rules() { cat <<'EOF'
-Never invent a company detail.
-EOF
-}
-
-#---
 # shared: web
 #---
 #---
@@ -159,21 +151,6 @@ g_dup() { :; }
 	k := mustParse(t, src)
 	if _, err := k.Resolve(k.Agents[0], false); err == nil {
 		t.Fatal("want error when a shared tool collides with a local one")
-	}
-}
-
-func TestSystemPromptInlinesSkills(t *testing.T) {
-	k := mustParse(t, capKit)
-	r, err := k.Resolve(k.Agents[1], false)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	p := r.SystemPrompt()
-	if !strings.Contains(p, "I do one job.") {
-		t.Fatalf("prompt missing body: %q", p)
-	}
-	if !strings.Contains(p, "### house-rules") || !strings.Contains(p, "Never invent") {
-		t.Fatalf("prompt missing skill: %q", p)
 	}
 }
 

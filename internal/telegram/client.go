@@ -9,46 +9,36 @@ import "context"
 // the API's int message_ids, the console client renders its own counter.
 type Msg struct {
 	ChatID int64
-	// SenderID is the Telegram user id of whoever sent this message, 0 when the
-	// transport cannot tell (a channel post has no author). It is the thing
-	// authorization is decided on: it comes from Telegram's servers and cannot
-	// be set by the sender, unlike anything in the message text. In a DM it
-	// equals ChatID; in a group it does not, which is the whole point — group
-	// membership must not be authorization.
+	// SenderID is who sent this, 0 when the transport cannot tell (a channel
+	// post has no author). Authorization is decided on it because Telegram
+	// sets it and the sender cannot. In a DM it equals ChatID; in a group it
+	// does not, which is the point — membership must not be authorization.
 	SenderID  int64
 	ID        string // this message's id ("" if unknown)
 	ReplyToID string // id this replies to, for thread resolution ("" = not a reply)
 	Text      string
 	ReplyTo   string // text of the message this replies to (Telegram reply/quote), for model context
-	// ReplyToBot reports that the message this one replies to was sent by
-	// THIS bot. It comes from Telegram (the replied-to message carries its
-	// author), which is what makes it survive a restart: the in-process
-	// record of what the bot has sent is empty after a reboot, and a group
-	// whose only trigger was "reply to me" would go deaf until someone
-	// @mentioned it again.
+	// ReplyToBot: the replied-to message was sent by THIS bot. Taken from
+	// Telegram's own author field, so it survives a restart — the in-process
+	// record of what the bot sent is empty after a reboot, and a group whose
+	// only trigger was "reply to me" would go deaf.
 	ReplyToBot bool
-	// MigratedTo is the new chat id when this message announces that the
-	// group became a supergroup (Telegram's migrate_to_chat_id service
-	// message). The chat id changes at that moment, and every id-keyed thing
-	// — the room's conversation, its thread marker — has to follow or the
-	// conversation is stranded under an id that will never speak again.
+	// MigratedTo is the new chat id when the group became a supergroup
+	// (migrate_to_chat_id). Every id-keyed thing — the conversation, its
+	// thread marker — must follow or it is stranded under a dead id.
 	MigratedTo int64
-	// ChatType is Telegram's chat type ("private", "group", "supergroup",
-	// "channel"). Anything but "private" is a room with other people in it,
-	// where a message must be addressed to the bot to count (see trigger.go).
+	// ChatType is "private", "group", "supergroup" or "channel". Anything but
+	// private holds other people, so a message must be addressed to the bot
+	// to count (trigger.go).
 	ChatType string
 	Media    []Media // photos/voice/documents already resolved to bytes
-	// HasMedia reports that the message CARRIES an attachment, whether or not
-	// its bytes have been fetched yet.
+	// HasMedia: the message carries an attachment, fetched or not.
 	HasMedia bool
-	// FetchMedia downloads this message's attachments, or nil when there are
-	// none (or a transport already filled Media in).
-	//
-	// Downloading is deferred so it happens AFTER authorization, never
-	// before: with Telegram privacy mode off the bot is delivered every
-	// message in a group, and resolving eagerly in the transport meant
-	// fetching every stranger's photo into memory only to discard it a
-	// moment later at the gate.
+	// FetchMedia downloads the attachments; nil when there are none or a
+	// transport already filled Media in. Deferred so it runs AFTER
+	// authorization: with privacy mode off the bot receives every group
+	// message, and fetching eagerly pulled every stranger's photo into
+	// memory to discard it a moment later at the gate.
 	FetchMedia func(ctx context.Context) []Media
 }
 
@@ -61,15 +51,14 @@ type Media struct {
 
 // Command is one bot command shown in Telegram's "/" autocomplete menu.
 type Command struct {
-	Command     string `json:"command"` // without leading slash, e.g. "clear"
+	Command     string `json:"command"` // without leading slash, e.g. "new"
 	Description string `json:"description"`
 }
 
-// SendOpt carries per-send delivery options. Variadic on the send methods so
-// the many call sites that don't care stay unchanged.
+// SendOpt is per-send delivery options, variadic so call sites that do not
+// care stay unchanged.
 type SendOpt struct {
-	// Silent sends without a notification ping (Telegram
-	// disable_notification): the message arrives, the phone stays quiet.
+	// Silent is Telegram disable_notification: arrives, phone stays quiet.
 	Silent bool
 }
 
@@ -90,13 +79,11 @@ type tgClient interface {
 	Updates(ctx context.Context) <-chan Msg
 	// Send posts plain text (no parse mode); returns the sent message id.
 	Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (msgID string, err error)
-	// SendHTML posts text with parse_mode=HTML. Callers must pass a valid
-	// Telegram HTML subset; on any API error the caller should fall back to Send
-	// with a plain-text version.
+	// SendHTML posts a valid Telegram HTML subset; callers fall back to Send
+	// with plain text on any API error.
 	SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (msgID string, err error)
-	// SendReply posts plain text as a reply to replyTo, threading it in the
-	// chat. If replyTo no longer exists (deleted message) it falls back to a
-	// plain Send so a thread whose anchor vanished never fails a turn.
+	// SendReply threads plain text onto replyTo, falling back to a plain Send
+	// if that message is gone — a vanished anchor must not fail a turn.
 	SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (msgID string, err error)
 	// SendHTMLReply is SendReply with parse_mode=HTML; callers fall back to
 	// SendReply with plain text on an HTML rejection.
@@ -104,27 +91,24 @@ type tgClient interface {
 	// Typing shows the "typing…" chat action.
 	Typing(ctx context.Context, chatID int64) error
 
-	// Username is the bot's own @name without the "@", used to spot an
-	// @mention in a group.
+	// Username is the bot's own @name without the "@", for @mention matching.
 	Username(ctx context.Context) (string, error)
 
-	// ChatInfo reports a chat's title and description — the raw material of
-	// a room's prompt brief. A private chat has no description.
+	// ChatInfo is a chat's title and description, the room brief's raw
+	// material. A private chat has no description.
 	ChatInfo(ctx context.Context, chatID int64) (title, description string, err error)
-	// SendDocument uploads a file to the chat with an optional caption,
-	// returning the sent message id so thread anchors can advance onto it.
+	// SendDocument uploads a file, returning its id so an anchor can advance.
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (msgID string, err error)
-	// SendPhoto uploads an image to the chat with an optional caption.
+	// SendPhoto uploads an image.
 	SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
-	// SendVoice uploads a voice note (ogg/opus) to the chat with an optional caption.
+	// SendVoice uploads an ogg/opus voice note.
 	SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error
-	// SendAudio uploads a music/audio file to the chat with an optional caption.
+	// SendAudio uploads a music/audio file.
 	SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
-	// SendVideo uploads a video file to the chat with an optional caption.
+	// SendVideo uploads a video file.
 	SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
 	// DeleteMessage removes a sent message (the progress bubble's cleanup).
-	// Best-effort: an already-deleted or too-old message is not an error the
-	// caller can act on.
+	// Best-effort — an already-deleted or too-old message is not actionable.
 	DeleteMessage(ctx context.Context, chatID int64, msgID string) error
 	// EditPlain replaces a message's text (the progress bubble's own edits).
 	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error

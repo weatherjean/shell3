@@ -21,14 +21,13 @@ import (
 	"github.com/weatherjean/shell3/internal/telegram"
 )
 
-// newTelegramCommand builds `shell3 telegram` — the personal bot front-end.
-// One chat, one agent, ONE long-lived conversation: every inbound message
-// continues it (a Telegram reply is a context hint, not a session switch, and
-// /new is the only reset), cron fires from a hidden dispatch parent, and
-// background completions come back as mail.
+// newTelegramCommand builds `shell3 telegram`, the bot front-end: one
+// long-lived conversation per chat that every message continues (a reply is a
+// context hint, /new the only reset), cron firing from a hidden dispatch
+// parent, and completions coming back as mail.
 //
-// --console swaps the Telegram transport for stdin/stdout, driving the same
-// bot loop with no credentials and no network.
+// --console swaps the transport for stdin/stdout, driving the same bot loop
+// with no credentials and no network.
 func newTelegramCommand() *cobra.Command {
 	var configDir string
 	var console bool
@@ -48,8 +47,8 @@ func newTelegramCommand() *cobra.Command {
 
 			tg := rt.Telegram()
 
-			// Console mode needs no Telegram credentials — it drives the same
-			// bot loop over stdin/stdout with a fixed dummy chat id.
+			// Console mode needs no credentials: the same loop over
+			// stdin/stdout with a fixed dummy chat id.
 			var chatID int64
 			if console {
 				chatID = telegram.ConsoleChatID
@@ -57,22 +56,21 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 
-			// The agent's shell runs in telegram.workdir; the config dir is the
-			// fallback, so a hosted agent stays self-contained.
+			// The shell runs in telegram.workdir, falling back to the config
+			// dir so a hosted agent stays self-contained.
 			workDir := tg.WorkDir
 			if workDir == "" {
 				workDir = resolved
 			}
 
-			// One-conversation model: the bot holds ONE long-lived session and the
-			// thread index records which one it is, so a restart resumes it. The
-			// index lives for the whole process (kept across /reload); openThreads
-			// runs the runs janitor first.
+			// The thread index records which session each room is holding, so a
+			// restart resumes them. It lives for the whole process, across
+			// /reload; openThreads runs the janitors first.
 			threads := openThreads(rt, "telegram")
 
-			// Transport: the real Telegram bot API, or (--console) a stdin/stdout
-			// dev transport driving the same bot loop headlessly. apiClient stays
-			// nil in console mode and the Telegram-only side effects are skipped.
+			// The real Bot API, or --console's stdin/stdout transport driving
+			// the same loop. apiClient stays nil in console mode, and the
+			// Telegram-only side effects are skipped.
 			var apiClient *telegram.BotAPIClient
 			var b *telegram.Bot
 			if console {
@@ -84,18 +82,15 @@ func newTelegramCommand() *cobra.Command {
 				}
 				b = telegram.NewBot(apiClient, rt, chatID, threads)
 			}
-			// Authorization is per sender, not per chat (see senderAllowlist):
-			// a bad allow_from entry fails startup rather than silently
-			// widening or narrowing who can drive an unrestricted shell.
+			// Authorization is per sender, not per chat, so a bad allow_from
+			// entry fails startup rather than silently widening or narrowing
+			// who can drive an unrestricted shell.
 			if err := b.SetAllowFrom(tg.AllowFrom); err != nil {
 				return err
 			}
 			b.SetMaxConcurrentTurns(tg.MaxConcurrentTurns)
-			// Transport-independent wiring (media, decorator, completion host,
-			// cron parent + scheduler, /reload) — shared by the Bot API and
-			// --console transports.
-			// LIFO: the scheduler-stop cleanup runs before the earlier
-			// `defer rt.Close()`.
+			// Transport-independent wiring, shared by both transports. LIFO:
+			// the scheduler-stop cleanup runs before the earlier rt.Close().
 			stopSched, err := wireHost(b, rt, workDir)
 			if err != nil {
 				return err
@@ -132,16 +127,13 @@ func newTelegramCommand() *cobra.Command {
 	return cmd
 }
 
-// telegramHomeChat validates the `telegram:` block the way the front-end needs
-// it and returns the HOME chat: where cron results and ownerless completions
-// land. It is not an access rule — rooms are authorized by who speaks in them
-// (allow_from), never by being listed here.
+// telegramHomeChat validates the telegram: block and returns the HOME chat,
+// where cron results and ownerless completions land. Not an access rule —
+// rooms are authorized by who speaks in them.
 //
-// Every failure names the field at fault: the block is almost always PRESENT
-// (shell3 boot always writes one, blank fields included) and the user's actual
-// problem is one empty field — telling them to add a block they are looking at
-// is the wrong diagnosis. Shared with `shell3 health`, so the check and the
-// message are the same in both places.
+// Every failure names the field at fault: the block is almost always present,
+// since boot writes one with blank fields, and telling someone to add a block
+// they are looking at is the wrong diagnosis. Shared with `shell3 health`.
 func telegramHomeChat(tg config.TelegramConfig) (int64, error) {
 	switch {
 	case !tg.Present:
@@ -150,9 +142,8 @@ func telegramHomeChat(tg config.TelegramConfig) (int64, error) {
 		return 0, fmt.Errorf("telegram.token is empty — put your @BotFather token in the .env beside shell3.sh")
 	}
 	if tg.ChatID == "" {
-		// No home chat named: fall back to the first allowlisted person's DM.
-		// A bot cannot open a DM the user has never written to, so this only
-		// works once they have — `shell3 health` says so.
+		// Fall back to the first allowlisted person's DM. A bot cannot open a
+		// DM the user has never written to, which `shell3 health` says.
 		if len(tg.AllowFrom) == 0 {
 			return 0, fmt.Errorf("telegram.chat_id is empty and telegram.allow_from names nobody — " +
 				"set chat_id to the chat cron results should land in (@userinfobot prints yours), " +
@@ -169,9 +160,9 @@ func telegramHomeChat(tg config.TelegramConfig) (int64, error) {
 		return 0, fmt.Errorf("telegram.chat_id %q is not a number", tg.ChatID)
 	}
 	// A GROUP chat id is negative and can never equal a user id, so the
-	// allowlist's "the chat owner" fallback resolves to nobody: the bot would
-	// start, look healthy, and ignore every human being. Refuse instead of
-	// letting that be discovered by silence.
+	// allowlist's owner fallback resolves to nobody and the bot would start,
+	// look healthy, and ignore every human. Refuse rather than be discovered
+	// by silence.
 	if id < 0 && len(tg.AllowFrom) == 0 {
 		return 0, fmt.Errorf("telegram.chat_id %d is a group and telegram.allow_from is empty — "+
 			"nobody would be allowed to drive the agent; list the user ids that may (@userinfobot prints yours)", id)
@@ -179,14 +170,12 @@ func telegramHomeChat(tg config.TelegramConfig) (int64, error) {
 	return id, nil
 }
 
-// parseChatID is the one definition of what a chat id IS — a base-10 int64,
-// exactly what the Bot API takes. Both validators (boot's form/flag check and
-// telegramChatID above) call it, wrapping the error in their own wording.
+// parseChatID is the one definition of a chat id: a base-10 int64, what the
+// Bot API takes. Validators wrap its error in their own wording.
 func parseChatID(s string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 }
 
-// newQuietStore opens the /quiet toggle's file at ~/.shell3/quiet_mode.json.
 func newQuietStore() (*telegram.QuietStore, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -195,9 +184,8 @@ func newQuietStore() (*telegram.QuietStore, error) {
 	return &telegram.QuietStore{Path: filepath.Join(paths.NewGlobal(home).Root, "quiet_mode.json")}, nil
 }
 
-// configReloader and rearmBot are the narrow slices of *shell3.Runtime and
-// *telegram.Bot that reloadAndRearm needs, keeping the reload-coordination
-// logic unit-testable with fakes.
+// configReloader and rearmBot are the slices of Runtime and Bot that
+// reloadAndRearm needs, so the coordination logic is testable with fakes.
 type configReloader interface {
 	Reload() (shell3.ReloadResult, error)
 	Cron() []shell3.CronJob
@@ -205,23 +193,19 @@ type configReloader interface {
 
 type rearmBot interface {
 	SetJobRunner(func(name string) error)
-	// PostCompletion, alongside SetJobRunner, lets reloadAndRearm wire the
-	// new scheduler's tool-job post callback itself — see wireCronPost.
+	// With SetJobRunner, this lets reloadAndRearm wire the new scheduler's
+	// tool-job post callback itself.
 	PostCompletion(p shell3.CompletionPost) error
 }
 
-// reloadAndRearm performs a /reload: rebuild config, then stop the old cron
-// scheduler and arm a fresh one from the reloaded jobs (rewiring the bot's
-// /run handler). Returns the new scheduler (nil when no jobs), the reload
-// result, and any error. On failure the old scheduler is left running and
-// returned unchanged, so a bad config never tears down a working schedule.
+// reloadAndRearm rebuilds config, then stops the old cron scheduler and arms a
+// fresh one from the reloaded jobs, rewiring /run. On failure the old
+// scheduler is returned still running, so a bad config never tears down a
+// working schedule.
 //
-// The bot's host tools (send_media_telegram, reload, status) need no
-// explicit re-registration: they are installed via the session decorator,
-// which Runtime.Reload re-applies to every live session. store and log carry
-// through to the fresh scheduler exactly like the initial armCron call (see
-// internal/cron/store.go, cmd/shell3/host.go's partsLogger) — a reload's
-// scheduler restores run history from the same seam a fresh start does.
+// The host tools need no re-registration: they install through the session
+// decorator, which Runtime.Reload re-applies to every live
+// session.
 func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, log applog.Logger, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {

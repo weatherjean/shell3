@@ -19,7 +19,7 @@ func captureBootSuccess(t *testing.T) string {
 	}
 	old := os.Stdout
 	os.Stdout = w
-	printBootSuccess("/home/u/.shell3", "/home/u/.shell3/shell3.yaml", "/home/u/.shell3/.env", false)
+	printBootSuccess("/home/u/.shell3", "/home/u/.shell3/shell3.sh", "/home/u/.shell3/.env", false)
 	_ = w.Close()
 	os.Stdout = old
 	out, err := io.ReadAll(r)
@@ -34,11 +34,11 @@ func captureBootSuccess(t *testing.T) string {
 func TestBootSuccessMessage(t *testing.T) {
 	base := captureBootSuccess(t)
 	for _, want := range []string{
-		"/home/u/.shell3/shell3.yaml", // config paths
-		"shell3 ask",                  // the local ask mode must be advertised
-		"shell3 telegram",             // how to run the front-end
-		"TELEGRAM_TOKEN",              // where the token lives
-		"docs/deploying.md",           // service management is user-owned, and documented there
+		"/home/u/.shell3/shell3.sh", // config paths
+		"shell3 ask",                // the local ask mode must be advertised
+		"shell3 telegram",           // how to run the front-end
+		"TELEGRAM_TOKEN",            // where the token lives
+		"docs/deploying.md",         // service management is user-owned, and documented there
 	} {
 		if !strings.Contains(base, want) {
 			t.Errorf("boot success message missing %q", want)
