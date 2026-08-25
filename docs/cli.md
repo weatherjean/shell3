@@ -51,7 +51,7 @@ arrives (it stays behind only when the turn failed, as a breadcrumb).
 `/stop` cancels the running turn (the dash shows what's queued).
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [task reports](configuration.md#task-reports): a failure or a
-`direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
+`report: raw` result posts to the chat (🔔, or ⏰ for a cron origin); everything
 else hands the agent a report, whose reply reaches you as an ✉️ update — only when
 the result warrants it (it stays silent otherwise). Every message you
 didn't directly cause carries a marker (⏰ cron, 🔔 completion, ⚠️ failure,

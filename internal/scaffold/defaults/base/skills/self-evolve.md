@@ -29,10 +29,11 @@ so future-you knows when to open the file. The body is the how.
 the declaration shape. The rule: tools fetch, parse, query and persist; they
 never score, rank or decide. Judgment belongs in a turn.
 
-**A recurring job** → a `cron:` block in `shell3.sh`: a schedule plus either
-`agent:` (the function under it is the prompt) or `tool:` (a declared tool,
-run with no model turn and no prompt at all). See the `building-agents` skill
-for the declaration shape.
+**A recurring job** → a `cron:` block in `shell3.sh`: a schedule plus an
+`agent:`, with the function under it as the prompt. Cron runs agent turns
+only — a job that mostly runs a tool still declares an agent, and the agent
+calls the tool and decides what its result means. See the `building-agents`
+skill for the declaration shape.
 
 ## What is not yours
 

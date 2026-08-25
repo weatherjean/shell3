@@ -236,50 +236,58 @@ that ends with a summary unconditionally buys a main-agent turn on every
 tick, and the sentinel has to come from the JOB: the main agent answering
 `NO_REPLY` after reading the report has already spent the turn.
 
-A block takes exactly one of `agent:` or `tool:` — a job is either a prompt
-or a tool call, never both, never neither. On a cron block those two keys are
-the job's *target*, not a nested declaration. `tool:` skips the agent
-entirely: no dispatch, no employee, no model turn at all — just the tool's
-shell function, called directly on schedule. This is the valve for
-mechanical, idempotent work (a sync, a rotation) where a prompt job's whole
-cost is the turn spent judging its own output:
+A block names exactly one target, and it is always an `agent:`. Cron runs
+agent turns only. `tool:` was a second job kind — the tool's shell function,
+called directly on schedule with no model turn at all — and it was removed:
+a scheduled shell call has no model in the loop to judge its result, which is
+exactly where judgment leaks out of a turn and into a script nobody reviews.
+It also bypassed the job runtime, so tool jobs were the one piece of
+scheduled work with no concurrency cap. A kit still carrying `tool:` on a
+cron block is a LOAD error naming the replacement, rather than arming
+nothing.
+
+Mechanical, idempotent work is still a job — it just keeps a model in the
+loop. Declare the agent, hand it the tool, and let it read the output:
 
 ```sh
 #---
 # cron: sync
 # schedule: "@every 30m"
-# tool: sync-notion-recent
+# agent: syncer
 #---
+cron_sync() { cat <<'EOF'
+Run sync-notion-recent. It is silent when nothing was inserted and nothing
+failed: if it printed nothing, reply with exactly NO_REPLY. If it reported
+failures, say what failed and how many.
+EOF
+}
 ```
 
-A tool job binds **no function at all** (there is no prompt, so the next
-definition in the file belongs to somebody else) and passes no arguments — a
-tool declaring a *required* param can never be used this way, and the kit
-refuses to load if one tries. It honours `workdir:` like a prompt job does.
-With no model turn around to relay its result, it posts for itself: silent on
-an empty result or the `NO_REPLY` sentinel (the point of scheduling an
-idempotent sync often), `⏰ <job>: <result>` otherwise, and `⚠️ <job> failed:
-<error>` on error — capped at 120s, the same limit a foreground `bash` call
-gets.
+That prompt is the whole difference. The tool still does the work; the turn
+decides what its output means, and the `NO_REPLY` sentinel keeps a quiet tick
+down to one cheap employee turn with no main-agent turn behind it. If a job
+has no judgment in it whatsoever, it does not belong on the schedule: call
+the tool from inside a tick that is already running, or give it a system
+timer.
 
-`report:` applies only to an `agent:` job and is the one axis for what the
-tick's finish does to the chat: `auto` (the default) spends a main-agent turn
-to judge the result, `raw` posts it straight to the chat instead and spends
-no turn, `always` spends the turn and requires it to answer. A tool job runs
-no model turn, so setting both is a load error rather than a silent no-op —
-as is the pre-`report:` spelling `direct: true`, which fails naming its
-replacement.
+`report:` is the one axis for what the tick's finish does to the chat:
+`auto` (the default) spends a main-agent turn to judge the result, `raw`
+posts it straight to the chat instead and spends no turn, `always` spends the
+turn and requires it to answer. The pre-`report:` spelling `direct: true` is
+a load error naming its replacement, rather than a silently ignored key.
 
 Every target resolves at load, next to the check that a `gate:` names a real
-agent — an unknown agent, an unknown tool, a tool needing an argument, a
-duplicate job name. Tool resolution is whole-kit: `tool:` names no agent, so
-the lookup searches every agent's declared tools plus every shared group, not
-just one agent's capability list — the operator scheduling a tool they
-declared themselves is the trust boundary, not `use:` scoping. The
-duplicate-name check at `tool:` declaration time is per-scope only (two
-agents may each legally declare a tool called the same thing), so a name that
-collides across scopes is refused by name here rather than silently running
-whichever function happened to parse first.
+agent — an unknown agent, a duplicate job name, a malformed schedule. All of
+them are load errors rather than a failed dispatch on the first tick, and
+`shell3 health` inherits every one by parsing the kit.
+
+A job's recorded history describes the RUN, not its dispatch. The scheduler
+fires and learns only that the subagent was accepted, so the outcome comes
+back later from the completion router: the dash's Cron table shows a job that
+dispatches cleanly and fails its work as a failure. Between a firing and its
+result the row still carries the previous run's verdict beside the new
+timestamp — inventing one for work still in flight would be the same lie in
+the other direction.
 
 ## The gate
 

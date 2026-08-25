@@ -141,9 +141,10 @@ whose chat is gone land in the operator's home chat.
 ## Cron
 
 Scheduled jobs are `cron:` blocks in the kit — `rg '^# cron:' -A 6
-~/.shell3/shell3.sh` shows every one with its schedule and target. A job runs
-either an agent (a prompt) or a tool directly (no model turn). You did not
-"decide" to run; a schedule fired.
+~/.shell3/shell3.sh` shows every one with its schedule and target. Every job
+runs an AGENT TURN; there is no tool-only job. You did not "decide" to run; a
+schedule fired. The dash's Cron table carries each job's last outcome, and
+that outcome is the run's own result, not merely that it was dispatched.
 
 ## The gate
 

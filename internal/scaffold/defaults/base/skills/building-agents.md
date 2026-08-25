@@ -115,20 +115,36 @@ judgment turn and posts the raw result instead — no tokens; `report: always`
 keeps the turn and requires it to answer, for a job that must be heard from
 every tick. Failures always surface whichever you pick.
 
-For mechanical work — a sync, a rotation — name a tool instead:
+Cron runs AGENT TURNS ONLY. There is no `tool:` job — a kit that names one
+fails to load. A scheduled shell call has no model in the loop to judge its
+result, which is exactly where judgment leaks out of a turn and into a script
+nobody reviews.
+
+Mechanical work — a sync, a rotation — is still a job; it just keeps a model
+in the loop. Declare the agent, hand it the tool, and say what silence means:
 
 ```sh
 #---
 # cron: sync-inbox
 # schedule: "@every 30m"
-# tool: sync-inbox
+# agent: syncer
 #---
+cron_sync_inbox() { cat <<'EOF'
+Run sync-inbox. It prints nothing when there was nothing to sync: if it
+printed nothing, reply with exactly NO_REPLY. If it failed, say what failed.
+EOF
+}
 ```
 
-A tool job binds no function and takes no prompt: it runs the tool with no
-model turn at all, and stays silent unless the tool prints something. That is
-what makes an idempotent tick affordable to run often. It passes no
-arguments, so the tool must not require any.
+That `NO_REPLY` line is what makes a frequent tick affordable: the completion
+router drops the result before any main-agent turn starts, so a quiet tick
+costs one cheap employee turn and nothing else. A prompt that always signs
+off with a summary, however short, buys a full main-agent turn at live
+conversation context on every single tick.
+
+If a job has no judgment in it at all, it does not belong on the schedule:
+call the tool from inside a tick that is already running, or give it a system
+timer.
 
 ## The loop
 
