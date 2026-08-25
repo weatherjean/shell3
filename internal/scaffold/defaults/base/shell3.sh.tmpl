@@ -302,6 +302,16 @@ main_gate() {
 
   block() { jq -cn --arg r "$1" --arg p "$POLICY" '{block: true, reason: ((($r | sub("[. ]+$";"")) + ". " + $p))}'; exit 0; }
 
+  ROUTE_POLICY="That path is allowed and is NOT a workaround — take it. Do not try to reach the same thing \
+another way, and do not edit the gate. Only if that genuinely cannot work, stop and tell the operator which \
+rule blocked you and why."
+
+  route() {
+    jq -cn --arg r "$1" --arg w "$2" --arg p "$ROUTE_POLICY" \
+      '{block: true, reason: (($r | sub("[. ]+$";"")) + ". THE WAY TO DO THIS: " + $w + " " + $p)}'
+    exit 0
+  }
+
   # Soft deny: the LLM reviewer decides (review_model in the wiring block,
   # default = the main model). Use it for judgment calls — a rule that is
   # right most of the time but has real false positives. The reviewer sees
@@ -408,9 +418,11 @@ SEGEOF
   case "$subject" in
     *.env.example*|*.env.sample*) ;;
     .env|*"/.env"*|*" .env"*|*'"'.env*)
-      block "the agent must not read or write .env — have a lib/bin script read the one key it needs at point of use (scripting skill)" ;;
+      route "the agent must not read or write .env — a key in a command reaches the transcript and stays there" \
+            "write (or reuse) a script that greps the ONE key it needs out of .env at point of use, then run that script. The key never enters the conversation, and the script itself is not restricted." ;;
     *"/.shell3/secrets"*)
-      block "the agent must not read the secrets/ dir — a script reads the one key file it needs at point of use; printing keys into the chat leaks them into transcripts" ;;
+      route "the agent must not read the secrets/ dir — printing a key into the chat leaks it into transcripts forever" \
+            "write (or reuse) a script that opens the one key file it needs at point of use, then run that script. Reading the token inside a script is ALLOWED and is the documented pattern (scripting skill); only reading it into the conversation is not." ;;
   esac
 
   # A write TARGET is unambiguous wherever it sits, so this runs against the

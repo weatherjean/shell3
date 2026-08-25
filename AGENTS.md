@@ -112,7 +112,17 @@ shell3.sh with every agent prompt, which the agent edits as ordinary work, so
 a write rule on that path would block the self-evolve loop and a narrower one
 is theatre. The "do not edit the gate"
 refusal text is advice only, and `hooks_test.go` PINS this by asserting
-`echo x >> ./shell3.sh` is ALLOWED. It is a speed
+`echo x >> ./shell3.sh` is ALLOWED. A refusal comes in one of TWO shapes, and confusing them is a real
+failure mode: `block()` carries the blanket policy ("no alternative command,
+path, or tool… stop and tell the operator") and is for rules with no way
+forward; `route()` names the sanctioned path instead and keeps escalation as a
+fallback rather than the instruction. The credential rules are `route()`s,
+because their whole remedy IS an alternative command — a script reading the one
+key it needs at point of use. Under the blanket policy they forbade the very
+thing they pointed at, and on 2026-08-25 an agent blocked from a Notion token
+correctly stopped and asked its operator to paste database URLs by hand while
+the sanctioned path was allowed the whole time. Pinned by
+`TestScaffoldedGateRoutesInsteadOfDeadEnding`. It is a speed
 bump by construction — the agent can rewrite it in two lines of Python — so
 real protection is filesystem-level (a dedicated user, `chflags
 uchg`/`chattr +i`, a container).

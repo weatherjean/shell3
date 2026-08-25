@@ -174,11 +174,15 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 			t.Errorf("%q = %s, want block (%s)", command, verdict, what)
 			continue
 		}
-		// Every refusal has to tell the model not to route around it. Without
-		// this an agent treats a block as an obstacle and, running unattended,
-		// has all night to find another way.
-		if !strings.Contains(strings.ToLower(reason), "do not work around") {
-			t.Errorf("%q refused without the no-workaround instruction: %s", command, reason)
+		// Every refusal has to close the loophole, in one of two shapes:
+		// the hard suffix where there is no way forward, or a route() that
+		// names the sanctioned path. A refusal with neither invites the agent
+		// to go looking, and unattended it has all night to find something.
+		// Which rule gets which shape is pinned by
+		// TestScaffoldedGateRoutesInsteadOfDeadEnding.
+		low := strings.ToLower(reason)
+		if !strings.Contains(low, "do not work around") && !strings.Contains(low, "the way to do this") {
+			t.Errorf("%q refused with neither a no-workaround instruction nor a route: %s", command, reason)
 		}
 	}
 }
@@ -415,4 +419,55 @@ func TestScaffoldedGateBlocksModelClientsInScripts(t *testing.T) {
 			t.Errorf("the auditor's own grep = %s (%s), want allow", v, r)
 		}
 	})
+}
+
+// A refusal that blocks a METHOD must name the sanctioned way to do the same
+// work, and must NOT carry the blanket policy suffix. The suffix forbids "no
+// alternative command, path, or tool" and then says "stop and tell the
+// operator" — which forbids the very alternative the credential rule exists to
+// point at, leaving escalation as the only branch standing.
+//
+// Observed 2026-08-25: blocked from reading the Notion token, the agent
+// stopped and asked its operator to paste database URLs by hand. It was
+// obeying the text exactly. Running a script that reads the token at point of
+// use was allowed the whole time.
+func TestScaffoldedGateRoutesInsteadOfDeadEnding(t *testing.T) {
+	dir := scaffoldForHooks(t)
+
+	for _, command := range []string{
+		"cat ~/.shell3/secrets/notion-token",
+		"cat ./.env",
+	} {
+		verdict, reason := runHook(t, dir, "main_gate", "bash", command)
+		if verdict != "block" {
+			t.Fatalf("%q = %s, want block", command, verdict)
+		}
+		low := strings.ToLower(reason)
+		if !strings.Contains(low, "the way to do this") {
+			t.Errorf("%q refused without naming the way forward:\n%s", command, reason)
+		}
+		if !strings.Contains(low, "script") {
+			t.Errorf("%q should route the agent to a script:\n%s", command, reason)
+		}
+		// The dead-end phrasing must be gone from THIS rule: it is what made
+		// the agent escalate instead of taking the path the same sentence
+		// had just described.
+		if strings.Contains(low, "no alternative command, path, or tool") {
+			t.Errorf("%q still carries the blanket policy, which forbids the route it just gave:\n%s", command, reason)
+		}
+	}
+
+	// Rules with genuinely no way forward keep the hard suffix.
+	for _, command := range []string{"rm -rf /usr/bin", "pkill -f shell3"} {
+		_, reason := runHook(t, dir, "main_gate", "bash", command)
+		if !strings.Contains(strings.ToLower(reason), "do not work around") {
+			t.Errorf("%q lost the no-workaround instruction:\n%s", command, reason)
+		}
+	}
+
+	// And the routed path is actually open.
+	if v, r := runHook(t, dir, "main_gate", "bash",
+		"cd ~/work && python3 scripts/sync_notion.py"); v != "allow" {
+		t.Errorf("running a script that reads its own key = %s (%s), want allow", v, r)
+	}
 }
