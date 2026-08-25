@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/mdpage"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -21,6 +22,8 @@ func (b *Bot) registerSendTool(s *shell3.Session) {
 	_ = s.RegisterHostTool(shell3.HostTool{
 		Name: "send_media_telegram",
 		Description: "Send a local file from disk to the user via Telegram (image, document, audio, video, …). " +
+			"A .md file is rendered to a formatted HTML page on the way out — write the document as markdown and send it; " +
+			"the user gets a real page with headings and tables, not source. Name it .txt to send the source itself. " +
 			"Use it to deliver a file you produced or were asked to share.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -44,6 +47,27 @@ func (b *Bot) registerSendTool(s *shell3.Session) {
 			return b.sendMediaHandler(ctx, s, argsJSON)
 		},
 	})
+}
+
+// renderMarkdownDoc turns a markdown document into a rendered HTML page on the
+// way out, returning the new filename and bytes (or the originals unchanged).
+//
+// Sending markdown SOURCE to a chat is the thing the agent is trying to escape
+// when it writes a document at all: Telegram shows a .md attachment as a file
+// of plain text, with the hashes and pipes still in it. The same conversion
+// already happens to a reply that overflows its bubbles (render.go), so doing
+// it here means one rule — markdown reaches the user as a page — rather than
+// two formats and an explanation of when each applies.
+//
+// To send the source itself, name the file .txt.
+func renderMarkdownDoc(name string, data []byte) (string, []byte) {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".md", ".markdown":
+	default:
+		return name, data
+	}
+	title := strings.TrimSuffix(name, filepath.Ext(name))
+	return title + ".html", mdpage.Render(title, string(data))
 }
 
 // validateKind checks whether a file with the given extension and size may
@@ -139,6 +163,7 @@ func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJS
 	case "video":
 		err = b.client.SendVideo(ctx, c.chatID, base, data, args.Caption)
 	default:
+		base, data = renderMarkdownDoc(base, data)
 		_, err = b.client.SendDocument(ctx, c.chatID, base, data, args.Caption)
 	}
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/mdpage"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 )
@@ -139,9 +140,19 @@ func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendO
 // to the newest message. An empty replyTo posts plain.
 //
 // replyMaxChunks caps the bubbles one reply may occupy; a longer one posts its
-// first chunk plus the whole text as a reply.md document, so the chat stays
-// readable and the phone gets one ping rather than twenty-five.
+// first chunk plus the whole text as a rendered HTML document, so the chat
+// stays readable and the phone gets one ping rather than twenty-five.
+//
+// The document is HTML, not the raw markdown it used to be. Attaching source
+// only moved the wall of unformatted text into a file: Telegram renders none
+// of the structure (mdhtml does not even parse a table, so a comparison
+// arrives as literal pipes), and neither did a .md attachment. A rendered page
+// is the thing the chat could not be.
 const replyMaxChunks = 2
+
+// overflowDocName is what the attachment is called in the chat. Fixed, so a
+// long reply always looks the same in the message list.
+const overflowDocName = "reply.html"
 
 func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {
 	if text == "" {
@@ -150,7 +161,8 @@ func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, repl
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
 		_ = c.postChunk(ctx, sess, replyTo, chunks[0], opts...)
-		if id, err := c.b.client.SendDocument(ctx, c.chatID, "reply.md", []byte(text), "full reply", opts...); err == nil {
+		page := mdpage.Render("shell3 — full reply", text)
+		if id, err := c.b.client.SendDocument(ctx, c.chatID, overflowDocName, page, "full reply", opts...); err == nil {
 			c.recordSent(sess, id)
 			return
 		}

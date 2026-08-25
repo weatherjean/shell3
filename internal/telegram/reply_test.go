@@ -9,8 +9,10 @@ import (
 )
 
 // A reply longer than replyMaxChunks bubbles posts its first chunk plus the
-// FULL text as a reply.md document — never a machine-gun of chat messages.
-// Both message ids are recorded so the thread anchor lands on the document.
+// FULL text as a RENDERED HTML document — never a machine-gun of chat
+// messages, and never raw markdown source, which only relocated the wall of
+// unformatted text into a file. Both message ids are recorded so the thread
+// anchor lands on the document.
 func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
@@ -23,11 +25,17 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 		t.Fatalf("want exactly 1 chat bubble, got %d", got)
 	}
 	doc, ok := fc.lastDoc()
-	if !ok || doc.filename != "reply.md" {
-		t.Fatalf("want a reply.md document, got %+v ok=%v", doc, ok)
+	if !ok || doc.filename != "reply.html" {
+		t.Fatalf("want a reply.html document, got %+v ok=%v", doc, ok)
 	}
-	if string(doc.data) != long {
-		t.Fatal("the document must carry the FULL reply text")
+	body := string(doc.data)
+	if !strings.HasPrefix(body, "<!doctype html>") {
+		t.Fatalf("the attachment must be a rendered page, got: %.80s", body)
+	}
+	// Every line of the reply survives into the page: the attachment is the
+	// FULL answer, not a preview of it.
+	if n := strings.Count(body, "line of reply text"); n != 900 {
+		t.Fatalf("page carries %d of 900 lines — the full reply must survive", n)
 	}
 	c := tconv(b)
 	c.mu.Lock()
@@ -88,5 +96,25 @@ func TestWithReplyContext(t *testing.T) {
 	}
 	if withReplyContext("hi", "   ") != "hi" {
 		t.Fatal("blank reply text should pass through unchanged")
+	}
+}
+
+// The overflow page renders structure Telegram cannot: mdhtml parses no
+// tables at all, so a long comparison posted inline arrives as literal pipe
+// characters. In the attachment it must be a real table.
+func TestPostReplyOverflowRendersTables(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	long := "| theme | n |\n|---|---|\n| schema | 21 |\n\n" + strings.Repeat("filler line\n", 900)
+	tconv(b).postReply(context.Background(), sess, "7", long)
+
+	doc, ok := fc.lastDoc()
+	if !ok {
+		t.Fatal("expected the overflow document")
+	}
+	if !strings.Contains(string(doc.data), "<td>schema</td>") {
+		t.Fatal("the page must render a real table, not the source pipes")
 	}
 }

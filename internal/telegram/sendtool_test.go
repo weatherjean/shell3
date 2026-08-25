@@ -271,3 +271,29 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 		}
 	}
 }
+
+// A markdown document is rendered on the way out. Sending .md SOURCE is the
+// thing writing a document was meant to escape — Telegram shows it as a file
+// of plain text with the hashes and pipes still in it.
+func TestSendMediaRendersMarkdownDocuments(t *testing.T) {
+	for _, name := range []string{"plan.md", "PLAN.MARKDOWN"} {
+		gotName, gotData := renderMarkdownDoc(name, []byte("# Plan\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"))
+		if filepath.Ext(gotName) != ".html" {
+			t.Fatalf("%s: sent as %q, want an .html page", name, gotName)
+		}
+		if !strings.Contains(string(gotData), "<td>1</td>") {
+			t.Fatalf("%s: page did not render the table:\n%s", name, gotData)
+		}
+	}
+}
+
+// Everything else passes through untouched — including the .txt escape hatch
+// for someone who genuinely wants the source.
+func TestSendMediaLeavesOtherDocumentsAlone(t *testing.T) {
+	for _, name := range []string{"notes.txt", "data.csv", "report.pdf", "archive.zip"} {
+		gotName, gotData := renderMarkdownDoc(name, []byte("# not markdown here"))
+		if gotName != name || string(gotData) != "# not markdown here" {
+			t.Fatalf("%s was rewritten to %q", name, gotName)
+		}
+	}
+}
