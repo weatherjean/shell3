@@ -14,36 +14,13 @@ const (
 	RoleTool      Role = "tool"
 )
 
-// ContentPartType identifies the kind of content in a ContentPart.
-type ContentPartType string
-
-const (
-	ContentPartTypeText       ContentPartType = "text"
-	ContentPartTypeImageURL   ContentPartType = "image_url"   // data URI or HTTPS URL
-	ContentPartTypeInputAudio ContentPartType = "input_audio" // base64 wav/mp3
-	ContentPartTypeFile       ContentPartType = "file"        // OpenAI-compatible file part (PDF), base64 file_data
-)
-
-// ContentPart is one element of a multimodal user message.
-type ContentPart struct {
-	Type        ContentPartType
-	Text        string
-	ImageURL    string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
-	AudioData   string // base64-encoded raw audio bytes (input_audio)
-	AudioFormat string // "wav" | "mp3" | "ogg"
-	FileData    string // data URI ("data:application/pdf;base64,...") (file)
-	FileName    string // filename (file)
-}
-
 // Message is one turn in a conversation.
 type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
-	// ContentParts replaces Content for multimodal messages (vision).
-	ContentParts []ContentPart `json:"content_parts,omitempty"`
-	ToolCallID   string        `json:"tool_call_id,omitempty"`
-	Name         string        `json:"name,omitempty"`
-	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	// ReasoningContent holds the non-standard chain-of-thought text the openai
 	// adapter populates from streaming and echoes back on the next turn:
 	// Moonshot 400s when thinking mode is on and an assistant tool-call message

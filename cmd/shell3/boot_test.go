@@ -83,11 +83,10 @@ func TestEnvKeyForName(t *testing.T) {
 }
 
 // TestCollectAnswersNonTTY covers the headless (flags-only) path: flags win,
-// blanks take defaults, model is required, int flags are validated, and the
-// vision flag flows through.
+// blanks take defaults, model is required, and int flags are validated.
 func TestCollectAnswersNonTTY(t *testing.T) {
 	t.Run("defaults fill blanks", func(t *testing.T) {
-		a, err := collectAnswers(&bootFlags{model: "m", vision: true}, false)
+		a, err := collectAnswers(&bootFlags{model: "m"}, false)
 		if err != nil {
 			t.Fatalf("collectAnswers: %v", err)
 		}
@@ -96,9 +95,6 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 		if a.ctxWindow != 128000 || a.compactAt != 102400 {
 			t.Errorf("int defaults: ctx=%d compact=%d, want 128000/102400", a.ctxWindow, a.compactAt)
-		}
-		if !a.vision {
-			t.Error("vision flag must flow through")
 		}
 	})
 
@@ -159,7 +155,7 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
 
-	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy", vision: true}
+	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy"}
 	if err := runBoot(f); err != nil {
 		t.Fatalf("runBoot: %v", err)
 	}
@@ -207,19 +203,6 @@ func TestBootEndToEnd(t *testing.T) {
 	if _, err := config.Load(resolved); err != nil {
 		t.Fatalf("generated config failed to load: %v", err)
 	}
-	// Vision=true opts the main agent into the media tool (read_media).
-	kitBody, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-	if err != nil {
-		t.Fatalf("read shell3.sh: %v", err)
-	}
-	if !strings.Contains(string(kitBody), "# use: [media]") ||
-		strings.Contains(string(kitBody), "# # use: [media]") {
-		t.Errorf("vision boot should opt into media; got:\n%s", kitBody)
-	}
-	if strings.Contains(string(kitBody), "\nmedia:") {
-		t.Errorf("vision boot must not render a media: block; got:\n%s", kitBody)
-	}
-
 	// No-clobber: a second boot without --force refuses.
 	if err := runBoot(f); err == nil {
 		t.Error("second boot without --force should error (config exists)")

@@ -102,7 +102,7 @@ func resolveReview(ctx context.Context, cfg ToolConfig, name, command, reason st
 }
 
 // gateNonBashTool runs the tool-call hook chain for a non-bash tool (edit_file,
-// read_media, host tools, …) before it dispatches.
+// host tools, …) before it dispatches.
 // The gate sees the real name and a nil command (only bash tools carry one), so
 // it decides by name / args. Only a pass or a block is meaningful here: a
 // {command=...} or {argv=...} verdict cannot apply to a non-bash tool, so it

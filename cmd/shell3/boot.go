@@ -26,8 +26,6 @@ type bootFlags struct {
 	contextWindow, compactAt     string
 	tgToken, tgChatID            string
 	workDir                      string
-	vision                       bool
-	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
 	prompts                      bool // refresh scaffold prompt files and exit
@@ -52,7 +50,6 @@ func newBootCommand() *cobra.Command {
 				}
 				return runPromptRefresh(paths.NewGlobal(home).Root, time.Now())
 			}
-			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
 		},
 	}
@@ -66,7 +63,6 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().StringVar(&f.workDir, "workdir", "", "Where the agent's shell runs (default: the config dir)")
-	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (adds the read_media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.sh, skills/, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
 	cmd.Flags().BoolVar(&f.prompts, "prompts", false,
@@ -103,7 +99,6 @@ func runBoot(f *bootFlags) error {
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
 		ChatID: a.tgChatID,
-		Vision: a.vision,
 	}, f.force); err != nil {
 		return err
 	}
@@ -161,7 +156,6 @@ type bootAnswers struct {
 	tgToken, tgChatID     string
 	workDir               string
 	ctxWindow, compactAt  int
-	vision                bool
 }
 
 // collectAnswers resolves every input. Flags win; on a TTY the rest are
@@ -173,7 +167,6 @@ func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 		tgToken:  f.tgToken,
 		tgChatID: f.tgChatID,
 		workDir:  f.workDir,
-		vision:   f.vision,
 	}
 	ctxStr, compactStr := f.contextWindow, f.compactAt
 
@@ -237,15 +230,6 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 	}
 	if len(model) > 0 {
 		groups = append(groups, huh.NewGroup(model...).Title("Model"))
-	}
-
-	if !f.visionSet {
-		a.vision = true
-		groups = append(groups, huh.NewGroup(
-			huh.NewConfirm().Title("Can your model see images?").
-				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, or PDF file directly. No: leave it off until you\nswitch to a multimodal model.").
-				Value(&a.vision),
-		).Title("Vision"))
 	}
 
 	var ctx []huh.Field

@@ -128,9 +128,10 @@ takes the kit file itself as its argument.
   OpenRouter, DeepSeek, and friends. MCP servers too, opt-in per agent and
   gated like every other tool.
 - **Media as declared tools, not config**: no built-in transcription, TTS,
-  or image generation — the agent reads/sends files with `read_media` and
-  `send_media_telegram`, and voice/image capabilities are tools you paste
-  into your kit ([recipes](docs/cookbook/voice-images.md)).
+  image generation, or perception at all — an attachment's path lands in the
+  prompt and the agent sends files back with `send_media_telegram`; voice and
+  vision are tools you paste into your kit
+  ([guide](internal/scaffold/defaults/base/skills/using-llms.md)).
 
 ## Documentation
 

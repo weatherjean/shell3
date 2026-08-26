@@ -18,7 +18,7 @@ func TestPromptRefreshPreservesWiringAndBacksUp(t *testing.T) {
 	dir := t.TempDir()
 
 	kit := "#---\n# shell3:\n#   models: {m1: {base_url: \"http://x\", api_key: k, model: mm}}\n#---\n" +
-		"#---\n# agent: main\n# use: [media]\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
+		"#---\n# agent: main\n# use: [bash]\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(kit), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -75,20 +75,18 @@ func TestPromptRefreshPreservesWiringAndBacksUp(t *testing.T) {
 	}
 }
 
-// The media skill is only shipped to an install whose kit opts into media —
-// refreshing a text-only install must not hand it the vision guidance.
-func TestPromptRefreshNonVisionVariant(t *testing.T) {
+// --prompts refreshes scaffold-shipped skills only; the kit is hand-edited
+// (wiring, every agent, every tool in one file) and must survive a refresh
+// byte-for-byte, whatever it declares.
+func TestPromptRefreshLeavesTheKitAlone(t *testing.T) {
 	dir := t.TempDir()
 	kit := "#---\n# shell3:\n#   models: {m1: {base_url: \"http://x\", api_key: k, model: mm}}\n#---\n" +
-		"#---\n# agent: main\n# # use: [media]\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
+		"#---\n# agent: main\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(kit), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := runPromptRefresh(dir, time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "media.md")); err == nil {
-		t.Error("a non-vision install must not receive the media skill")
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {

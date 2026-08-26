@@ -11,13 +11,16 @@ import (
 
 // Builtins are the tool names an agent may name in `use:` to get a built-in
 // tool.
-var Builtins = []string{"bash", "bash_bg", "edit", "media", "history"}
+var Builtins = []string{"bash", "bash_bg", "edit", "history"}
 
-// mainDefaults is what the main agent gets without declaring anything: every
-// built-in except `media`. read_media needs a multimodal model, so handing it
-// to an agent whose model cannot see images offers a tool that always fails —
-// `use: [media]` opts in when the model supports it.
-var mainDefaults = []string{"bash", "bash_bg", "edit", "history"}
+// removedBuiltins are names a kit may still declare from an older install.
+// Each fails the load naming its replacement: a stale kit must say what to do
+// instead, never arm nothing silently.
+var removedBuiltins = map[string]string{
+	"media": "the read_media tool was removed. Perception is a tool you declare: " +
+		"see the using-llms skill for a `see` tool block, and ask the operator " +
+		"which vision model to point it at",
+}
 
 // Resolved is one agent's fully-resolved capability set: the built-ins it asked
 // for, the MCP servers it opted into, and every declared tool it can call
@@ -41,7 +44,7 @@ type Resolved struct {
 func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 	r := Resolved{Agent: a, Tools: append([]Tool{}, a.Tools...)}
 	if isMain {
-		r.Builtins = append(r.Builtins, mainDefaults...)
+		r.Builtins = append(r.Builtins, Builtins...)
 	}
 
 	for _, name := range a.Use {
@@ -50,10 +53,13 @@ func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 			r.MCP = append(r.MCP, strings.TrimPrefix(name, "mcp:"))
 			continue
 		case isBuiltin(name):
-			if !isMain || name == "media" {
+			if !isMain {
 				r.Builtins = append(r.Builtins, name)
 			}
 			continue
+		}
+		if why, gone := removedBuiltins[name]; gone {
+			return Resolved{}, fmt.Errorf("agent %q (line %d): use: %q — %s", a.Name, a.Line, name, why)
 		}
 		g, ok := k.group(name)
 		if !ok {

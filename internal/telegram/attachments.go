@@ -56,16 +56,15 @@ func saveAttachments(files []Media) []savedFile {
 	return out
 }
 
-// attachmentNote turns saved attachments into a text note for the agent,
-// naming read_media only when that tool is actually enabled for the agent.
-func attachmentNote(saved []savedFile, hasReadMedia bool) string {
+// attachmentNote turns saved attachments into a text note for the agent: what
+// arrived and where it landed. It names no tool — perception is a tool the
+// operator declares, the harness cannot know whether one exists, and the
+// skills index is already in the prompt.
+func attachmentNote(saved []savedFile) string {
 	if len(saved) == 0 {
 		return ""
 	}
-	how := "Use `bash` (cat, file, …) to inspect them."
-	if hasReadMedia {
-		how = "Use the `read_media` tool to view images/audio, or `bash` for other files."
-	}
+	const how = "Inspect with `bash`."
 	var lines []string
 	for _, s := range saved {
 		lines = append(lines, fmt.Sprintf("- %s (%s, %s) saved at %s", s.Name, s.MIME, humanBytes(s.Size), s.Path))

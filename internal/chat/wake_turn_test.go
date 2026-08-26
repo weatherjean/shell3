@@ -12,9 +12,9 @@ import (
 
 // TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage proves the wake-turn
 // history-hygiene defect: a turn initiated with an empty user message (the
-// RunQueued wake turn) seeded purely from the inbox must NOT persist an empty,
-// part-less user row. Such a row replays as openai.UserMessage("") on later
-// turns, which real providers reject with HTTP 400.
+// RunQueued wake turn) seeded purely from the inbox must NOT persist an empty
+// user row. Such a row replays as openai.UserMessage("") on later turns,
+// which real providers reject with HTTP 400.
 func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -25,8 +25,8 @@ func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	for i, m := range sess.Messages() {
-		if m.Role == llm.RoleUser && m.Content == "" && len(m.ContentParts) == 0 {
-			t.Fatalf("empty part-less user message persisted at index %d: %+v", i, sess.Messages())
+		if m.Role == llm.RoleUser && m.Content == "" {
+			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.Messages())
 		}
 	}
 }
@@ -52,11 +52,6 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 		if strings.Contains(m.Content, "do the queued thing") {
 			found = true
 		}
-		for _, p := range m.ContentParts {
-			if strings.Contains(p.Text, "do the queued thing") {
-				found = true
-			}
-		}
 	}
 	if !found {
 		t.Fatalf("queued text did not reach the wire on the wake turn; msgs=%+v", calls[0].Msgs)
@@ -65,14 +60,14 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 
 // TestWhitespaceOnlyInboxSeededTurn_NoProviderCall proves FIX 2: a wake
 // (RunQueued-style, empty initiating message) turn whose entire inbox is
-// whitespace-only — interjectReminder returns "" and there are no media parts —
+// whitespace-only — interjectReminder returns "" —
 // must NOT send a system-only request to the provider. With no prior history,
 // allMsgs would be just [system], which a strict provider rejects. The turn is
 // skipped cleanly: no LLM call, and no empty user row persisted.
 func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
-	sess.Interject("   \n\t  ") // whitespace-only steering text, no parts
+	sess.Interject("   \n\t  ") // whitespace-only steering text
 
 	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	// Mirror RunQueued: an empty initiating user message; the inbox supplies input.
@@ -82,8 +77,8 @@ func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 		t.Fatalf("whitespace-only wake turn sent %d provider call(s); want 0: %+v", len(calls), calls)
 	}
 	for i, m := range sess.Messages() {
-		if m.Role == llm.RoleUser && m.Content == "" && len(m.ContentParts) == 0 {
-			t.Fatalf("empty part-less user message persisted at index %d: %+v", i, sess.Messages())
+		if m.Role == llm.RoleUser && m.Content == "" {
+			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.Messages())
 		}
 	}
 }

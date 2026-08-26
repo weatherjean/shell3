@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"time"
 
@@ -24,13 +23,11 @@ import (
 // root in production; injectable for tests). now stamps the backup dir.
 func runPromptRefresh(dir string, now time.Time) error {
 	kitPath := filepath.Join(dir, "shell3.sh")
-	kitSrc, err := os.ReadFile(kitPath)
-	if err != nil {
+	if _, err := os.Stat(kitPath); err != nil {
 		return fmt.Errorf("boot --prompts: no shell3.sh in %s — this refreshes an existing install; run a plain `shell3 boot` first", dir)
 	}
-	vision := toolsMediaRe.Match(kitSrc)
 
-	files, err := scaffold.PromptFiles(scaffold.Values{Name: "main", Vision: vision})
+	files, err := scaffold.PromptFiles(scaffold.Values{Name: "main"})
 	if err != nil {
 		return err
 	}
@@ -39,12 +36,6 @@ func runPromptRefresh(dir string, now time.Time) error {
 	// and every tool in one hand-edited file, so there is no safe seam to
 	// splice a new prompt into. Refreshing skills gives an upgrade the new
 	// guidance without touching anything the operator wrote.
-	// The media skill documents read_media. An install whose kit does not opt
-	// into media has no such tool, so shipping the skill would teach it a verb
-	// it cannot call.
-	if !vision {
-		delete(files, "skills/media.md")
-	}
 
 	backupDir := filepath.Join(dir, ".backup", "prompts-"+now.Format("20060102-150405"))
 	rels := make([]string, 0, len(files))
@@ -94,9 +85,3 @@ func runPromptRefresh(dir string, now time.Time) error {
 	fmt.Println("apply with a reload (send /reload, or ask the agent to `reload`)")
 	return nil
 }
-
-// toolsMediaRe matches a kit declaration line opting into the media tool.
-// A kit's declaration lines are themselves comments (`# use: [media]`), so the
-// non-vision scaffold renders the opt-in double-commented (`# # use: …`) —
-// hence the single-# anchor, which distinguishes the two.
-var toolsMediaRe = regexp.MustCompile(`(?m)^#\s?use:\s*\[[^\]]*\bmedia\b`)

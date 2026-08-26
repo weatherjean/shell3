@@ -43,43 +43,35 @@ func TestSaveAttachments_WritesFiles(t *testing.T) {
 	}
 }
 
-func TestAttachmentNote_ToolGating(t *testing.T) {
-	saved := saveAttachments([]Media{{Bytes: []byte("x"), MIME: "image/jpeg", Filename: "photo.jpg"}})
-	t.Cleanup(func() {
-		for _, s := range saved {
-			_ = os.Remove(s.Path)
-		}
+func TestAttachmentNoteNamesNoTool(t *testing.T) {
+	note := attachmentNote([]savedFile{
+		{Name: "photo.jpg", MIME: "image/jpeg", Size: 84 * 1024, Path: "/m/tg-1.jpg"},
 	})
-
-	// read_media enabled → mention it + include the path.
-	on := attachmentNote(saved, true)
-	if !strings.Contains(on, "read_media") || !strings.Contains(on, saved[0].Path) {
-		t.Fatalf("note should name read_media and the path: %q", on)
+	if strings.Contains(note, "read_media") {
+		t.Error("note must not name a removed tool")
 	}
-	// read_media disabled → must NOT mention it; should suggest bash.
-	off := attachmentNote(saved, false)
-	if strings.Contains(off, "read_media") {
-		t.Fatalf("note must not mention read_media when disabled: %q", off)
+	if strings.Contains(note, "skill") {
+		t.Error("the harness must not guess at tools it cannot see; the skills index is already in the prompt")
 	}
-	if !strings.Contains(off, "bash") {
-		t.Fatalf("note should suggest bash when read_media is off: %q", off)
+	for _, want := range []string{"photo.jpg", "image/jpeg", "/m/tg-1.jpg", "bash"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note missing %q: %s", want, note)
+		}
 	}
 }
 
 func TestAttachmentNote_Empty(t *testing.T) {
-	if attachmentNote(nil, true) != "" {
+	if attachmentNote(nil) != "" {
 		t.Fatal("want empty note for no attachments")
 	}
 }
 
 // TestMediaMessage_AttachmentNoteReachesTurnPrompt is the end-to-end
-// must-not-regress check for the media.stt removal (Task 4): a message
-// carrying an attachment, with no text of its own, still gets its saved
-// file's path injected into the prompt the model actually receives —
-// composeText in bot.go's runUserTurn calls attachmentNote(mail.saved, ...)
-// directly now that preflightText (and its STT half) is gone. Unit-testing
-// attachmentNote alone (above) proves the function is correct; this proves
-// the wiring that calls it from handleMsg is still connected.
+// must-not-regress check that a message carrying an attachment, with no text
+// of its own, still gets its saved file's path injected into the prompt the
+// model receives. Unit-testing attachmentNote alone (above) proves the
+// function is correct; this proves the wiring that calls it from the
+// composeText closure is still connected.
 func TestMediaMessage_AttachmentNoteReachesTurnPrompt(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})

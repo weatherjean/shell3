@@ -65,3 +65,14 @@ func TestToolDefsIsOrderStable(t *testing.T) {
 		}
 	}
 }
+
+// read_media was a built-in reaching a hard-coded loader; perception is now
+// a tool an agent declares in its own kit, not something shipped in the
+// binary's tool table.
+func TestReadMediaIsNotAToolAnyMore(t *testing.T) {
+	for _, b := range builtins {
+		if b.Def.Name == "read_media" {
+			t.Fatal("read_media was removed; perception is a declared tool now")
+		}
+	}
+}

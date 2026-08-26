@@ -94,7 +94,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	// An inbox-seeded turn has an empty initiating message; its text arrives
 	// through the drain reminder below. Persisting the empty one would replay
 	// as an empty user turn, which real providers reject.
-	inboxSeeded := userMsg.Content == "" && len(userMsg.ContentParts) == 0
+	inboxSeeded := userMsg.Content == ""
 	if !inboxSeeded {
 		sess.append(userMsg)
 	}
@@ -185,15 +185,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// a turn boundary so a finished task never interrupts this turn.
 		steerTexts, _ := sess.drainInbox(true)
 		injectAndEmit(sess, &allMsgs, reminderBlock(steerReminderHeader, steerTexts), true)
-
-		// Tool messages cannot carry media, so read_media's files are appended
-		// as a synthetic user message — the only role the adapter renders
-		// parts for. After the reminder block, so the reminder lands on the
-		// last tool message rather than this parts-carrying one.
-		if msg, ok := attachmentsMessage(outcome.pendingMedia); ok {
-			allMsgs = append(allMsgs, msg)
-			sess.append(msg)
-		}
 	}
 }
 
@@ -268,48 +259,10 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	return allMsgs, toolList, toolSchemas, skip
 }
 
-// attachmentsMessage delivers the media read_media loaded this round. Tool
-// messages cannot carry it and the adapter renders parts only on user
-// messages, so this is the single injection point; the trailing text part says
-// where the media came from. ok is false when there is nothing to deliver.
-func attachmentsMessage(readMedia []llm.ContentPart) (llm.Message, bool) {
-	if len(readMedia) == 0 {
-		return llm.Message{}, false
-	}
-	parts := make([]llm.ContentPart, 0, len(readMedia)+1)
-	parts = append(parts, readMedia...)
-	label := fmt.Sprintf("%d file(s) you loaded with read_media", len(readMedia))
-	parts = append(parts, llm.ContentPart{
-		Type: llm.ContentPartTypeText,
-		Text: "Above are the attached media file(s): " + label + ".",
-	})
-	return llm.Message{
-		Role:         llm.RoleUser,
-		Content:      "[attached: " + label + "]",
-		ContentParts: parts,
-	}, true
-}
-
 // toolLoopState is what one tool loop threads through its handlers and
-// reports back: the working message slice and read_media's collected parts.
+// reports back.
 type toolLoopState struct {
-	allMsgs      []llm.Message     // updated slice
-	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
-}
-
-// turnScopedHandlers builds the handlers that need state beyond ToolConfig —
-// read_media collects parts for the post-loop message. They close over st, so
-// they are rebuilt per executeToolCalls call.
-func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandler {
-	return map[string]ToolHandler{
-		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
-			out, part := handleReadMedia(string(args), cfg.WorkDir)
-			if part.Type != "" {
-				st.pendingMedia = append(st.pendingMedia, part)
-			}
-			return out, nil
-		}},
-	}
+	allMsgs []llm.Message // updated slice
 }
 
 // executeToolCalls runs the tool calls in order, emitting events and
@@ -318,7 +271,6 @@ func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandle
 // otherwise outcome.allMsgs carries the slice for the next round.
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopState, error) {
 	st := &toolLoopState{allMsgs: allMsgs}
-	turnScoped := turnScopedHandlers(cfg, st)
 	for i, tc := range toolCalls {
 		if ctx.Err() != nil {
 			// Cancelled mid-loop. The assistant message is already persisted
@@ -334,8 +286,8 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
 		res, invalid := validateCall(toolSchemas, tc)
 		// On a validation failure res already carries the reason. Otherwise
-		// gate, then resolve a handler: turn-scoped, then custom dispatchers,
-		// then built-ins — custom first, so a declared tool name always wins.
+		// gate, then resolve a handler: custom dispatchers, then built-ins —
+		// custom first, so a declared tool name always wins.
 		if !invalid {
 			// The gate is the only policy surface and fires before every tool.
 			// The bash family self-gates in its handlers, where rewrite and
@@ -349,9 +301,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				res = errResult(gateMsg)
 			} else {
 				var handler ToolHandler
-				if h, ok := turnScoped[tc.Name]; ok {
-					handler = h
-				} else if cfg.HostToolNames[tc.Name] {
+				if cfg.HostToolNames[tc.Name] {
 					res = dispatchHostTool(ctx, cfg, tc.Name, tc.RawArgs)
 				} else if h, ok := cfg.Handlers[tc.Name]; ok {
 					handler = h

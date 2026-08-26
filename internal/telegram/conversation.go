@@ -175,7 +175,7 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 		parts := make([]string, 0, len(batch))
 		for _, mail := range batch {
 			out := mail.text
-			if injected := attachmentNote(mail.saved, c.b.hasTool(sess, "read_media")); injected != "" {
+			if injected := attachmentNote(mail.saved); injected != "" {
 				if out != "" {
 					out += "\n\n" + injected
 				} else {

@@ -271,32 +271,7 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 		case llm.RoleSystem:
 			out = append(out, openai.SystemMessage(m.Content))
 		case llm.RoleUser:
-			if len(m.ContentParts) > 0 {
-				parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(m.ContentParts))
-				for _, p := range m.ContentParts {
-					switch p.Type {
-					case llm.ContentPartTypeText:
-						parts = append(parts, openai.TextContentPart(p.Text))
-					case llm.ContentPartTypeImageURL:
-						parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-							URL: p.ImageURL,
-						}))
-					case llm.ContentPartTypeInputAudio:
-						parts = append(parts, openai.InputAudioContentPart(openai.ChatCompletionContentPartInputAudioInputAudioParam{
-							Data:   p.AudioData,
-							Format: p.AudioFormat,
-						}))
-					case llm.ContentPartTypeFile:
-						parts = append(parts, openai.FileContentPart(openai.ChatCompletionContentPartFileFileParam{
-							Filename: openai.String(p.FileName),
-							FileData: openai.String(p.FileData),
-						}))
-					}
-				}
-				out = append(out, openai.UserMessage(parts))
-			} else {
-				out = append(out, openai.UserMessage(m.Content))
-			}
+			out = append(out, openai.UserMessage(m.Content))
 		case llm.RoleAssistant:
 			asst := openai.ChatCompletionAssistantMessageParam{}
 			if m.Content != "" {

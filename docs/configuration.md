@@ -166,7 +166,7 @@ employee the main agent can delegate to.
 #---
 # agent: main
 # model: main
-# use: [bash, bash_bg, edit, media, history]
+# use: [bash, bash_bg, edit, history]
 # context: [memory.md]
 #---
 main_prompt() { cat <<'SHELL3_EOF'
@@ -177,7 +177,7 @@ SHELL3_EOF
 
 Declaration keys: `model` (a name from the wiring's `models:`; omitted, the
 main agent's model), `use` (built-ins — any of `bash`, `bash_bg`, `edit`,
-`media`, `history` — plus the names of declared tools
+`history` — plus the names of declared tools
 and `shared:` groups), `mcp` (see [MCP](#mcp-servers)), `workdir`,
 `description` (what the main model reads when deciding to delegate; employees
 only), and `context` (see below).
@@ -422,7 +422,7 @@ kind. A `gate:` naming an agent the kit does not declare is a load error.
 The dash index states which of the two it is, in as many words: **command
 gate armed**, or **command gate off** when the main agent has none.
 
-Every tool call — `bash`, `bash_bg`, `edit_file`, `read_media`, host tools
+Every tool call — `bash`, `bash_bg`, `edit_file`, host tools
 like `send_media_telegram`, and `mcp_*` — sources the kit and calls the
 governing function with JSON on stdin (sourcing is safe: a kit is
 definitions-only, so it runs nothing):
@@ -433,7 +433,7 @@ definitions-only, so it runs nothing):
 
 | Field | Description |
 |-------|-------------|
-| `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, `"send_media_telegram"`, `"mcp_…"`. |
+| `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"send_media_telegram"`, `"mcp_…"`. |
 | `command` | The bash command string — the two bash tools only; **null** for every other tool. |
 | `args` | Raw arguments JSON (every tool). Gate non-bash tools by inspecting this. |
 | `headless` | `true` when no human is attached (employees, cron jobs, scripted `shell3 ask -p`). |
@@ -726,25 +726,24 @@ and collects any body nothing points at any more.
 
 ## Attachments and media
 
-There is no `media:` config block — voice transcription, speech, and image
-generation are not built-in services; they are tools you declare in your
-kit, with a full working `transcribe`/`say`/`image` set (each reading its
-own key from `.env` at point of use) in
-[cookbook/voice-images.md](cookbook/voice-images.md). What ships:
+There is no `media:` config block and no built-in perception at all — no
+transcription, speech, image generation, or way for the agent to open an
+image, audio, or PDF file. Every one of those is a tool you declare in your
+kit, each reading its own key from `.env` at point of use, following the
+convert/decide rule in the `using-llms` skill
+([internal/scaffold/defaults/base/skills/using-llms.md](../internal/scaffold/defaults/base/skills/using-llms.md)):
+a tool may call a model to convert between forms (pixels, audio or PDF into
+text, text into speech or an image); it never calls a model to decide. What
+ships:
 
 - **Attachments.** Every file sent to the bot is saved to the media dir
   (`<configDir>/media` — `~/.shell3/media/` for the default config dir,
   overridable with `$SHELL3_MEDIA_DIR`; see
   [The media janitor](#the-media-janitor--media_keep_days) for that
   variable's precedence) as `tg-*`, and its path goes into the prompt. There
-  is no automatic transcription or captioning step — the agent decides
-  whether and how to act on the attachment.
-- **`read_media`** (needs `media` in the agent's `tools`) lets the agent
-  open a file directly: images (`.jpg/.jpeg/.png/.gif/.webp`, vision
-  models), audio (`.wav/.mp3/.ogg/.opus/.oga`, audio models), and PDFs
-  (`.pdf` ≤ 20 MB, an OpenAI-compatible `file` part — works on OpenAI and
-  OpenRouter). Video is not supported as model input; `send_media_telegram`
-  can still send a video file to the chat.
+  is no automatic transcription or captioning step, and no built-in way to
+  open the file at all — the agent needs a declared tool before it can act
+  on the attachment.
 - **`send_media_telegram`** (a host tool, on every non-headless session —
   headless employee children don't get it, since there's no live chat to
   send to) lets the agent push a local file back to the chat as
@@ -752,7 +751,7 @@ own key from `.env` at point of use) in
 
 **Media storage.** Everything you send the bot (`tg-*`) and anything a
 wrapper script generates and saves there live in the media dir — stable
-paths, re-readable with `read_media` and re-sendable with
+paths, re-readable by a declared perception tool and re-sendable with
 `send_media_telegram` long after the message has scrolled away. The folder
 grows until you prune it or set
 [`media_keep_days`](#the-media-janitor--media_keep_days).
@@ -975,8 +974,9 @@ uploads are user data, so deletion is opt-in. When set, `shell3 telegram`
 deletes files in the media dir whose mtime is older than N days at startup,
 before the bot starts polling. It prints `janitor: removed N media files`
 (silent when zero) and is fail-open like the runs janitor. Note that once a
-file is swept, a `read_media` or `send_media_telegram` of its stored path in
-an old transcript fails. Start-time only — no daemon, no timers.
+file is swept, a declared perception tool or `send_media_telegram` acting on
+its stored path in an old transcript fails. Start-time only — no daemon, no
+timers.
 
 The media dir this sweep points at is resolved by `internal/mediadir`:
 normally it's derived from `--config`/the active config dir, but the

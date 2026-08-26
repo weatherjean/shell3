@@ -18,7 +18,6 @@ var builtins = []struct {
 	{"bash", bashTool},
 	{"bash_bg", bashBgTool},
 	{"edit", editFileTool},
-	{"media", readMediaTool},
 	{"history", historyTool},
 }
 
@@ -211,21 +210,6 @@ var editFileTool = llm.ToolDefinition{
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
 		},
 		"required": []string{"file_path", "old_string", "new_string"},
-	},
-}
-
-var readMediaTool = llm.ToolDefinition{
-	Name: "read_media",
-	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif, webp), audio (wav, mp3, ogg/opus), or PDFs (pdf). " +
-		"The file is decoded and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
-		"Requires a model with the matching modality; PDF parts additionally require a model/provider that accepts file content parts. " +
-		"This tool is for images/audio/PDF only — to read text files use `bash` with cat/sed/head.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path": map[string]any{"type": "string", "description": "Path to the media file (absolute or relative to the project root)."},
-		},
-		"required": []string{"path"},
 	},
 }
 

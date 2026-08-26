@@ -47,7 +47,9 @@ curl -fsS --max-time 15 \
 
 ## Scripts that need a model call
 
-A `tool:` never calls a model at all — not curl, not `shell3 ask --agent`.
-It takes the result as a param and the agent writes it in its own turn. Only a
+A `tool:` may call a model to convert — pixels, audio or PDF into text, text
+into speech or an image — but never to decide. For judgment (score, tier,
+rank, draft, summary): not curl, not `shell3 ask --agent` inside the tool —
+take the result as a param and write it yourself in your own turn. Only a
 standalone operator script may call `shell3 ask --agent`.
 See the `using-llms` skill for how and why.

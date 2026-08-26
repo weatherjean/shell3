@@ -9,26 +9,13 @@ import (
 )
 
 // searchableText extracts the text worth full-text indexing from a message:
-// user and assistant prose (plain content and text parts). Tool output and
-// system prompts are skipped — they dwarf the conversation and bury search
-// results in noise.
+// user and assistant prose. Tool output and system prompts are skipped —
+// they dwarf the conversation and bury search results in noise.
 func searchableText(m llm.Message) string {
 	if m.Role != llm.RoleUser && m.Role != llm.RoleAssistant {
 		return ""
 	}
-	var b strings.Builder
-	if m.Content != "" {
-		b.WriteString(m.Content)
-	}
-	for _, p := range m.ContentParts {
-		if p.Type == llm.ContentPartTypeText && p.Text != "" {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(p.Text)
-		}
-	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(m.Content)
 }
 
 // SeqMessage is one stored message with its position in the session.

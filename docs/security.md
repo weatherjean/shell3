@@ -14,7 +14,7 @@ The opt-in gate is a bash function the kit declares: a `gate:` block naming
 the agents it governs, bound to the function under it. There is no fallback
 between agents; each is governed by exactly one function or none.
 The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
-`read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
+MCP tools as `mcp_<server>_<tool>`, host tools like
 `send_media_telegram`) with the call as JSON on stdin, and prints a verdict: pass,
 rewrite, runner-swap, or block — there is no ask verdict and no approval flow.
 The full verdict contract and payload fields are in
@@ -70,7 +70,8 @@ in your config: model `base_url`s and MCP servers. That is the whole list.
 There is no telemetry, no crash reporting, and no update check. (The agent's
 own shell commands can of course reach anything the gate lets them — that
 includes any wrapper script you write for transcription, speech, or image
-generation; see [cookbook/voice-images.md](cookbook/voice-images.md).)
+generation; see the `using-llms` skill in
+[internal/scaffold/defaults/base/skills/using-llms.md](../internal/scaffold/defaults/base/skills/using-llms.md).)
 
 ## The Telegram boundary
 

@@ -251,27 +251,15 @@ func streamQuiet(ctx context.Context, client LLMClient, msgs []llm.Message) (str
 	return sb.String(), err
 }
 
-// mediaPartTokens is charged per image/audio part. Real costs vary with
-// resolution and duration; this only needs the right order of magnitude so
-// multimodal histories register on the thresholds at all.
-const mediaPartTokens = 1000
-
-// msgTokens is (content + reasoning + tool-call args + part text) / 4 plus a
-// flat charge per media part. Reasoning counts because the adapter re-sends
-// it, so it occupies real prompt tokens the tail-sizing walk must not miss.
+// msgTokens is (content + reasoning + tool-call args) / 4. Reasoning counts
+// because the adapter re-sends it, so it occupies real prompt tokens the
+// tail-sizing walk must not miss.
 func msgTokens(m llm.Message) int {
 	n := len(m.Content) + len(m.ReasoningContent)
 	for _, tc := range m.ToolCalls {
 		n += len(tc.RawArgs)
 	}
-	media := 0
-	for _, p := range m.ContentParts {
-		n += len(p.Text)
-		if p.ImageURL != "" || p.AudioData != "" {
-			media++
-		}
-	}
-	return n/4 + media*mediaPartTokens
+	return n / 4
 }
 
 // estimatePromptTokens sums a slice. Pruning mutates in place, so freed

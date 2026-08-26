@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -40,48 +41,15 @@ worker_local() { echo local; }
 web_search() { echo "q=$q"; }
 `
 
-// The agent you talk to gets every built-in without declaring one — except
-// media, which needs a multimodal model and so stays opt-in.
+// The agent you talk to gets every built-in without declaring one.
 func TestResolveMainGetsDefaultBuiltins(t *testing.T) {
 	k := mustParse(t, capKit)
 	r, err := k.Resolve(k.Agents[0], true)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if len(r.Builtins) != len(mainDefaults) {
-		t.Fatalf("main builtins = %v, want %v", r.Builtins, mainDefaults)
-	}
-	for _, b := range r.Builtins {
-		if b == "media" {
-			t.Fatal("media must not be granted implicitly — read_media needs a multimodal model")
-		}
-	}
-}
-
-// media reaches the main agent only when it is declared.
-func TestResolveMainMediaOptIn(t *testing.T) {
-	src := `#---
-# agent: main
-# use: [media]
-#---
-main_prompt() { cat <<'EOF2'
-hi
-EOF2
-}
-`
-	k := mustParse(t, src)
-	r, err := k.Resolve(k.Agents[0], true)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	var got bool
-	for _, b := range r.Builtins {
-		if b == "media" {
-			got = true
-		}
-	}
-	if !got {
-		t.Fatalf("media not granted despite use: [media]; builtins = %v", r.Builtins)
+	if len(r.Builtins) != len(Builtins) {
+		t.Fatalf("main builtins = %v, want %v", r.Builtins, Builtins)
 	}
 }
 
@@ -254,5 +222,32 @@ EOF2
 	got := k.Agents[0].Context
 	if len(got) != 2 || got[0] != "memory.md" || got[1] != "notes/*.md" {
 		t.Fatalf("context = %v", got)
+	}
+}
+
+func TestUseMediaIsANamedRemoval(t *testing.T) {
+	k := &Kit{}
+	_, err := k.Resolve(Agent{Name: "main", Use: []string{"media"}}, true)
+	if err == nil {
+		t.Fatal("use: [media] must be a load error, got nil")
+	}
+	for _, want := range []string{"read_media tool was removed", "using-llms"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name the replacement; missing %q in: %v", want, err)
+		}
+	}
+}
+
+func TestBuiltinsNoLongerCarryMedia(t *testing.T) {
+	if slices.Contains(Builtins, "media") {
+		t.Fatal("media is not a built-in any more")
+	}
+	r, err := (&Kit{}).Resolve(Agent{Name: "main"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"bash", "bash_bg", "edit", "history"}
+	if !slices.Equal(r.Builtins, want) {
+		t.Errorf("main defaults = %v, want %v", r.Builtins, want)
 	}
 }

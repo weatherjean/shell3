@@ -728,16 +728,3 @@ func (b *Bot) LiveSession() *shell3.Session {
 	defer b.mu.Unlock()
 	return b.cron
 }
-
-// hasTool reports whether sess's active agent has the named tool enabled.
-func (b *Bot) hasTool(sess *shell3.Session, name string) bool {
-	if sess == nil {
-		return false
-	}
-	for _, t := range sess.Snapshot().Tools {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
-}

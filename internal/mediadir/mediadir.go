@@ -35,8 +35,8 @@ func SetBaseDir(configDir string) {
 
 // Dir returns shell3's durable media directory — where inbound Telegram
 // attachments are saved, so every media file the agent has seen keeps a
-// stable path that survives reboots and OS temp cleaning (re-readable with
-// read_media, findable from history). Default <configDir>/media (which is
+// stable path that survives reboots and OS temp cleaning (re-readable by a
+// declared perception tool, findable from history). Default <configDir>/media (which is
 // ~/.shell3/media for the default config dir, see SetBaseDir);
 // $SHELL3_MEDIA_DIR overrides (tests point it at a TempDir). Created on
 // demand.

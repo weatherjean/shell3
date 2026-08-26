@@ -439,30 +439,13 @@ func (r *reminderTracker) check(statusLine string, promptTokens int) string {
 // where its instruction ("reply NO_REPLY if this needs nothing") is
 // positionally weakest. Later reminders coalesce onto that carrier.
 //
-// Operates on allMsgs only, never sess.messages. A multimodal message gets
-// the reminder mirrored into its text part — the adapter sends ContentParts
-// and ignores Content — on a clone, so what is stored stays reminder-free.
+// Operates on allMsgs only, never sess.messages.
 func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 	if reminder == "" {
 		return msgs
 	}
 	if i := len(msgs) - 1; i >= 0 && msgs[i].Role == llm.RoleUser {
 		msgs[i].Content = msgs[i].Content + "\n\n" + reminder
-		if len(msgs[i].ContentParts) > 0 {
-			parts := slices.Clone(msgs[i].ContentParts)
-			appended := false
-			for j := range parts {
-				if parts[j].Type == llm.ContentPartTypeText {
-					parts[j].Text += "\n\n" + reminder
-					appended = true
-					break
-				}
-			}
-			if !appended {
-				parts = append(parts, llm.ContentPart{Type: llm.ContentPartTypeText, Text: reminder})
-			}
-			msgs[i].ContentParts = parts
-		}
 		return msgs
 	}
 	// No trailing user message: carry the reminder as a fresh one rather than

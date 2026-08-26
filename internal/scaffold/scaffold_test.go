@@ -57,7 +57,7 @@ func TestRenderBaseConfig(t *testing.T) {
 		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 		"skills/cookbook.md", "skills/find-skills.md", "skills/writing-code.md",
-		"skills/media.md",
+		"skills/using-llms.md",
 		"lib/bin/skill-search",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
@@ -115,106 +115,27 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 	})
 }
 
-func TestRenderBaseConfigVision(t *testing.T) {
-	t.Run("vision enables the media tool and renders no media: block", func(t *testing.T) {
-		dir := t.TempDir()
-		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
-		if err := RenderBaseConfig(dir, v, false); err != nil {
-			t.Fatalf("RenderBaseConfig: %v", err)
-		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		for _, banned := range []string{"media:", "describe:"} {
-			if strings.Contains(string(cfg), banned) {
-				t.Errorf("vision config should not render %q; got:\n%s", banned, cfg)
-			}
-		}
-		agentMD, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		if !strings.Contains(string(agentMD), "# use: [media]") ||
-			strings.Contains(string(agentMD), "# # use: [media]") {
-			t.Errorf("vision kit should opt into media; got:\n%s", agentMD)
-		}
-	})
-
-	t.Run("no vision disables the media tool and renders no media: block", func(t *testing.T) {
-		dir := t.TempDir()
-		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: false}
-		if err := RenderBaseConfig(dir, v, false); err != nil {
-			t.Fatalf("RenderBaseConfig: %v", err)
-		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		for _, banned := range []string{"media:", "describe:"} {
-			if strings.Contains(string(cfg), banned) {
-				t.Errorf("no-vision config should not render %q; got:\n%s", banned, cfg)
-			}
-		}
-		agentMD, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		if !strings.Contains(string(agentMD), "# # use: [media]") {
-			t.Errorf("no-vision kit should leave media commented out; got:\n%s", agentMD)
-		}
-	})
-
-	// A vision config must also load cleanly, with the media tool gated on.
-	t.Run("vision config loads", func(t *testing.T) {
-		dir := t.TempDir()
-		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
-		if err := RenderBaseConfig(dir, v, false); err != nil {
-			t.Fatalf("RenderBaseConfig: %v", err)
-		}
-		writeEnv(t, dir)
-		c, err := config.Load(dir)
-		if err != nil {
-			t.Fatalf("vision config failed to load: %v", err)
-		}
-		if len(c.Warnings()) != 0 {
-			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
-		}
-		src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		if err != nil {
-			t.Fatalf("read kit: %v", err)
-		}
-		k, err := kit.Parse(src)
-		if err != nil {
-			t.Fatalf("parse kit: %v", err)
-		}
-		r, err := k.Resolve(k.Agents[0], true)
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		var media bool
-		for _, b := range r.Builtins {
-			if b == "media" {
-				media = true
-			}
-		}
-		if !media {
-			t.Errorf("vision config should grant the media tool; builtins = %v", r.Builtins)
-		}
-	})
-}
-
 // TestRenderedYAMLHasNoMediaBlock guards the removal of the media: block from
-// the yaml template for good: neither a vision nor a no-vision boot may ever
-// emit media:/stt:/tts:/describe:/imagegen: again, but media_keep_days (the
-// janitor knob) must survive either way.
+// the yaml template for good: a boot may never emit
+// media:/stt:/tts:/describe:/imagegen: again, but media_keep_days (the
+// janitor knob) must survive.
 func TestRenderedYAMLHasNoMediaBlock(t *testing.T) {
-	for _, vision := range []bool{true, false} {
-		dir := t.TempDir()
-		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: vision}
-		if err := RenderBaseConfig(dir, v, false); err != nil {
-			t.Fatalf("RenderBaseConfig(vision=%v): %v", vision, err)
+	dir := t.TempDir()
+	v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}
+	if err := RenderBaseConfig(dir, v, false); err != nil {
+		t.Fatalf("RenderBaseConfig: %v", err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatalf("read shell3.sh: %v", err)
+	}
+	for _, banned := range []string{"media:", "stt:", "tts:", "describe:", "imagegen:"} {
+		if strings.Contains(string(cfg), banned) {
+			t.Errorf("rendered shell3.sh still contains %q", banned)
 		}
-		cfg, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		if err != nil {
-			t.Fatalf("read shell3.sh (vision=%v): %v", vision, err)
-		}
-		for _, banned := range []string{"media:", "stt:", "tts:", "describe:", "imagegen:"} {
-			if strings.Contains(string(cfg), banned) {
-				t.Errorf("vision=%v: rendered shell3.sh still contains %q", vision, banned)
-			}
-		}
-		if !strings.Contains(string(cfg), "media_keep_days") {
-			t.Errorf("vision=%v: rendered shell3.sh dropped media_keep_days", vision)
-		}
+	}
+	if !strings.Contains(string(cfg), "media_keep_days") {
+		t.Errorf("rendered shell3.sh dropped media_keep_days")
 	}
 }
 
@@ -236,7 +157,7 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 // shape. This is the canonical "does our default config work" test.
 func TestRenderedConfigLoads(t *testing.T) {
 	dir := t.TempDir()
-	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: "", Vision: true}
+	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: ""}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
@@ -278,7 +199,7 @@ func TestRenderedConfigLoads(t *testing.T) {
 		got[sk.Name] = true
 	}
 	for _, want := range []string{"planning", "browser", "find-skills", "writing-code",
-		"cookbook", "history", "self-evolve", "scripting", "media", "building-agents"} {
+		"cookbook", "history", "self-evolve", "scripting", "using-llms", "building-agents"} {
 		if !got[want] {
 			t.Errorf("scaffold skill %q missing (got %v)", want, got)
 		}
@@ -501,6 +422,44 @@ func TestScaffoldShipsTheAuditor(t *testing.T) {
 	}
 }
 
+// Task 6 deleted the gate rule that caught a model API endpoint written into
+// a script at write time; that judgment now lives only here, in a model
+// reading the script, because only a model can tell whether a given call
+// converts between forms or decides. The old check-1 text told a script to
+// call `shell3 ask --agent` instead — which using-llms rule 1 forbids for a
+// tool — so two shipped texts disagreed about the same rule.
+func TestAuditPromptJudgesConvertVsDecide(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderBaseConfig(dir, Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}, false); err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := kit.Parse(src)
+	if err != nil {
+		t.Fatalf("parse kit: %v", err)
+	}
+	var job *kit.CronJob
+	for i := range k.Crons {
+		if k.Crons[i].Name == "harness-audit" {
+			job = &k.Crons[i]
+		}
+	}
+	if job == nil {
+		t.Fatalf("scaffold kit declares no harness-audit cron; crons = %+v", k.Crons)
+	}
+	for _, want := range []string{"CONVERTS", "DECIDES"} {
+		if !strings.Contains(job.Prompt, want) {
+			t.Errorf("audit prompt must carry the convert/decide criterion; missing %q:\n%s", want, job.Prompt)
+		}
+	}
+	if strings.Contains(job.Prompt, "shell3 ask --agent") {
+		t.Error("check 1 still tells a script to shell out to ask --agent, which using-llms rule 1 forbids for a tool")
+	}
+}
+
 // shell3 tool run/test prove a tool's plumbing and can never see a
 // wrong-layer bug. The skill that says so ships to every install, and reaches
 // existing ones through `shell3 boot --prompts`.
@@ -515,5 +474,26 @@ func TestScaffoldShipsTestingWorkflowsSkill(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "shell3 ask --agent") {
 		t.Error("the skill must name the command that runs a real turn test")
+	}
+}
+
+func TestUsingLLMsCarriesPerception(t *testing.T) {
+	files, err := PromptFiles(Values{Name: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files["skills/media.md"]; ok {
+		t.Error("media.md was folded into using-llms.md")
+	}
+	src := string(files["skills/using-llms.md"])
+	for _, want := range []string{
+		"convert between forms",
+		"tool: see",
+		"ask the operator",
+		"shell3 tool test",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("using-llms.md missing %q", want)
+		}
 	}
 }

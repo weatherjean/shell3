@@ -61,9 +61,8 @@
 # agent: main
 # model: {{.Name | yamlkey}}
 # context: [memory.md]
-{{if .Vision}}# use: [media]
-{{else}}# # use: [media]   — read_media needs a multimodal model; add it if you switch.
-{{end}}#---
+# # To see images, declare a `see` tool — the using-llms skill has the block.
+#---
 main_prompt() { cat <<'SHELL3_EOF'
 You are the user's single point of contact. You do work directly with bash,
 or you dispatch an employee — an agent with its own prompt, its own declared
@@ -363,48 +362,6 @@ SEGEOF
     return 1
   }
 
-  # --- 0. Model clients in scripts ------------------------------------------
-  # A script that speaks to a model API directly is judgment that escaped the
-  # turn layer, and it is how a tool ends up drafting prose from a stale copy
-  # of a skill the calling agent already holds (2026-08-20, found four days
-  # later). This judges the BODY BEING WRITTEN, not the target path, because
-  # that URL is visible exactly once — at the moment the file is written.
-  #
-  # Scoped to SCRIPT targets on purpose: prose may name an endpoint (this kit's
-  # own auditor prompt does, docs and memory files do), and blocking that would
-  # break the self-evolve loop over shell3.sh for no safety gain.
-  #
-  # It BLOCKS rather than review()s: a {review} verdict on a non-bash tool
-  # fails closed anyway (internal/chat/safety.go), so edit_file could never
-  # reach the reviewer. There is no legitimate reason to write a model endpoint
-  # into a script in this install.
-  case "$name" in
-    edit_file)
-      llm_target=$(printf '%s' "$args" | jq -r '.path // empty' 2>/dev/null)
-      llm_body=$(printf '%s' "$args" | jq -r '.new_string // empty' 2>/dev/null) ;;
-    bash|bash_bg)
-      # A shell command's TARGET is not its text: a heredoc into x.py ends at
-      # the terminator, not at .py. Look for the write instead — a redirect,
-      # a tee, or a heredoc landing on one. A plain `rg chat/completions` has
-      # no write target and stays allowed, which is what the auditor runs.
-      llm_body="$cmd"
-      if printf '%s\n' "$cmd" | grep -Eq '(>>?|[[:space:]]tee[[:space:]]+(-a[[:space:]]+)?)[[:space:]]*[^|;&[:space:]]*\.(py|sh|rb|js|mjs|cjs|ts|pl|php)([[:space:]]|$)'; then
-        llm_target="script"
-      else
-        llm_target=""
-      fi ;;
-    *) llm_target=""; llm_body="" ;;
-  esac
-  case "$llm_target" in
-    # Extensions only, anchored at the end. A trailing wildcard here (*.sh*)
-    # matches ".shell3" in EVERY path under the config dir, which silently
-    # turned this into a rule against writing that URL anywhere at all.
-    script|*.py|*.sh|*.rb|*.js|*.mjs|*.cjs|*.ts|*.pl|*.php)
-      if printf '%s\n' "$llm_body" | grep -Eqi '(/v1/(chat/)?completions|/v1/messages|api\.(openai|anthropic|minimax|deepseek|mistral)\.|generativelanguage\.googleapis\.com|openrouter\.ai/api)'; then
-        block "that script calls a model API directly. A tool never calls a model — not curl, not urllib, and not shell3 ask --agent either: it takes the result as a parameter and YOU write it in your own turn, the way lead-save and draft-save already work. If the work is too big for one turn, dispatch an employee with task. Only a standalone operator script, wired to no tool, may shell out to shell3 ask --agent. See the using-llms skill"
-      fi ;;
-  esac
-
   # --- 1. Credentials -------------------------------------------------------
   # The one mistake that cannot be undone: a leaked key is leaked into a
   # transcript forever. Judged against the right field — a bash command by its
@@ -552,14 +509,15 @@ cron_harness_audit() { cat <<'SHELL3_EOF'
 Run today's harness audit from the config dir. Four checks, then report or
 NO_REPLY.
 
-1. Model calls outside shell3. A script must never speak to a model API
-   directly — it calls `shell3 ask --agent <name> -p "..."` instead, which
-   inherits the real adapter and keeps the key out of the script.
+1. Model calls outside a turn. The grep finds them; you judge each one.
+   A call that CONVERTS between forms — image/audio/PDF to text, text to
+   speech or an image — is correct. A call that DECIDES — a score, tier,
+   ranking, draft or summary — is judgment that escaped its turn.
 
      rg -l 'chat/completions|api\.(openai|anthropic|minimax)' work lib 2>/dev/null
 
-   Do NOT scan shell3.sh: its shell3: wiring block legitimately carries model
-   base_urls, and that is the one known-good location.
+   Do NOT scan shell3.sh: its shell3: wiring block carries model base_urls and
+   conversion tools legitimately live there. Check 3 reads them instead.
 
 2. Secrets read outside .env. Every secret lives in .env beside this kit and
    is read by the one script that needs it, at point of use.
@@ -570,6 +528,18 @@ NO_REPLY.
    any promising a score, tier, rank, draft, summary or classification. Then
    judge each one: a tool that PERSISTS a verdict the agent reached is
    correct; a tool that PRODUCES one is not.
+   A tool that CONVERTS — bytes the turn cannot read (pixels, audio, PDF)
+   into text it can, or text into speech or an image — is also correct. It
+   returns what was there. The line is decide, not call.
+   A description can lie or simply be wrong about its own body, so also grep
+   shell3.sh directly for tools with a model call regardless of what they
+   claim to do, and read each match's body:
+
+     rg -n 'chat/completions|api\.' shell3.sh
+
+   Judge every body this turns up the same way: convert is correct, decide is
+   not — whether or not its description mentioned a score, tier, rank, draft
+   or summary.
 
 4. Tools that grew a brain. A long script under a tool is where judgment
    hides.

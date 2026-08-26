@@ -340,10 +340,10 @@ func (m *Manager) callLocked(ctx context.Context, sc *serverConn, tool string, a
 }
 
 // flatten joins a result's text parts, marking non-text ones so the model
-// knows something was there — this surface is text-only, and read_media covers
-// local files rather than MCP blobs. A result whose only payload is
-// structuredContent, which is spec-legal, is serialized as JSON so it is not
-// lost.
+// knows something was there — this surface is text-only, and a declared
+// perception tool covers local files rather than MCP blobs. A result whose
+// only payload is structuredContent, which is spec-legal, is serialized as
+// JSON so it is not lost.
 func flatten(res *sdk.CallToolResult) string {
 	var parts []string
 	hasText := false

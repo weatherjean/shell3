@@ -127,11 +127,6 @@ func writeMessage(b *strings.Builder, n int, m llm.Message) {
 	if text != "" {
 		fmt.Fprintf(b, "<div class=\"body\">%s</div>\n", esc(text))
 	}
-	for _, part := range m.ContentParts {
-		if part.Type != "" && part.Type != "text" {
-			fmt.Fprintf(b, "<p class=\"meta\">attachment: %s</p>\n", esc(string(part.Type)))
-		}
-	}
 	for _, call := range m.ToolCalls {
 		fmt.Fprintf(b, "<details class=\"call\"><summary>tool <code>%s</code></summary><pre>%s</pre></details>\n",
 			esc(call.Name), esc(call.RawArgs))

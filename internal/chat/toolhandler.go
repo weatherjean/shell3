@@ -21,9 +21,8 @@ type ToolHandler interface {
 	Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)
 }
 
-// funcHandler adapts a closure to ToolHandler, for turn-scoped tools
-// (read_media) that close over the tool loop's mutable state — see
-// turnScopedHandlers in turn.go.
+// funcHandler adapts a closure to ToolHandler; tests use it to stand up
+// ad-hoc handlers without a dedicated type per case.
 type funcHandler struct {
 	name string
 	fn   func(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)

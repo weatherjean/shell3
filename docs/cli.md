@@ -142,16 +142,16 @@ listener itself never binds beyond loopback.
 ### Attachments and media
 
 Files you send are saved under `~/.shell3/media/` and their paths go into
-the prompt; the agent reads them back with `read_media` and sends files to
-you with `send_media_telegram`. There is no built-in transcription or
-captioning step — voice notes and images are handled at the agent's
-discretion, via wrapper scripts you install. See
-[Voice & images](cookbook/voice-images.md).
+the prompt; the agent sends files back to you with `send_media_telegram`.
+There is no built-in perception, transcription, or captioning step — the
+agent cannot open an image, audio, or PDF file at all until you declare a
+tool that does, following the convert/decide rule in the `using-llms` skill
+([internal/scaffold/defaults/base/skills/using-llms.md](../internal/scaffold/defaults/base/skills/using-llms.md)).
 
 ## `shell3 boot` — set up a config
 
 ```sh
-shell3 boot     # interactive form: model endpoint + key, vision, bot token, workdir
+shell3 boot     # interactive form: model endpoint + key, bot token, workdir
 ```
 
 An interactive form scaffolds the config tree under `~/.shell3/`:
@@ -161,10 +161,7 @@ main agent and a general-purpose `assistant` employee — plus
 ships **armed** (credentials, system paths, unread remote code, publishing and
 force-pushes refused; ordinary work untouched). `--force` overwrites an existing config.
 
-The form asks for the model endpoint, tag, name and key; whether the model can
-see images (yes adds the `media` tool — `read_media` — to the agent's
-frontmatter so it can open image/audio/PDF files directly; no leaves
-that tool out until you add a vision model); the
+The form asks for the model endpoint, tag, name and key; the
 context window and auto-compaction threshold; an optional proxy command; the
 **Telegram bot token** (from [@BotFather](https://t.me/BotFather)) and **chat
 id** (your numeric id — [@userinfobot](https://t.me/userinfobot) prints it);
@@ -197,7 +194,7 @@ there. Its closing note says as much, and points at
 
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults, except `--model`, which headless boot requires): `--url`, `--model`,
-`--name`, `--key`, `--vision`, `--workdir`, `--context-window`,
+`--name`, `--key`, `--workdir`, `--context-window`,
 `--compact-at`, `--proxy`, `--tg-token`, `--tg-chat-id`, `--force`.
 `shell3 boot --show` reprints the post-boot summary for the existing config
 without writing or asking anything. `shell3 boot --prompts` refreshes the

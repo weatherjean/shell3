@@ -51,7 +51,7 @@ Gates are per-agent, but one `gate:` block can name several
 (`gate: [main, assistant]`) — list every agent the sandbox should cover, or
 declare a second function for the ones that differ; an agent no `gate:` names
 runs unsandboxed. The `name` guard keeps
-your sandboxing off `edit_file`, `read_media`, and host tools like
+your sandboxing off `edit_file` and host tools like
 `send_media_telegram`; gate those separately by name + args. A malformed argv
 (empty, or any empty element) fails **closed** — blocked, never run
 unwrapped.

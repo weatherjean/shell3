@@ -180,12 +180,8 @@ else — agents, tools, skills, cron — comes from `internal/kit` via
 `agentsetup`. `context:` paths are validated by `shell3 health`, against each
 agent's own workdir, not at load time.
 
-**Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
-`read_media` — attach an image, audio, or PDF file so a multimodal
-model can perceive it (PDF via an OpenAI-compatible `file` part) — when
-`media` is in the agent's `tools`. Video is NOT a model input. `read_media` is
-the ONLY way media reaches a model: Telegram hands the agent a PATH and lets
-it decide). The main agent is bash-first
+**Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file`. The
+main agent is bash-first
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
 `ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
@@ -403,17 +399,12 @@ closed (output replaced by an error notice, never passed through
 unredacted). **The scaffold's gate ships armed** (`internal/scaffold`,
 covered by `internal/scaffold/hooks_test.go`, which sources the shipped kit
 and drives its gate with real payloads): credential paths, system-path
-writes, force-pushes, self-termination, and a model API client written into a
-SCRIPT are refused, and unread
+writes, force-pushes, and self-termination are refused, and unread
 remote code and publishing soft-deny to the reviewer; everything else runs.
-The model-client rule judges the BODY BEING WRITTEN, not the target path,
-because that URL is visible exactly once — at the moment the file is written —
-and it is scoped to script extensions so prose naming an endpoint (the
-auditor's own cron heredoc, docs, memory files) still writes freely. A bash
-write is found by its REDIRECT, since a heredoc into `x.py` ends at the
-terminator rather than at `.py`. It BLOCKS rather than soft-denying because a
-`review` verdict on a non-bash tool fails closed anyway (`gateNonBashTool`),
-so `edit_file` could never reach the reviewer.
+The gate draws no line at model calls — a vision call and a drafting call are
+the same `/v1/chat/completions` request, and no regex can tell convert from
+decide — so that judgment moved out of the gate entirely and onto the daily
+`harness-audit` cron (below), whose agent turn reads what a tool's body actually does.
 The system-path rule judges the WRITE TARGET, per command SEGMENT
 (`os_write`), because a command line is several commands. The previous rule
 ANDed "a write verb appears somewhere" with "an OS path appears somewhere" and
@@ -437,12 +428,15 @@ warning that `shell3 health` turns into a failure; an absent dir means no
 skills. The agent reads a skill's body with `cat` (skills are indexed by
 absolute path in the prompt under `## Skills` — there is no `skill` tool).
 Custom tools ARE declarable — a `tool:` block plus the function under it (see
-the kit section above). A tool NEVER calls a model — not `curl`, not `urllib`,
-and not `shell3 ask --agent` either: it takes the result as a PARAMETER and the
-agent writes it in its own turn (the `lead-save`/`draft-save` shape). Swapping a
-hand-rolled client for `shell3 ask --agent` inside a tool stops the key leaking
-and leaves the judgment exactly where it did not belong. Only a standalone
-operator script, wired to no tool, shells out to `shell3 ask --agent`.
+the kit section above). A tool may call a model to CONVERT between forms —
+pixels, audio or PDF into text, text into speech or an image — but never to
+DECIDE: no score, tier, ranking, draft or summary. For a decision, not
+`curl`, not `urllib`, and not `shell3 ask --agent` either: the tool takes the
+result as a PARAMETER and the agent writes it in its own turn (the
+`lead-save`/`draft-save` shape). Swapping a hand-rolled client for
+`shell3 ask --agent` inside a tool stops the key leaking but still leaves the
+judgment where it does not belong. Only a standalone operator script, wired
+to no tool, shells out to `shell3 ask --agent`.
 What is NOT a tool is reusable glue with no model-facing
 surface: that stays a wrapper script (canonically `~/.shell3/lib/bin/`) run
 through bash, documented by the
@@ -780,13 +774,14 @@ text arriving DURING a wake turn queues rather than steering into it
 
 **Media**: a turn's attachments are saved to `~/.shell3/media/` as `tg-*`
 (`attachments.go`) and their paths always go into the prompt
-(`attachmentNote`) — there is no built-in transcription, captioning, TTS, or
-image generation, and no `media:` config block. The agent perceives a file
-by calling `read_media` itself (gated by `use: [media]` in the agent's
-`agent:` block) and sends one back with `send_media_telegram`; anything more —
-transcribing a voice note before answering, speaking a reply, generating an
-image — is a kit tool the operator declares, documented in
-[docs/cookbook/voice-images.md](docs/cookbook/voice-images.md). The media
+(`attachmentNote`, which names no tool — the harness cannot know whether one
+exists). There is NO built-in perception: no `read_media`, no transcription,
+captioning, TTS or image generation, and no `media:` config block. Perception
+is a tool the operator or the agent DECLARES — the convert/decide rule in
+`skills/using-llms.md` is what permits it: a tool may call a model to convert
+between forms, never to decide. The agent sends a file back with
+`send_media_telegram`. Nothing in `internal/llm` encodes a non-text content
+part any more; the adapter renders text parts only. The media
 dir and its startup janitor (`media_keep_days`) now live in
 `internal/mediadir`, which owns `Dir()` and `Sweep()` independent of any
 Telegram-specific code. Restriction policy is the hook script, not a tools
@@ -824,10 +819,11 @@ inherits every one of them by parsing the kit.
 
 The scaffold ships ONE armed cron job, `harness-audit` (daily, `internal/
 scaffold/defaults/base/shell3.sh.tmpl`), dispatching an `auditor` employee
-whose whole job is finding work that escaped the turn layer: a model endpoint
-hand-rolled into a script, a secret read outside `.env`, a `tool:` whose
-description promises a verdict, a script over 200 lines under a tool. Its four
-checks live in the CRON HEREDOC rather than in the agent prompt or a skill —
+whose whole job is finding work that escaped the turn layer: a model call
+made outside a turn that DECIDES rather than CONVERTS, a secret read outside
+`.env`, a `tool:` whose description promises a verdict rather than converting
+between forms, a script over 200 lines under a tool. Its four checks
+live in the CRON HEREDOC rather than in the agent prompt or a skill —
 an agent cron job must bind a prompt function anyway, and that heredoc is
 literally the text the turn receives. The auditor is an agent with
 `use: [bash]` and NOT a `tool:` that greps and returns a verdict, which would
@@ -978,24 +974,24 @@ agent answered "I'd have to check the wiring", and a message sent 60 seconds
 earlier in the same room was invisible to it — the right answer, reached by
 hedging rather than by knowing.
 
-`shell3 boot` scaffolds the config tree (an interactive form: model, vision —
-which wires only the `media` tool (`read_media`) into agent frontmatter, no
-config block — context budget, an optional
-proxy command, the Telegram bot token + chat id, and the agent's workdir) and
-writes secrets to `~/.shell3/.env` (the token as `TELEGRAM_TOKEN`, referenced
-from the rendered yaml as `env:TELEGRAM_TOKEN`; both Telegram fields may be
-left blank and filled in later, and a non-numeric chat id is rejected at the
-form). It installs **nothing** and exposes **nothing**: the finale prints how
-to run the bot and points at `docs/deploying.md` (or the agent) for service
-management — it only ever *prints*; running any of it is the operator's.
-`--show` reprints that finale, rendered to the terminal's own background.
-`--prompts` refreshes the scaffold's prompt files in an existing install
-(scaffold-shipped `skills/`) after an upgrade — the kit itself is hand-edited,
-so there is no safe seam to splice a prompt into and it is left alone:
-`shell3.sh` (cron jobs included), `.env`, memory, and user-authored skills are untouched;
-replaced files back up to `.backup/prompts-<ts>/`; the Vision variant is
-inferred from whether the install's own agent declares `media`; a reload
-applies it
+`shell3 boot` scaffolds the config tree (an interactive form: model, context
+budget, an optional proxy command, the Telegram bot token + chat id, and the
+agent's workdir) and writes secrets to `~/.shell3/.env` (the token as
+`TELEGRAM_TOKEN`, referenced from the rendered yaml as `env:TELEGRAM_TOKEN`;
+both Telegram fields may be left blank and filled in later, and a non-numeric
+chat id is rejected at the form). There is no vision question and no
+`--vision` flag: perception is a tool the operator declares in their own kit
+(see the `using-llms` skill), not something boot can wire in — there is no
+`media` built-in to opt into. It installs **nothing** and exposes **nothing**:
+the finale prints how to run the bot and points at `docs/deploying.md` (or the
+agent) for service management — it only ever *prints*; running any of it is
+the operator's. `--show` reprints that finale, rendered to the terminal's own
+background. `--prompts` refreshes the scaffold's prompt files in an existing
+install (scaffold-shipped `skills/`) after an upgrade — the kit itself is
+hand-edited, so there is no safe seam to splice a prompt into and it is left
+alone: `shell3.sh` (cron jobs included), `.env`, memory, and user-authored
+skills are untouched; replaced files back up to `.backup/prompts-<ts>/`; one
+set of files ships to every install now; a reload applies it
 (`runPromptRefresh` in cmd/shell3/bootprompts.go, rendered by
 `scaffold.PromptFiles`).
 `shell3 ask` is the terminal front-end, and it has TWO faces. WITH a message

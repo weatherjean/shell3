@@ -8,7 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/shell3"
 )
+
+// hasTool reports whether sess's active agent has the named tool enabled.
+// Test-only: production code dropped its last caller when attachmentNote was
+// de-branched.
+func hasTool(sess *shell3.Session, name string) bool {
+	if sess == nil {
+		return false
+	}
+	for _, t := range sess.Snapshot().Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	fc := newFakeClient()
@@ -16,7 +33,7 @@ func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	b := newBot(t, fc, rt)
 	sess := decoratedSession(t, b, rt)
 
-	if !b.hasTool(sess, "send_media_telegram") {
+	if !hasTool(sess, "send_media_telegram") {
 		t.Fatal("send_media_telegram should be registered in the schema")
 	}
 

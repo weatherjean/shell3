@@ -46,25 +46,6 @@ func TestSearchFindsConversationText(t *testing.T) {
 	}
 }
 
-// Multimodal user messages index their text parts.
-func TestSearchIndexesTextParts(t *testing.T) {
-	st, _ := Open(t.TempDir())
-	id, _ := st.NewSession(Meta{})
-	if err := st.AppendMessage(id, llm.Message{
-		Role: llm.RoleUser,
-		ContentParts: []llm.ContentPart{
-			{Type: llm.ContentPartTypeText, Text: "what is on this whiteboard photo"},
-			{Type: llm.ContentPartTypeImageURL, ImageURL: "data:image/png;base64,xxxx"},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	hits, err := st.Search("whiteboard", 10)
-	if err != nil || len(hits) != 1 {
-		t.Fatalf("Search: hits=%d err=%v", len(hits), err)
-	}
-}
-
 // Current session: record, overwrite, read back, and surface isolation.
 func TestCurrentSessionRecordLookup(t *testing.T) {
 	st, _ := Open(t.TempDir())
