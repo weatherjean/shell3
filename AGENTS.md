@@ -8,6 +8,29 @@ Minimal Unix-composable personal agent written in Go.
 > the kind of agent it is. Humans want [README.md](README.md) and
 > [docs/](docs/).
 
+**Two principles decide what belongs in the binary.** Read them before
+adding anything; most of what follows is their consequence.
+
+**Do less, and do the necessary well.** What stays in the harness is what
+ONLY the harness can do — the transport, the filesystem, the turn. Everything
+else is a shell command, and shell3 already has bash. A feature that an agent
+could have written for itself is not a feature; it is a decision taken away
+from it, shipped as a binary nobody can edit.
+
+**Let the agent do anything — but let it do the doing.** A capability handed
+down cannot be inspected, changed, or stretched to the case nobody foresaw. A
+capability the agent builds is one it understands, tests, and extends the
+morning it needs a fourth format. So the harness teaches rather than
+provides: a rule, one worked example, and the seam to hang the work on.
+
+The corollary is a knife: when a built-in and a declared tool can both do the
+job, the built-in is the one that has to justify itself. `read_media` could
+not — it was an HTTP call any agent could make, welded into the binary, and
+its removal (v0.25.0) is the shape every such removal should take. Perception
+became a `see` tool the agent declares after asking its operator which model
+to point it at; the harness kept only what it alone could do — saving the
+attachment, and sending one back.
+
 **Kit config.** The config is a **directory** (default `~/.shell3/`), and its
 centre is ONE file: `shell3.sh`, the **kit**, parsed by `internal/kit` and
 attached to `Parts` by `agentsetup.LoadKit`. A kit is three elements and
