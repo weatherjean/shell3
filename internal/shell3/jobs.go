@@ -15,6 +15,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
@@ -184,6 +185,9 @@ type bgJob struct {
 	// logPath is runs/<parent-session>/jobs/<id>.log, "" when no store or
 	// parent existed at start. The completion mail and task_status point here.
 	logPath string
+	// store is the Parts-generation handle this job was created with. Reload
+	// may swap Runtime.store while a subagent keeps running.
+	store *runs.Store
 
 	// suppress marks a job whose completion must NOT be routed: killed by
 	// superstop, where the one summary is the record rather than N ⚠️ posts,
@@ -314,6 +318,10 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		return "", errors.New("empty command argv")
 	}
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return "", errors.New("background jobs are shutting down")
+	}
 	// A bash_bg job shares its spawner's rank: it is that agent's own work,
 	// so it competes with the agent's siblings, not with its children.
 	depth := m.spawnerDepthLocked(parent)
@@ -339,9 +347,10 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	// Best-effort log beside the parent's transcript, so output up to the cap
 	// outlives the in-memory ring for the completion mail and task_status.
 	var logPath string
-	if parent != nil && m.rt != nil && m.rt.store != nil {
+	jobStore := sessionStore(parent)
+	if parent != nil && jobStore != nil {
 		if sid := parent.sess.ID(); sid != "" {
-			if p := m.rt.store.JobLogPath(sid, id); p != "" {
+			if p := jobStore.JobLogPath(sid, id); p != "" {
 				if w := newCappedFileWriter(p); w != nil {
 					out.file = w
 					logPath = p
@@ -362,9 +371,13 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		parentID:      parentName(parent),
 		parentSession: parentSessionID(parent),
 		startedAt:     time.Now(), cancel: cancel, out: out,
-		report: report, note: note, logPath: logPath, depth: depth,
+		report: report, note: note, logPath: logPath, store: jobStore, depth: depth,
 	}
 	m.jobs[id] = j
+	// Count the job before publishing it outside m.mu. cancelAll takes this
+	// same lock before calling Wait, so shutdown can never observe a job whose
+	// positive Add has not happened yet.
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	// Marker before Start: the goroutine that clears it cannot run before the
@@ -386,10 +399,10 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		if out.file != nil {
 			out.file.Close()
 		}
+		m.wg.Done()
 		return "", err
 	}
 
-	m.wg.Add(1)
 	go func() {
 		var exit int
 		defer func() {
@@ -761,6 +774,10 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		return "", fmt.Errorf("subagents require a runtime")
 	}
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return "", errors.New("background jobs are shutting down")
+	}
 	depth := m.dispatchDepthLocked(parent)
 	if depth > maxDispatchDepth {
 		m.mu.Unlock()
@@ -795,6 +812,9 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		depth: depth,
 	}
 	m.jobs[id] = j
+	// See startCommand: admitted work is counted before cancelAll can snapshot
+	// it and begin waiting.
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	// An agent may declare its own workdir; an explicit spawn-time one wins.
@@ -822,17 +842,19 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		delete(m.jobs, id)
 		m.mu.Unlock()
 		cancel() // release context resources; goroutine was never started
+		m.wg.Done()
 		return "", err
 	}
+	childStore := sessionStore(child)
 	m.mu.Lock()
 	j.childID = child.sess.ID()
 	j.child = child
+	j.store = childStore
 	m.mu.Unlock()
 
 	// Marker before the goroutine starts, so the finish path cannot race it.
 	m.putRunningMarker(j, parent.ID())
 
-	m.wg.Add(1)
 	go func() {
 		var summary string
 		var runErr error
@@ -1146,14 +1168,16 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 func (m *jobManager) transcript(id string) []llm.Message {
 	m.mu.Lock()
 	var childID string
+	var store *runs.Store
 	if j := m.jobs[id]; j != nil {
 		childID = j.childID
+		store = j.store
 	}
 	m.mu.Unlock()
-	if childID == "" || m.rt == nil || m.rt.store == nil {
+	if childID == "" || store == nil {
 		return nil
 	}
-	msgs, err := m.rt.store.LoadMessages(childID)
+	msgs, err := store.LoadMessages(childID)
 	if err != nil {
 		return nil
 	}

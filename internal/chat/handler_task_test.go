@@ -30,7 +30,6 @@ func TestTaskToolStartsSubagent(t *testing.T) {
 	}
 }
 
-// task refuses the removed `direct` arg for the same reason bash_bg does.
 func TestTaskRefusesRemovedDirectArg(t *testing.T) {
 	started := false
 	cfg := ToolConfig{

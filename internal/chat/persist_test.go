@@ -49,7 +49,6 @@ func TestFlushMessages_StopsAtFirstFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	// Close the store's database so every append fails.
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}

@@ -7,8 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// TestJobSink verifies that jobSink tees written bytes to both the ring buffer
-// and the emit callback.
 func TestJobSink(t *testing.T) {
 	var chunks []string
 	ring := newRingBuffer(1024)
@@ -24,17 +22,14 @@ func TestJobSink(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	// Ring buffer should have both bytes via String().
 	if got := sink.String(); got != "hello world" {
 		t.Errorf("String() = %q, want %q", got, "hello world")
 	}
-	// Emit callback should have received both chunk strings.
 	if len(chunks) != 2 || chunks[0] != "hello" || chunks[1] != " world" {
 		t.Errorf("chunks = %v, want [\"hello\" \" world\"]", chunks)
 	}
 }
 
-// TestJobEventsNonNil verifies that rt.JobEvents() returns a non-nil channel.
 func TestJobEventsNonNil(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	if rt.JobEvents() == nil {
@@ -58,15 +53,11 @@ func TestEmitJobNeverBlocks(t *testing.T) {
 	}()
 	select {
 	case <-done:
-		// passed
 	case <-time.After(2 * time.Second):
 		t.Fatal("emitJob blocked on a full channel (deadlock)")
 	}
 }
 
-// TestJobProgressIntegration runs a fast bash_bg command and drains
-// JobEvents, asserting at least one chunk event and exactly one Done event
-// arrive with JobID and Parent populated.
 func TestJobProgressIntegration(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("done"))
 

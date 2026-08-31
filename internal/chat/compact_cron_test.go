@@ -12,16 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestRunTurn_AutoCompact_CronJobSurvivesRoll drives a REAL compaction through
-// RunTurn (not a hand-built post-roll row): a cron-dispatched session runs one
-// ordinary turn, then a second turn whose lastPromptTokens trips auto-compaction
-// and rolls onto a new runs-store session. Without carrying CronJob (and Agent/
-// ParentID) into compactInto's NewSession call, the rolled row comes back with
-// cron_job="" and CronRollup silently drops the majority of a tool-heavy job's
-// spend the moment it compacts — exactly the job this branch exists to make
-// visible. This test would fail RED (rolled row cron_job="") before the fix in
-// chat.go/toolhandler.go/compact.go/shell3/session.go carrying Agent/ParentID/
-// CronJob through the roll.
 func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -33,14 +23,11 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	}
 
 	fake := fakellm.New(
-		// Turn 1: ordinary turn, no compaction (lastPromptTokens starts 0).
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "answer-1"},
 			{Usage: &llm.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110}},
 		}},
-		// Turn 2, call 0: the quiet compaction summary of the head.
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
-		// Turn 2, call 1: the user's turn, answered against the compacted history.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "answer-2"},
 			{Usage: &llm.Usage{PromptTokens: 200, CompletionTokens: 20, TotalTokens: 220}},
@@ -58,18 +45,13 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	}
 
 	sess := NewSession(SessionOpts{StoreID: origID, Store: st})
-	// RunTurn itself does not flush to the store; the caller's beforeDone
-	// does (see turn.go's doc comment on beforeDone).
 	persist := func() { saveHistory(cfg.Store, LogOrNoop(nil), sess, sess.ID()) }
 
-	// Turn 1: adds usage to the ORIGINAL session row (below CompactAt, no roll).
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q1"}, persist)
 	if sess.ID() != origID {
 		t.Fatalf("turn 1 must not have rolled the session, got id=%s", sess.ID())
 	}
 
-	// Pad history so the compaction cut clears compactionFloor, then force
-	// compaction on turn 2 by raising lastPromptTokens past CompactAt.
 	big := strings.Repeat("y", 40)
 	var filler []llm.Message
 	for range 12 {
@@ -105,9 +87,6 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 		t.Fatalf("rolled session agent = %q, want %q", rolledMeta.Agent, "syncer")
 	}
 
-	// CronRollup must see the WHOLE spend (both the pre-compaction fragment on
-	// origID and the post-compaction fragment on rolledID), not just the
-	// smaller slice left on one row.
 	costs, err := st.CronRollup(time.Time{})
 	if err != nil {
 		t.Fatalf("cron rollup: %v", err)

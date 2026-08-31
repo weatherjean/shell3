@@ -9,8 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// lastMail returns the single Mail the host saw, failing when the count is
-// not exactly one — every test here is about one completion.
 func lastMail(t *testing.T, h *fakeHost) Mail {
 	t.Helper()
 	h.mu.Lock()
@@ -21,10 +19,6 @@ func lastMail(t *testing.T, h *fakeHost) Mail {
 	return h.mails[0]
 }
 
-// report:"always" binds the report turn: the mail carries Required plus the
-// raw text the front-end posts if that turn says nothing. Without the
-// fallback the bind would have nothing to fall back TO, and enforcement would
-// have to ask the model a second time.
 func TestReportAlwaysMailsWithFallback(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -51,7 +45,6 @@ func TestReportAlwaysMailsWithFallback(t *testing.T) {
 	}
 }
 
-// The default mode is unchanged: no bind, and the mail still offers NO_REPLY.
 func TestReportAutoMailsUnbound(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -66,10 +59,6 @@ func TestReportAutoMailsUnbound(t *testing.T) {
 	}
 }
 
-// A job whose own output happens to BE the sentinel is dropped unmailed under
-// auto — the cost valve for idempotent ticks — but never under always: the
-// spawner said the user is waiting, and the job's output does not get to
-// overrule that.
 func TestReportAlwaysSurvivesNoReplyTail(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -95,8 +84,6 @@ func TestReportAlwaysSurvivesNoReplyTail(t *testing.T) {
 	}
 }
 
-// A FAILED report:"always" job drops the bind: the ⚠️ floor post already told
-// the user, so binding the turn to speak would only duplicate it.
 func TestReportAlwaysFailureDropsTheBind(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -114,8 +101,6 @@ func TestReportAlwaysFailureDropsTheBind(t *testing.T) {
 	}
 }
 
-// report:"raw" is unchanged by the rename: the result posts itself and no
-// agent turn is spent.
 func TestReportRawPostsAndDoesNotMail(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}

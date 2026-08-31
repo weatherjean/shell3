@@ -59,7 +59,6 @@ func TestStatusListsLiveRooms(t *testing.T) {
 	}
 }
 
-// With no room live the section is absent rather than an empty header.
 func TestStatusOmitsRoomsWhenNoneLive(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, newFakeClient(), rt)
@@ -73,10 +72,6 @@ func TestStatusOmitsRoomsWhenNoneLive(t *testing.T) {
 	}
 }
 
-// The three description states look identical from inside the prompt and have
-// different fixes, so status has to name which one a room is in. "Telegram is
-// withholding it" is the one nobody guesses: a restricted bot gets an empty
-// string with no error.
 func TestBriefStateNamesWhyADescriptionIsMissing(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -104,8 +99,6 @@ func TestBriefStateNamesWhyADescriptionIsMissing(t *testing.T) {
 	}
 }
 
-// The rooms section carries the state, so the agent can answer "why don't you
-// know about this group?" without anyone reading the database.
 func TestStatusReportsDescriptionState(t *testing.T) {
 	fc := newFakeClient()
 	fc.chatTitle, fc.chatDesc = "backend-infra", "about the payments service"

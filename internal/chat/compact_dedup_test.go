@@ -24,8 +24,6 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 		t.Fatalf("open runs store: %v", err)
 	}
 
-	// Create the outgoing session and simulate three turns that each called
-	// saveHistory: messages 0-2 are already on disk.
 	prevID, err := st.NewSession(runs.Meta{})
 	if err != nil {
 		t.Fatalf("new session: %v", err)
@@ -37,7 +35,6 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 		{Role: llm.RoleUser, Content: "turn 2 user"},
 	}
 
-	// Simulate prior saveHistory calls: append all three messages to disk.
 	for _, m := range msgs {
 		if err := st.AppendMessage(prevID, m); err != nil {
 			t.Fatalf("AppendMessage: %v", err)
@@ -54,8 +51,6 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 	// persistedLen == len(sess.messages)) to the outgoing session.
 	compactInto(CompactSummary{Summary: "compacted"}, st, sess, nil, applog.Noop{}, "", "", "", "", "", "")
 
-	// The outgoing session (prevID) must contain EXACTLY the 3 original
-	// messages — no duplicates.
 	got, err := st.LoadMessages(prevID)
 	if err != nil {
 		t.Fatalf("LoadMessages(prevID): %v", err)

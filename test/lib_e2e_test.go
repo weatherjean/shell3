@@ -12,9 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestLibE2E_SingleTurn exercises the embedder path: construct chat.TurnConfig
-// manually (no bootstrap, no FS), run one turn through a fake LLM, verify the
-// event stream shape end-to-end.
 func TestLibE2E_SingleTurn(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{
 		Events: []llm.StreamEvent{
@@ -48,8 +45,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 
 	sess.End("ok")
 
-	// Assert: session_start, user_message, assistant_token+, assistant_message,
-	// usage, turn_done, session_end all present.
 	kinds := make([]chat.EventKind, 0, len(collected))
 	for _, e := range collected {
 		kinds = append(kinds, e.Kind)
@@ -57,7 +52,7 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 
 	want := map[chat.EventKind]int{
 		chat.EventUserMessage:      1,
-		chat.EventAssistantToken:   2, // "hi", " there"
+		chat.EventAssistantToken:   2,
 		chat.EventAssistantMessage: 1,
 		chat.EventUsage:            1,
 		chat.EventTurnDone:         1,

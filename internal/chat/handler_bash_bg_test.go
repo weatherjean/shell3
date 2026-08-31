@@ -117,7 +117,7 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 			gotCmd = command
 			return "bg1", nil
 		},
-		RunToolCall: nil, // ungated
+		RunToolCall: nil,
 	}
 	out, err := BashBgHandler{}.Execute(context.Background(), "t", json.RawMessage(`{"command":"echo hi"}`), cfg)
 	if err != nil {
@@ -131,11 +131,6 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	}
 }
 
-// The removed `direct` arg is REFUSED, not ignored. json.Unmarshal drops
-// unknown fields, so without an explicit decode a model still writing
-// direct:true — from a stale kit prompt, a skill, or its own history in a
-// long-lived conversation — would silently get auto mode, which is the
-// "nobody told the user" failure report: exists to remove.
 func TestBashBgRefusesRemovedDirectArg(t *testing.T) {
 	started := false
 	cfg := ToolConfig{
@@ -146,7 +141,7 @@ func TestBashBgRefusesRemovedDirectArg(t *testing.T) {
 	}
 	for _, args := range []string{
 		`{"command":"true","direct":true}`,
-		`{"command":"true","direct":false}`, // just as stale as true
+		`{"command":"true","direct":false}`,
 	} {
 		out, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(args), cfg)
 		if err != nil {

@@ -15,7 +15,6 @@ func TestResolveConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// An explicit dir with shell3.sh resolves to itself.
 	explicit := t.TempDir()
 	if err := os.WriteFile(filepath.Join(explicit, "shell3.sh"), []byte("#---\n# shell3:\n#   models: {}\n#---\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -24,12 +23,10 @@ func TestResolveConfigDir(t *testing.T) {
 		t.Errorf("explicit dir: got %q err %v, want %q", got, err, explicit)
 	}
 
-	// A dir without shell3.sh fails with a clear message.
 	if _, err := ResolveConfigDir(t.TempDir(), home); err == nil || !strings.Contains(err.Error(), "shell3 boot") {
 		t.Errorf("empty dir: want boot hint, got %v", err)
 	}
 
-	// A project-local config tree must NOT be picked up for an empty flag.
 	if err := os.WriteFile(filepath.Join(cwd, "shell3.sh"), []byte("#---\n# shell3:\n#   models: {}\n#---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +34,6 @@ func TestResolveConfigDir(t *testing.T) {
 		t.Error("empty flag: expected error (cwd tree must be ignored, ~/.shell3 empty)")
 	}
 
-	// With ~/.shell3/shell3.sh present, empty flag resolves to ~/.shell3.
 	if err := os.WriteFile(filepath.Join(shell3Dir, "shell3.sh"), []byte("#---\n# shell3:\n#   models: {}\n#---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

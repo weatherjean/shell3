@@ -181,7 +181,7 @@ func (b *Bot) refreshChatMeta(ctx context.Context, chatID int64) chatMeta {
 // and nothing is on the turn path — the one place blocking is right.
 func (b *Bot) refreshAllChatMeta(ctx context.Context) {
 	for _, c := range b.allConvs() {
-		b.refreshChatMeta(ctx, c.chatID)
+		b.refreshChatMeta(ctx, c.chatIDValue())
 	}
 }
 
@@ -189,12 +189,13 @@ func (b *Bot) refreshAllChatMeta(ctx context.Context) {
 // PromptSuffix, so it runs EVERY turn — which is what makes a description
 // edited mid-conversation take effect next turn rather than next restart.
 func (c *conversation) brief() string {
-	meta := c.b.chatMetaFor(c.chatID)
-	settings := c.b.settingsFor(c.chatID)
+	chatID := c.chatIDValue()
+	meta := c.b.chatMetaFor(chatID)
+	settings := c.b.settingsFor(chatID)
 
-	room := fmt.Sprintf("Telegram chat %d", c.chatID)
+	room := fmt.Sprintf("Telegram chat %d", chatID)
 	if meta.title != "" {
-		room = fmt.Sprintf("the Telegram chat %q (id %d)", meta.title, c.chatID)
+		room = fmt.Sprintf("the Telegram chat %q (id %d)", meta.title, chatID)
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## This room\n\nYou are speaking in %s. "+
@@ -251,8 +252,9 @@ func (b *Bot) Rooms() []RoomSnapshot {
 		queued := len(c.mailQueue)
 		busy := c.turnActive
 		c.mu.Unlock()
+		chatID := c.chatIDValue()
 		snap := RoomSnapshot{
-			ChatID: c.chatID, Title: b.chatMetaFor(c.chatID).title,
+			ChatID: chatID, Title: b.chatMetaFor(chatID).title,
 			Busy: busy, Queued: queued, SessionID: sess.ID(),
 		}
 		snap.Jobs = runningJobs(sess)

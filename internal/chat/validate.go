@@ -19,6 +19,9 @@ func validateToolArgs(schema map[string]any, args json.RawMessage) error {
 	if err := json.Unmarshal(args, &obj); err != nil {
 		return fmt.Errorf("args must be a JSON object: %w", err)
 	}
+	if obj == nil {
+		return fmt.Errorf("args must be a JSON object")
+	}
 
 	req := schema["required"]
 	if req == nil {

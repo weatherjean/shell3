@@ -10,8 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// A kit-declared command is answered by its shell function, with no model
-// turn: the runner's stdout is the reply.
 func TestKitCommand_Answers(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -29,7 +27,6 @@ func TestKitCommand_Answers(t *testing.T) {
 	}
 }
 
-// A failing command reports the failure rather than posting nothing.
 func TestKitCommand_FailureReported(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -47,8 +44,6 @@ func TestKitCommand_FailureReported(t *testing.T) {
 	}
 }
 
-// A command whose output is empty posts nothing — an idempotent command with
-// nothing to say should not spam the chat.
 func TestKitCommand_EmptyOutputPostsNothing(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -64,9 +59,6 @@ func TestKitCommand_EmptyOutputPostsNothing(t *testing.T) {
 	}
 }
 
-// A built-in always wins. The kit parser rejects the collision at load, so a
-// runner reaching here for a built-in name would be a second bug; this pins
-// that dispatch order regardless.
 func TestKitCommand_BuiltinWins(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -86,7 +78,6 @@ func TestKitCommand_BuiltinWins(t *testing.T) {
 	}
 }
 
-// A verb neither built-in nor kit-declared still answers "unknown command".
 func TestKitCommand_UnknownStillUnknown(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -101,8 +92,6 @@ func TestKitCommand_UnknownStillUnknown(t *testing.T) {
 	}
 }
 
-// Kit commands join the registered command menu, after the built-ins, so they
-// appear in the client's "/" autocomplete.
 func TestBotCommandsIncludeKitCommands(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -120,11 +109,6 @@ func TestBotCommandsIncludeKitCommands(t *testing.T) {
 	}
 }
 
-// kit.ReservedCommands is what the kit parser refuses to let a command
-// shadow. It cannot be derived from BotCommands at parse time without
-// internal/kit importing the front-end, so this test is the pin: adding a
-// built-in without reserving its name would let a kit declare a command that
-// silently never fires.
 func TestReservedCommandsCoverBuiltins(t *testing.T) {
 	for _, c := range BotCommands() {
 		if !slices.Contains(kit.ReservedCommands, c.Command) {

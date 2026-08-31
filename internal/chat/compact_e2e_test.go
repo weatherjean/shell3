@@ -27,21 +27,13 @@ func assertNoOrphanToolResults(t *testing.T, msgs []llm.Message) {
 	}
 }
 
-// TestRunTurn_AutoCompact_TailWireValid_SecondTurn closes the end-to-end gap the
-// per-task reviews could only reason about: when the preserved tail contains a
-// real assistant(tool_call)+tool(result) pair, a RunTurn compaction must keep
-// that pair intact (the cut snaps so the tail never begins with an orphan tool
-// result), AND a subsequent RunTurn must run cleanly on the rebuilt history.
 func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 	fake := fakellm.New(
-		// turn 1, call 0: the quiet compaction summary of the head.
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
-		// turn 1, call 1: the user's turn, answered against the compacted history.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "answer-1"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
 		}},
-		// turn 2: a fresh turn on the rebuilt history.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "answer-2"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
@@ -50,17 +42,12 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		// KeepRecent keeps roughly the last three messages as the tail.
-		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
-		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
+		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
-	// Head: 12 tiny filler messages (clears compactionFloor, summarized away).
-	// Tail: assistant(tool_call id=1) + tool(result id=1) + assistant — the
-	// pair the cut must preserve. The tail messages are sized so KeepRecent=25
-	// lands the cut just before the assistant tool_call.
-	big := strings.Repeat("y", 40) // ~10 estimated tokens each
+	big := strings.Repeat("y", 40)
 	var msgs []llm.Message
 	for range 12 {
 		msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: "h"})
@@ -71,7 +58,7 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 		llm.Message{Role: llm.RoleAssistant, Content: big},
 	)
 	sess.messages = msgs
-	sess.lastPromptTokens = 500 // > CompactAt: compaction fires at turn start
+	sess.lastPromptTokens = 500
 
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q1"}, nil)
 
@@ -81,8 +68,6 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 	if sess.messages[0].Role != llm.RoleUser || !strings.Contains(sess.messages[0].Content, "SUMMARY") {
 		t.Fatalf("first message must be the continuation summary, got %+v", sess.messages[0])
 	}
-	// The assistant tool_call from the tail must have survived intact (it lives
-	// in ToolCalls, not Content, so check there).
 	var keptToolCall bool
 	for _, m := range sess.messages {
 		for _, tc := range m.ToolCalls {
@@ -96,7 +81,6 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 	}
 	assertNoOrphanToolResults(t, sess.messages)
 
-	// A fresh turn on the rebuilt history must complete cleanly.
 	before := len(c.all())
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q2"}, nil)
 	if !hasKind(c.all()[before:], EventTurnDone) {

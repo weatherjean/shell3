@@ -49,7 +49,6 @@ func TestRotateOnOpen(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "shell3.log")
 
-	// Write a file larger than 10 bytes to trigger rotation.
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 20)), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +62,9 @@ func TestRotateOnOpen(t *testing.T) {
 	lg.Debug("after rotate")
 	_ = closer.Close()
 
-	// Original must have been rotated to .1
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("expected rotated archive at %s.1: %v", path, err)
 	}
-	// New log file must exist with the new entry.
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), "after rotate") {
 		t.Errorf("new log file missing expected content:\n%s", string(data))
@@ -78,15 +75,12 @@ func TestRotateKeepsMaxArchives(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "shell3.log")
 
-	// Pre-populate archives .1 .2 .3 — opening with maxArchives=3 should
-	// delete .3 and shift .1→.2, .2→.3.
 	for i := 1; i <= 3; i++ {
 		content := strings.Repeat("x", 5)
 		if err := os.WriteFile(filepath.Join(dir, filepath.Base(path)+"."+string(rune('0'+i))), []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Main log: large enough to trigger rotation.
 	if err := os.WriteFile(path, []byte(strings.Repeat("y", 20)), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -96,12 +90,9 @@ func TestRotateKeepsMaxArchives(t *testing.T) {
 	lg.Debug("new")
 	_ = closer.Close()
 
-	// .3 should now be former .2 (content "xxxxx"), not the original .3.
-	// Former .3 was deleted; former .2 shifted to .3.
 	if _, err := os.Stat(path + ".3"); err != nil {
 		t.Fatalf("expected archive .3 to exist: %v", err)
 	}
-	// .4 must not exist.
 	if _, err := os.Stat(path + ".4"); err == nil {
 		t.Errorf("unexpected archive .4")
 	}
@@ -111,7 +102,6 @@ func TestOpenFileRotatesAndAppends(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "proxy.log")
 
-	// Existing oversized log must be rotated to .1 on open.
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 20)), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +134,6 @@ func TestOddFieldMarkedMissing(t *testing.T) {
 	}
 	defer closer.Close()
 
-	// Odd number of fields: the dangling key has no value. Even pairs
-	// before it must still format normally.
 	lg.Warn("odd msg", "k1", "v1", "lonely")
 	_ = closer.Close()
 

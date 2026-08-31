@@ -15,7 +15,6 @@ func TestReminderPersistAndRestore(t *testing.T) {
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
 	emitSystemReminder(s, "<system-reminder>subagent x finished</system-reminder>")
 
-	// A fresh session for the same id restores the reminder from the sidecar.
 	s2 := NewSession(SessionOpts{Store: st, StoreID: id})
 	if err := s2.RestoreReminders(); err != nil {
 		t.Fatalf("RestoreReminders: %v", err)

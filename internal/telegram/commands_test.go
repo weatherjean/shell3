@@ -85,8 +85,6 @@ func TestCommand_ReloadNoReloader(t *testing.T) {
 	}
 }
 
-// TestCommand_UnknownDropped pins that a removed command (/clear, /set, …) is no
-// longer routed — the trimmed command set answers "unknown command".
 func TestCommand_UnknownDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -97,7 +95,6 @@ func TestCommand_UnknownDropped(t *testing.T) {
 	}
 }
 
-// The view commands moved to the web dash: they answer "unknown command".
 func TestViewCommandsRemoved(t *testing.T) {
 	for _, cmd := range []string{"/status", "/jobs", "/job x", "/runs", "/cancel bg1", "/run_1", "/job_1", "/cancel_1"} {
 		fc := newFakeClient()
@@ -110,8 +107,6 @@ func TestViewCommandsRemoved(t *testing.T) {
 	}
 }
 
-// BotCommands is the surviving action set — no view commands, /dash and
-// /superstop present.
 func TestBotCommandsSurvivingSet(t *testing.T) {
 	var names []string
 	for _, c := range BotCommands() {
@@ -132,7 +127,6 @@ func TestBotCommandsSurvivingSet(t *testing.T) {
 	}
 }
 
-// Bare /dash with no listener wired explains itself.
 func TestDashCommand_Disabled(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -143,7 +137,6 @@ func TestDashCommand_Disabled(t *testing.T) {
 	}
 }
 
-// Bare /dash replies with the minted URL and the TTL hint.
 func TestDashCommand_MintsURL(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -156,8 +149,6 @@ func TestDashCommand_MintsURL(t *testing.T) {
 	}
 }
 
-// /dash with an argument becomes a normal agent turn pointed at the
-// dash-exposing skill — the agent's reply reaches the chat.
 func TestDashCommand_ArgBecomesAgentTurn(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "tunnel is up")
@@ -168,7 +159,6 @@ func TestDashCommand_ArgBecomesAgentTurn(t *testing.T) {
 	})
 }
 
-// /superstop with nothing running says so.
 func TestSuperstop_NothingRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -179,8 +169,6 @@ func TestSuperstop_NothingRunning(t *testing.T) {
 	}
 }
 
-// /superstop kills a live background job, replies with ONE summary naming it,
-// and queues the same summary into the conversation without waking it.
 func TestSuperstop_KillsJobsAndSummarizes(t *testing.T) {
 	fc := newFakeClient()
 	blocking := fakellm.NewBlocking()
@@ -272,9 +260,6 @@ func TestQuietCommand(t *testing.T) {
 	}
 }
 
-// A /dash link pointing off-machine (a planted or tunnel host) is flagged:
-// the reply names the host and warns, so a prompt-injected dash_url.txt can't
-// quietly hand out a live token to an attacker's server.
 func TestDashCommand_WarnsOnNonLoopbackHost(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -287,7 +272,6 @@ func TestDashCommand_WarnsOnNonLoopbackHost(t *testing.T) {
 	}
 }
 
-// A loopback link carries no warning — the common case stays quiet.
 func TestDashCommand_LoopbackNoWarning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")

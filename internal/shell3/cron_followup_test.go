@@ -9,8 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// assertNoWakeFor drains the runtime bus for d and fails if any Wake for
-// session s arrives. A cron job's pinned parent must never be woken.
 func assertNoWakeFor(t *testing.T, rt *Runtime, s *Session, d time.Duration) {
 	t.Helper()
 	id := s.ID()
@@ -27,11 +25,6 @@ func assertNoWakeFor(t *testing.T, rt *Runtime, s *Session, d time.Duration) {
 	}
 }
 
-// TestCronSubagentFollowUpMailsAgent is the lingering-cron behavior on the
-// mail path: a cron dispatch spawns a subagent that starts a bash_bg
-// outliving its main turn. The main turn's result arrives as agent mail (a
-// fresh quiet turn — cron has no live owner), and the later follow-up turn's
-// summary rides the same route — the pinned parent is never woken.
 func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	g := newGatedLLM("main answer", "follow-up answer")
 	rt := newTestRuntime(t, func() chat.Config {
@@ -48,7 +41,7 @@ func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	<-g.Started // child main turn verifiably in flight
+	<-g.Started
 
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
@@ -56,22 +49,18 @@ func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	if child == nil {
 		t.Fatal("child session not recorded on the job")
 	}
-	// A bash_bg job owned by the child, still running when the main turn ends.
 	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	close(g.Release) // main turn completes now
+	close(g.Release)
 
-	// The main turn's result arrives as agent mail carrying the cron origin.
 	waitFor(t, "main-turn mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
 	_, _, fresh := host.snapshot()
 	if !strings.Contains(fresh[0], "followup") || !strings.Contains(fresh[0], "main answer") {
 		t.Fatalf("main-turn mail = %q", fresh[0])
 	}
 
-	// The lingering job finishes → a follow-up turn runs → its summary rides
-	// the same mail route, never a wake of the pinned parent.
 	waitFor(t, "one follow-up turn", func() bool {
 		_, _, _, fu, _ := jobSnapshot(rt.jobs, id)
 		return fu == 1
@@ -86,7 +75,6 @@ func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 		return closed && !driver
 	})
 
-	// The parent (pinned cron session) was never woken by any event.
 	assertNoWakeFor(t, rt, parent, 200*time.Millisecond)
 }
 
@@ -115,14 +103,13 @@ func TestCronSubagentOrphanFloors(t *testing.T) {
 
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
-	rt.jobs.jobs[id].noFollowUps = true // poison: no follow-up turns
+	rt.jobs.jobs[id].noFollowUps = true
 	rt.jobs.mu.Unlock()
 	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	close(g.Release)
 
-	// Main-turn result arrives as agent mail.
 	waitFor(t, "main-turn mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
 
 	// The poisoned job is cascade-cancelled → its completion is a failure →

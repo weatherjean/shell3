@@ -28,9 +28,6 @@ func TestConfigDir_ExplicitSpec(t *testing.T) {
 	}
 }
 
-// The real bot starts with no -c flag (ConfigDir ""); ConfigDir must resolve
-// it to the global ~/.shell3 the runtime loaded. The cwd is NOT consulted — a
-// project-local config tree must be ignored.
 func TestConfigDir_ResolvesEmptySpec(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -38,10 +35,10 @@ func TestConfigDir_ResolvesEmptySpec(t *testing.T) {
 	if err := os.MkdirAll(shell3Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeBaseTree(t, shell3Dir, nil) // creates ~/.shell3/shell3.sh
+	writeBaseTree(t, shell3Dir, nil)
 
 	dir := t.TempDir()
-	writeBaseTree(t, dir, nil) // a cwd config tree that must be ignored
+	writeBaseTree(t, dir, nil)
 
 	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: "", WorkDir: dir})
 	if err != nil {

@@ -10,8 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// openTestStore opens a fresh SQLite runs store in a temp dir, registered
-// for cleanup. File-backed so it exercises the real append path.
 func openTestStore(t *testing.T) *runs.Store {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())

@@ -10,7 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// requiredMail is the shape a report:"always" completion arrives in.
 func requiredMail(note string) shell3.Mail {
 	return shell3.Mail{
 		Note:     note,
@@ -22,11 +21,6 @@ func requiredMail(note string) shell3.Mail {
 	}
 }
 
-// The bind's whole point: a report turn that answers NO_REPLY does not get to
-// swallow a result the spawner said the user was waiting on — the job's own
-// output posts in its place. This is the 2026-08-25 failure, pinned: a
-// finished install sat unreported for nine minutes because the model judged
-// its own start-of-job narration as "they already know".
 func TestWakeTurn_NoReplyUnderRequiredPostsFallback(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "NO_REPLY")
@@ -46,8 +40,6 @@ func TestWakeTurn_NoReplyUnderRequiredPostsFallback(t *testing.T) {
 	}
 }
 
-// The same NO_REPLY under the default mode stays silent — the cost valve for
-// routine ticks has to keep working.
 func TestWakeTurn_NoReplyUnboundStaysSilent(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "NO_REPLY")
@@ -72,8 +64,6 @@ func TestWakeTurn_NoReplyUnboundStaysSilent(t *testing.T) {
 	}
 }
 
-// A bound turn that DOES answer discharges the bind: the user sees the
-// agent's own ✉️ words and not a second raw copy of the same result.
 func TestWakeTurn_ReplyUnderRequiredDischargesTheBind(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "camoufox is back — smoke test passed")
@@ -93,10 +83,6 @@ func TestWakeTurn_ReplyUnderRequiredDischargesTheBind(t *testing.T) {
 	}
 }
 
-// A USER turn drains queued notices too, so it settles the binds it
-// inherited: it answered the user, so the fallback must NOT also post. Without
-// this the user would read the agent's reply and then a raw copy of the same
-// result under it.
 func TestUserTurn_ReplyDischargesTheBind(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "all done, camoufox works"))
@@ -114,8 +100,6 @@ func TestUserTurn_ReplyDischargesTheBind(t *testing.T) {
 	}
 }
 
-// The same turn answering NO_REPLY posts nothing of its own, so the bind is
-// unmet and the job's result posts instead.
 func TestUserTurn_NoReplyFlushesTheBind(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "NO_REPLY"))
@@ -129,10 +113,6 @@ func TestUserTurn_NoReplyFlushesTheBind(t *testing.T) {
 	})
 }
 
-// A reply that says its piece and then signs off with the sentinel posts the
-// piece and NOT the sentinel. Observed live 2026-08-25: the literal word
-// NO_REPLY was delivered to the user as part of an ✉️ update, because the
-// whole-reply match let anything with content through untouched.
 func TestWakeTurn_TrailingSentinelIsStrippedNotPosted(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "Background dry-run dispatched. Will land next turn.\n\nNO_REPLY")

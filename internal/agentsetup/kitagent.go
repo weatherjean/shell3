@@ -19,8 +19,8 @@ var errNoSuchKitAgent = errors.New("agentsetup: no such kit agent")
 
 // LoadKit attaches the kit config.Load already parsed: its agents resolve
 // through KitAgentRuntime and their tools dispatch through KitHostTool. path
-// is where it was read from — a cron tool job sources it. The wiring comes
-// from the same parse, lifted by config.readWiring.
+// is where it was read from — declared tools and hooks source it. The wiring
+// comes from the same parse, lifted by config.readWiring.
 func (p *Parts) LoadKit(path string) error {
 	k := p.lc.Kit()
 	if k == nil {
@@ -199,10 +199,6 @@ func expandHomePath(p, home string) string {
 // `context: [memory.md]` would load the main agent's memory. Exported because
 // `shell3 health` must inspect the same files the agent loads — a second copy
 // of this rule would let health pass on a file nothing reads.
-//
-// TODO: SubagentWorkdir expands ~/ but leaves a RELATIVE workdir alone, so the
-// shell runs it against the process cwd while context: resolves it against the
-// config dir. One of the two is wrong; decide which.
 func AgentContextBase(configDir, home, workdir string) string {
 	if workdir == "" {
 		return configDir
@@ -244,6 +240,9 @@ func (p *Parts) KitHostTool(r kit.Resolved, workDir string) func(context.Context
 		if argsJSON != "" {
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("tool %q: arguments are not valid JSON: %w", name, err)
+			}
+			if args == nil {
+				return "", fmt.Errorf("tool %q: arguments must be a JSON object", name)
 			}
 		}
 		return kit.Runner{Path: path, Dir: workDir}.Run(ctx, t, args)

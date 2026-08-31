@@ -31,8 +31,6 @@ func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 			if o.WorkDir != "" {
 				cfg.WorkDir = o.WorkDir
 			}
-			// Only inject the runtime's store when the config doesn't already
-			// carry an explicit one (tests using fakeCfgWithStore bring their own).
 			if cfg.Store == nil {
 				cfg.Store = store
 			}
@@ -64,8 +62,6 @@ func fakeCfg(text string) func() chat.Config {
 	}
 }
 
-// TestRuntime_SessionsAreIndependent pins the core phase-1 behavior: two
-// sessions on one runtime hold separate histories and separate busy gates.
 func TestRuntime_SessionsAreIndependent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("hi"))
 	a, err := rt.Session(SessionOpts{})
@@ -87,7 +83,6 @@ func TestRuntime_SessionsAreIndependent(t *testing.T) {
 	}
 }
 
-// TestRuntime_SessionAfterCloseErrors: Session on a closed runtime returns an error.
 func TestRuntime_SessionAfterCloseErrors(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	if err := rt.Close(); err != nil {
@@ -99,8 +94,6 @@ func TestRuntime_SessionAfterCloseErrors(t *testing.T) {
 	}
 }
 
-// TestRuntime_EachSessionCallIsDistinct: every Runtime.Session call creates a
-// fresh, independent session (no dedup/reuse-by-name lookup).
 func TestRuntime_EachSessionCallIsDistinct(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	a, err := rt.Session(SessionOpts{})
@@ -116,8 +109,6 @@ func TestRuntime_EachSessionCallIsDistinct(t *testing.T) {
 	}
 }
 
-// TestRuntime_CloseClosesSessions: Runtime.Close closes remaining sessions
-// then runs the shared cleanup exactly once.
 func TestRuntime_CloseClosesSessions(t *testing.T) {
 	cleanups := 0
 	rt := newTestRuntime(t, fakeCfg("x"))
@@ -138,8 +129,6 @@ func TestRuntime_CloseClosesSessions(t *testing.T) {
 	}
 }
 
-// TestRuntime_PerSessionWorkdir: a bash tool call runs in the session's own
-// workdir, not the runtime root — the substrate for repo-rooted subagents.
 func TestRuntime_PerSessionWorkdir(t *testing.T) {
 	dirA, dirB := t.TempDir(), t.TempDir()
 	mk := func() chat.Config {

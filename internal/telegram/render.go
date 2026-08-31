@@ -121,13 +121,14 @@ func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendO
 	if text == "" {
 		text = "(no output)"
 	}
+	chatID := c.chatIDValue()
 	for _, part := range chunk(text) {
 		// Markdown to Telegram-safe HTML so formatting shows, falling back to
 		// raw text if Telegram still rejects it.
 		html := mdhtml.ToTelegramHTML(part)
-		id, err := c.b.client.SendHTML(ctx, c.chatID, html, opts...)
+		id, err := c.b.client.SendHTML(ctx, chatID, html, opts...)
 		if err != nil {
-			id, _ = c.b.client.Send(ctx, c.chatID, part, opts...)
+			id, _ = c.b.client.Send(ctx, chatID, part, opts...)
 		}
 		// Still a message from the bot: remembering its id lets a user reply
 		// in a group instead of retyping an @mention.
@@ -162,7 +163,7 @@ func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, repl
 	if len(chunks) > replyMaxChunks {
 		_ = c.postChunk(ctx, sess, replyTo, chunks[0], opts...)
 		page := mdpage.Render("shell3 — full reply", text)
-		if id, err := c.b.client.SendDocument(ctx, c.chatID, overflowDocName, page, "full reply", opts...); err == nil {
+		if id, err := c.b.client.SendDocument(ctx, c.chatIDValue(), overflowDocName, page, "full reply", opts...); err == nil {
 			c.recordSent(sess, id)
 			return
 		}
@@ -180,15 +181,16 @@ func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, repl
 // completion router uses it to keep an undelivered post's outbox row.
 func (c *conversation) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, part string, opts ...SendOpt) error {
 	html := mdhtml.ToTelegramHTML(part)
+	chatID := c.chatIDValue()
 	var id string
 	var err error
 	if replyTo != "" {
-		if id, err = c.b.client.SendHTMLReply(ctx, c.chatID, html, replyTo, opts...); err != nil {
-			id, err = c.b.client.SendReply(ctx, c.chatID, part, replyTo, opts...)
+		if id, err = c.b.client.SendHTMLReply(ctx, chatID, html, replyTo, opts...); err != nil {
+			id, err = c.b.client.SendReply(ctx, chatID, part, replyTo, opts...)
 		}
 	} else {
-		if id, err = c.b.client.SendHTML(ctx, c.chatID, html, opts...); err != nil {
-			id, err = c.b.client.Send(ctx, c.chatID, part, opts...)
+		if id, err = c.b.client.SendHTML(ctx, chatID, html, opts...); err != nil {
+			id, err = c.b.client.Send(ctx, chatID, part, opts...)
 		}
 	}
 	c.recordSent(sess, id)

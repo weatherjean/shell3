@@ -7,9 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// TestFailedCommandJobWakesParent verifies that a bash_bg job exiting nonzero
-// wakes an idle parent session, so a hosted agent narrates the failure
-// proactively instead of the notice sitting queued until the next user message.
 func TestFailedCommandJobWakesParent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	parent, err := rt.Session(SessionOpts{})
@@ -25,9 +22,6 @@ func TestFailedCommandJobWakesParent(t *testing.T) {
 	}
 }
 
-// TestCleanCommandJobWakesParent verifies the default path: a bash_bg job
-// exiting 0 wakes the parent with its completion notice, taking the same
-// injectNotification path a failure does.
 func TestCleanCommandJobWakesParent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	parent, err := rt.Session(SessionOpts{})
@@ -43,9 +37,6 @@ func TestCleanCommandJobWakesParent(t *testing.T) {
 	}
 }
 
-// TestDirectCommandJobPostsRaw verifies direct:true posts the raw result to
-// the user and queues the notice on the owner WITHOUT waking it — the user is
-// already served; the agent sees it next turn.
 func TestDirectCommandJobPostsRaw(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}
@@ -67,9 +58,6 @@ func TestDirectCommandJobPostsRaw(t *testing.T) {
 	}
 }
 
-// TestDefaultCommandJobMailsOwner verifies the default with a host installed:
-// a clean bash_bg completion is mail to the agent — WakeOwner carries it, and
-// nothing posts to the user.
 func TestDefaultCommandJobMailsOwner(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}

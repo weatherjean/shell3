@@ -57,8 +57,6 @@ func TestRetryReason(t *testing.T) {
 	}
 }
 
-// callObserver invokes the middleware once with a request carrying the given
-// retry-count header and a next that returns (res, err).
 func callObserver(mw option.Middleware, retryCount string, ctx context.Context, res *http.Response, err error) {
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://x", nil)
 	req.Header.Set("X-Stainless-Retry-Count", retryCount)
@@ -91,7 +89,6 @@ func TestRetryObserverSuppressesOnLastAttempt(t *testing.T) {
 			n++
 		}
 	})
-	// retryCount == maxRetries: the SDK will not retry, so no notice.
 	callObserver(mw, "5", context.Background(), resp(503, nil), nil)
 	if n != 0 {
 		t.Fatalf("expected no notice on final attempt, got %d", n)

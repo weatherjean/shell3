@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// PrintHeader writes the two-line brand banner. It must contain the product
-// name and the tagline, and end with a trailing blank line.
 func TestPrintHeader(t *testing.T) {
 	var b strings.Builder
 	PrintHeader(&b)

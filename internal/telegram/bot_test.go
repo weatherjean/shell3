@@ -17,9 +17,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
 
-// storeRuntimeClient builds a Runtime whose sessions share a real file-native
-// runs store — so Session.ID() is a stable non-empty store id, which the thread
-// index and resume paths need. The given client backs every session.
 func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())
@@ -37,7 +34,6 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	return rt
 }
 
-// storeRuntime is storeRuntimeClient with a fakellm that always replies `reply`.
 func storeRuntime(t *testing.T, reply string) *shell3.Runtime {
 	return storeRuntimeClient(t, fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: reply}}}))
 }
@@ -90,9 +86,6 @@ func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
 	}
 }
 
-// Contract 2 (the core of the model): a SECOND bare message — no Telegram
-// reply, no buttons — continues the SAME session. Typing without replying
-// never forks the conversation.
 func TestContract2_BareMessageContinuesTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "r")
@@ -117,9 +110,6 @@ func TestContract2_BareMessageContinuesTheConversation(t *testing.T) {
 	}
 }
 
-// Contract 3: a Telegram reply — even to a message the bot never recorded —
-// also continues the conversation, and the quoted text reaches the model as
-// context. Replies are context hints, not session switches.
 func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	fc := newFakeClient()
 	rec := fakellm.New(
@@ -157,9 +147,6 @@ func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	}
 }
 
-// Contract 4 (steering): a TEXT message arriving mid-turn STEERS the running
-// turn — injected into the session inbox for the next round boundary, never
-// parked behind the turn. Nothing posts; the anchor advances to it.
 func TestContract4_MidTurnTextSteers(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -229,9 +216,6 @@ func TestContract4_MidTurnMediaQueues(t *testing.T) {
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
-// Contract 4c: a steer that lands AFTER the turn's final round boundary is
-// caught up by its own POSTED turn — never silently absorbed into a later
-// quiet turn.
 func TestContract4_SteerCatchupPostsReply(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "caught up")
@@ -246,8 +230,6 @@ func TestContract4_SteerCatchupPostsReply(t *testing.T) {
 	sess := c.main
 	c.mu.Unlock()
 
-	// Simulate the missed-boundary steer: it sits in the inbox with no turn
-	// running.
 	sess.Interject("also do this")
 	before := len(fc.sentReplies())
 	tconv(b).startNextWork(context.Background())
@@ -324,9 +306,6 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	}
 }
 
-// Contract 6: a Wake for the main conversation arriving mid-turn marks
-// pending (not a second turn), and drains as a quiet mail turn after the slot
-// frees.
 func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "queued reply")
@@ -342,10 +321,10 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	c.mu.Unlock()
 
 	c.mu.Lock()
-	c.turnActive = true // simulate a turn holding the slot
+	c.turnActive = true
 	c.mu.Unlock()
 
-	sess.NotifyText("bg result") // agent mail (a notice), NOT user steering
+	sess.NotifyText("bg result")
 	b.dispatchWake(context.Background(), sess.ID())
 	c.mu.Lock()
 	pending := c.wakePending
@@ -364,14 +343,11 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 		defer tconv(b).mu.Unlock()
 		return !tconv(b).turnActive && !tconv(b).wakePending && !sess.HasQueuedInput()
 	})
-	// The wake turn's reply reaches the user as ✉️ agent mail — one channel.
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ queued reply")
 	})
 }
 
-// Contract 7: a Wake for anything that is NOT the main conversation (the cron
-// parent, a /new'd-away session) is dropped — no turn, no post.
 func TestContract7_ForeignWakeDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused")
@@ -393,8 +369,6 @@ func TestContract7_ForeignWakeDropped(t *testing.T) {
 	}
 }
 
-// Contract 8: /new detaches the conversation — the next message runs in a
-// fresh session, and the marker moves with it.
 func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "r")
@@ -409,7 +383,6 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	first := c.main.ID()
 	c.mu.Unlock()
 
-	// /new refuses mid-turn and the reply posts before the slot frees.
 	waitIdle(t, b)
 
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
@@ -486,8 +459,6 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	}
 }
 
-// Contract 10 (debounce): text fragments arriving back to back — Telegram
-// splits long messages into several updates — merge into ONE turn.
 func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
 	fc := newFakeClient()
 	rec := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "merged"}}})
@@ -511,9 +482,6 @@ func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
 	}
 }
 
-// Contract 11: a text arriving during a QUIET (wake) turn must NOT steer into
-// it — the quiet turn's reply posts nowhere, so the user's message would be
-// silently absorbed. It queues instead and runs as its own posted turn.
 func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "answered")
@@ -523,13 +491,11 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	if !waitForReply(t, fc, "answered") {
 		t.Fatal("first turn produced no reply")
 	}
-	// The real turn's teardown clears turnActive and drains the queue; let it
-	// finish before simulating a quiet turn, or it clobbers the flags below.
 	waitIdle(t, b)
 
 	tconv(b).mu.Lock()
 	tconv(b).turnActive = true
-	tconv(b).turnQuiet = true // simulate a wake turn holding the slot
+	tconv(b).turnQuiet = true
 	tconv(b).mu.Unlock()
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "are you there?"})
@@ -567,7 +533,7 @@ func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
 	c.mu.Unlock()
 	before := len(fc.sentReplies())
 
-	sess.Interject("and one more thing") // user steering, landed post-turn
+	sess.Interject("and one more thing")
 	b.dispatchWake(context.Background(), sess.ID())
 
 	waitFor(t, func() bool { return len(fc.sentReplies()) > before })

@@ -12,9 +12,6 @@ import (
 
 const probeReport = "TASK REPORT — cron nightly (clean)\nstatus: clean\noutput tail: 3 files synced"
 
-// newReportSession returns a session with one completed user→assistant
-// exchange already in history — the shape every live conversation has by the
-// time a cron report lands.
 func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakellm.Client, TurnConfig) {
 	t.Helper()
 	fake := fakellm.New(append([]fakellm.Script{
@@ -26,10 +23,6 @@ func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakel
 	return sess, fake, cfg
 }
 
-// A report arriving on a wake turn must be the LAST thing the model reads.
-// Grafting it onto the last user message buries it above the assistant's own
-// previous reply, where the "reply NO_REPLY" instruction it carries is
-// positionally weakest.
 func TestReportLandsAtEndOfWakeContext(t *testing.T) {
 	sess, fake, cfg := newReportSession(t,
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "NO_REPLY"}, {Done: true}}})
@@ -95,8 +88,6 @@ func TestReportTraceKeepsTranscriptAlternating(t *testing.T) {
 	}
 }
 
-// A follow-up turn must be able to see why the agent spoke — the exact thing
-// missing when the agent confabulated an explanation.
 func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 	sess, fake, cfg := newReportSession(t,
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}},
@@ -115,8 +106,6 @@ func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 	t.Fatalf("follow-up turn cannot see the report that caused the reply: %+v", calls[len(calls)-1].Msgs)
 }
 
-// Regression: on an ordinary turn the user DID just speak, so a reminder still
-// rides their current message rather than becoming a separate carrier.
 func TestReminderStillRidesCurrentUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}, {Done: true}}})
 	sess, _ := newCollectorSession(SessionOpts{})

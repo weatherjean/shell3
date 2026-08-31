@@ -47,14 +47,11 @@ func TestReplaceAllMultiple(t *testing.T) {
 	}
 }
 
-// TestReplaceAllExactOverlappingSelfMatch pins that the exact-match replaceAll
-// path (simpleReplacer → single candidate) matches strings.ReplaceAll's
-// non-overlapping left-to-right semantics, including the odd-leftover case.
 func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
 	cases := []struct{ content, old, new, want string }{
-		{"aaaa", "aa", "X", "XX"}, // two non-overlapping matches
-		{"aaa", "aa", "X", "Xa"},  // one match, trailing leftover
-		{"abab", "ab", "X", "XX"}, // adjacent matches
+		{"aaaa", "aa", "X", "XX"},
+		{"aaa", "aa", "X", "Xa"},
+		{"abab", "ab", "X", "XX"},
 	}
 	for _, c := range cases {
 		got, err := replace(c.content, c.old, c.new, true)
@@ -69,7 +66,6 @@ func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
 
 func TestLineTrimmedReplacerHandlesTrailingWhitespace(t *testing.T) {
 	content := "func main() {\n\treturn nil  \n}\n"
-	// model emits the line without the trailing spaces — exact-match would fail.
 	got, err := replace(content, "func main() {\n\treturn nil\n}", "func main() { return ok }", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -119,7 +115,6 @@ func TestWhitespaceNormalizedReplacer(t *testing.T) {
 
 func TestIndentationFlexibleReplacer(t *testing.T) {
 	content := "func f() {\n\t\tif x {\n\t\t\treturn 1\n\t\t}\n}\n"
-	// Search uses no indent, original is double-tab indented.
 	find := "if x {\n\treturn 1\n}"
 	got, err := replace(content, find, "if y { return 2 }", false)
 	if err != nil {
@@ -132,7 +127,6 @@ func TestIndentationFlexibleReplacer(t *testing.T) {
 
 func TestEscapeNormalizedReplacer(t *testing.T) {
 	content := "line1\nline2\nline3"
-	// model double-escapes newlines.
 	got, err := replace(content, `line1\nline2`, "X", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -155,7 +149,6 @@ func TestTrimmedBoundaryReplacer(t *testing.T) {
 
 func TestContextAwareReplacer(t *testing.T) {
 	content := "func F() {\n\ta := 1\n\tb := 2\n\tc := 3\n}\n"
-	// Middle lines drift but >= 50% match.
 	find := "func F() {\n\ta := 1\n\tDIFFERENT := 99\n\tc := 3\n}"
 	got, err := replace(content, find, "func F() {}", false)
 	if err != nil {
@@ -177,9 +170,6 @@ func TestSimpleReplacerWinsOverMultiOccurrenceForUnique(t *testing.T) {
 }
 
 func TestReplaceAllFuzzyReplacesEveryDistinctMatch(t *testing.T) {
-	// "foo   bar" (3 spaces) matches neither line literally, but
-	// whitespaceNormalizedReplacer matches both "foo bar" and "foo  bar" as two
-	// DISTINCT candidates. replaceAll must replace BOTH.
 	content := "foo bar\nfoo  bar\n"
 	got, err := replace(content, "foo   bar", "X", true)
 	if err != nil {

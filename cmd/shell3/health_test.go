@@ -32,8 +32,6 @@ func kitWithWiring(wiring, gate string) string {
 	return b.String()
 }
 
-// writeHealthTree writes a minimal loadable kit config (plus extra files) and
-// returns the directory. An entry for shell3.sh in extra replaces the default.
 func writeHealthTree(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -184,9 +182,6 @@ func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
 	}
 }
 
-// The telegram check runs LAST on purpose: a blank chat_id is a state `boot`
-// itself writes ("fill it in later"), and failing early would hide the hook
-// and MCP diagnostics — the expensive checks someone runs health FOR.
 func TestHealthBrokenTelegramDoesNotHideHookDiagnostics(t *testing.T) {
 	cfg := writeHealthTree(t, map[string]string{
 		"shell3.sh": kitWithWiring(healthWiring+"telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n", "echo not-json"),
@@ -200,9 +195,6 @@ func TestHealthBrokenTelegramDoesNotHideHookDiagnostics(t *testing.T) {
 	}
 }
 
-// healthKit is a minimal kit declaring the models wiring, one main agent, and
-// one tool with a required param — enough to exercise cron tool: job
-// validation without dragging in a full boot fixture.
 const healthKit = `#---
 # shell3:
 #   models:
@@ -250,9 +242,6 @@ func writeKitTree(t *testing.T, src string) string {
 	return dir
 }
 
-// A cron agent: job naming an agent the kit does not declare must fail here.
-// Nothing else checks it — the typo used to surface as a failed dispatch on
-// the first tick, hours later and only in the app log.
 func TestHealthFailsOnUnknownCronAgent(t *testing.T) {
 	cfg := writeKitHealthTree(t, `
 #---
@@ -275,7 +264,6 @@ EOF2
 	}
 }
 
-// The main agent is a legitimate cron target.
 func TestHealthOKWithCronAgentJob(t *testing.T) {
 	cfg := writeKitHealthTree(t, `
 #---
@@ -293,9 +281,6 @@ EOF2
 	}
 }
 
-// Cron runs agent turns only. A kit still carrying the removed tool: kind
-// must FAIL health naming the replacement, not load and arm nothing — the
-// same contract kit.Parse enforces, surfaced where an operator looks first.
 func TestHealthFailsOnCronToolJob(t *testing.T) {
 	cfg := writeKitHealthTree(t, `
 #---

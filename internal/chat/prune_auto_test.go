@@ -21,19 +21,17 @@ func testContext(t *testing.T) context.Context {
 }
 
 func TestMaybeCompact_TwoTierBands(t *testing.T) {
-	// A prunable old tool output followed by a protected recent tail.
 	mkSession := func() *Session {
 		sess := newTestSession(t)
 		sess.messages = []llm.Message{
 			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "1", Name: "bash"}}},
-			bigTool("1"), // old -> prunable once in-band
-			{Role: llm.RoleUser, Content: strings.Repeat("r", 4000)}, // recent tail
+			bigTool("1"),
+			{Role: llm.RoleUser, Content: strings.Repeat("r", 4000)},
 		}
 		return sess
 	}
 	cfg := TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1000, PruneAt: 600, KeepRecent: 1500}, ToolConfig: ToolConfig{Log: noopLogger()}}
 
-	// Below prune_at: the dispatcher does nothing; the long tool output survives.
 	below := mkSession()
 	below.lastPromptTokens = 100
 	maybeCompact(testContext(t), cfg, below)
@@ -41,9 +39,6 @@ func TestMaybeCompact_TwoTierBands(t *testing.T) {
 		t.Fatal("pruned below prune_at threshold")
 	}
 
-	// In the [prune_at, compact_at) band: the dispatcher must invoke the prune
-	// tier, stubbing the old tool output while protecting the recent tail. This
-	// is the assertion that actually guards the two-tier dispatch.
 	inBand := mkSession()
 	inBand.lastPromptTokens = 700
 	maybeCompact(testContext(t), cfg, inBand)
@@ -56,10 +51,10 @@ func TestPruneOldToolOutputs_StubsOldProtectsTail(t *testing.T) {
 	sess := newTestSession(t)
 	sess.messages = []llm.Message{
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "1", Name: "bash"}}},
-		bigTool("1"), // old -> should be pruned
-		{Role: llm.RoleUser, Content: strings.Repeat("r", 4000)}, // recent tail
+		bigTool("1"),
+		{Role: llm.RoleUser, Content: strings.Repeat("r", 4000)},
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "2", Name: "bash"}}},
-		bigTool("2"), // recent -> protected
+		bigTool("2"),
 	}
 	cfg := TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1000, KeepRecent: 1500}, ToolConfig: ToolConfig{Log: noopLogger()}}
 	pruneOldToolOutputs(cfg, sess)

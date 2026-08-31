@@ -22,8 +22,6 @@ EOF2
 }
 `
 
-// A directory holding only shell3.sh is a complete config: the kit carries its
-// own wiring.
 func TestLoadKitOnlyDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(wiringKit), 0o600); err != nil {

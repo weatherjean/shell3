@@ -12,12 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// TestStreamRequestParamMapping pins how SetParams values land in the outgoing
-// ChatCompletions request body — the RequestParams→SDK mapping in Stream
-// (client.go), which no other test covers. It captures the request body from a
-// stub SSE server and asserts the JSON the SDK serialized. Cases cover the
-// xhigh→high clamp, the "none"/"" effort skip, temperature, parallel_tool_calls,
-// and max_completion_tokens.
 func TestStreamRequestParamMapping(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	b := func(v bool) *bool { return &v }
@@ -46,8 +40,6 @@ func TestStreamRequestParamMapping(t *testing.T) {
 			},
 		},
 		{
-			// "none" hits the eff != "none" skip in Stream, so the field is
-			// omitted even though the client default is medium.
 			name:   "none is omitted",
 			params: llm.RequestParams{ReasoningEffort: "none"},
 			assert: func(t *testing.T, body map[string]any) {

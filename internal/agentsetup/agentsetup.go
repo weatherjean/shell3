@@ -144,15 +144,17 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	return p.KitAgentRuntime(name)
 }
 
-// SubagentWorkdir is an employee's declared workdir with ~/ expanded. ""
-// inherits the spawner's, the default when none is declared.
+// SubagentWorkdir is an employee's declared workdir resolved against the
+// config directory (with ~/ expanded). "" inherits the spawner's, the default
+// when none is declared. AgentContextBase uses the same rule for context:
+// files, so an agent executes beside the memory it reads.
 func (p *Parts) SubagentWorkdir(name string) string {
 	if p.kit == nil {
 		return ""
 	}
 	for _, a := range p.kit.Agents {
 		if a.Name == name && a.Workdir != "" {
-			return expandHomePath(a.Workdir, p.home)
+			return AgentContextBase(p.configDir, p.home, a.Workdir)
 		}
 	}
 	return ""
@@ -301,8 +303,16 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		// tally never hard-stops another. A nil reviewer leaves
 		// cfg.ReviewToolCall nil and reviews fail closed downstream.
 		if rev := p.Reviewer(); rev != nil {
-			cfg.ReviewToolCall = func(ctx context.Context, name, command, reason string) (bool, string) {
-				return rev.Review(ctx, activeName, command, reason)
+			cfg.ReviewToolCall = func(ctx context.Context, req chat.ToolReviewRequest) (bool, string) {
+				return rev.Review(ctx, activeName, review.Request{
+					Name:               req.Name,
+					Command:            req.Command,
+					Reason:             req.Reason,
+					WorkDir:            req.WorkDir,
+					Headless:           req.Headless,
+					TrustedUserContext: req.TrustedUserContext,
+					Messages:           req.Messages,
+				})
 			}
 		}
 	}
@@ -491,9 +501,9 @@ func (b *builder) openStore() {
 	}
 }
 
-// reviewMaxTokens caps the reviewer's reply. The verdict is one word, but a
-// reasoning model spends thinking tokens first, and a 16-token cap would
-// truncate the thought and fail every review closed.
+// reviewMaxTokens caps the reviewer's compact JSON assessment. A reasoning
+// model spends thinking tokens first, and a tiny cap would truncate the final
+// object and fail every review closed.
 const reviewMaxTokens = 1024
 
 // Reviewer is the shared reviewer behind the gate's {review} verdict, built on

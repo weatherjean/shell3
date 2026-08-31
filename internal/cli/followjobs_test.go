@@ -15,28 +15,15 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
 
-// TestFollowAskJobs_WaitsForBackgroundJob is the Q2 regression: a one-shot
-// (`ask -p`-style) run that dispatches a background job must NOT return at turn
-// end — it must stay alive until the job completes and its wake turn is
-// rendered, so the in-process job's result is never silently killed by the
-// process exiting.
-//
-// The scripted model: turn 1 launches a slow bash_bg job then replies; on the
-// wake turn (RunQueued) it narrates the completion. The narration only appears
-// in the output if FollowAskJobs actually waited for the wake — which is the
-// behavior under test.
 func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 	fake := fakellm.New(
-		// turn 1, round 1: launch a slow background job.
 		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{
 			ID: "x", Name: "bash_bg", RawArgs: `{"command":"sleep 0.4; echo hi"}`,
 		}}}},
-		// turn 1, round 2: the assistant's reply after the tool result.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "dispatched the job"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
 		}},
-		// wake turn: narrate the completion the host woke us with.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "JOB-FINISHED-NARRATION"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
@@ -69,7 +56,6 @@ func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 	if !strings.Contains(buf.String(), "JOB-FINISHED-NARRATION") {
 		t.Fatalf("wake-turn narration missing — the run did not wait for the background job:\n%s", buf.String())
 	}
-	// No job should still be running once FollowAskJobs returns.
 	for _, j := range sess.Jobs() {
 		if !j.Done {
 			t.Errorf("job %s still running after FollowAskJobs returned", j.ID)
@@ -132,8 +118,6 @@ func TestFollowAskJobs_CtxCancelStopsWait(t *testing.T) {
 	}
 }
 
-// contentRule matches a Stream call by substring(s) found in the concatenated
-// content of every message in the call. Used by contentLLM below.
 type contentRule struct {
 	contains []string
 	reply    string
@@ -156,11 +140,6 @@ type contentLLM struct {
 }
 
 func (c *contentLLM) Stream(ctx context.Context, msgs []llm.Message, _ []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
-	// Match on the LAST message only (the newly-added tool result or injected
-	// notice): a child session's conversation keeps its full history, so
-	// matching over the whole transcript would let an earlier turn's text
-	// (e.g. "started background job" from round 2) falsely match a later
-	// turn's call (e.g. round 3, the follow-up).
 	text := ""
 	if len(msgs) > 0 {
 		text = msgs[len(msgs)-1].Content
@@ -191,8 +170,6 @@ func (c *contentLLM) Stream(ctx context.Context, msgs []llm.Message, _ []llm.Too
 		onEvent(llm.StreamEvent{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}})
 		return nil
 	}
-	// Default: a subagent child's very first turn — launch a background job
-	// that will outlive the turn.
 	onEvent(llm.StreamEvent{ToolCall: &llm.ToolCall{
 		ID: "x", Name: "bash_bg", RawArgs: `{"command":"sleep 0.15; echo hi"}`,
 	}})
@@ -216,13 +193,9 @@ func (c *contentLLM) Stream(ctx context.Context, msgs []llm.Message, _ []llm.Too
 func TestFollowAskJobs_LingeringSubagentFollowUp(t *testing.T) {
 	followupGate := make(chan struct{})
 	fake := &contentLLM{rules: []contentRule{
-		// child main turn, round 2: tool result for the bash_bg launch.
 		{contains: []string{"started background job"}, reply: "child main answer"},
-		// child follow-up turn (RunQueued over the bg_done notice): gated.
 		{contains: []string{"background job", "exited"}, reply: "FOLLOWUP-NARRATION", gate: followupGate},
-		// root narrating the agent_update notice from the follow-up turn.
 		{contains: []string{"follow-up (background job finished)"}, reply: "ROOT-SAW-FOLLOWUP"},
-		// root narrating the agent_done notice from the subagent's main turn.
 		{contains: []string{"finished (done)"}, reply: "ROOT-SAW-DONE"},
 	}}
 	rt := shell3test.NewRuntimeForTestClient(t, fake)
@@ -242,16 +215,13 @@ func TestFollowAskJobs_LingeringSubagentFollowUp(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- FollowAskJobs(ctx, &buf, rt, sess) }()
 
-	// Give the child's main turn, its bash_bg job, and the (gated) follow-up
-	// call time to reach the gate. FollowAskJobs must NOT have returned yet:
-	// the subagent is Done but its child is still open running the follow-up.
 	select {
 	case err := <-done:
 		t.Fatalf("FollowAskJobs returned before the follow-up notice was delivered (err=%v):\n%s", err, buf.String())
 	case <-time.After(800 * time.Millisecond):
 	}
 
-	close(followupGate) // let the follow-up turn complete
+	close(followupGate)
 	select {
 	case err := <-done:
 		if err != nil {
@@ -272,15 +242,10 @@ func TestFollowAskJobs_LingeringSubagentFollowUp(t *testing.T) {
 	}
 }
 
-// TestWaitForChange_ClosedBusReturnsPromptly is the Minor regression: a
-// closed Wake or job-progress bus can never report a future change, so
-// waitForChange must return the terminal errJobBusClosed sentinel rather than
-// nil (which would make FollowAskJobs loop straight back into a select on the
-// same already-closed channel — a busy spin).
 func TestWaitForChange_ClosedBusReturnsPromptly(t *testing.T) {
 	hostEvents := make(chan shell3.HostEvent)
 	close(hostEvents)
-	jobEvents := make(chan shell3.JobProgress) // left open; the closed bus alone must trip it
+	jobEvents := make(chan shell3.JobProgress)
 
 	done := make(chan error, 1)
 	go func() { done <- waitForChange(context.Background(), "sess1", hostEvents, jobEvents) }()
@@ -294,11 +259,6 @@ func TestWaitForChange_ClosedBusReturnsPromptly(t *testing.T) {
 	}
 }
 
-// TestFollowAskJobs_ClosedBusNoBusySpin verifies FollowAskJobs itself treats a
-// closed bus as terminal: it must return promptly after exactly ONE wait call
-// rather than looping (busy-spinning) forever re-entering a wait function
-// that keeps reporting the bus closed, even while a job is still (and will
-// always be, in this test) reported running.
 func TestFollowAskJobs_ClosedBusNoBusySpin(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{
@@ -316,8 +276,6 @@ func TestFollowAskJobs_ClosedBusNoBusySpin(t *testing.T) {
 	if err := RunAskTurn(ctx, &buf, sess, "start a slow job"); err != nil {
 		t.Fatalf("turn: %v", err)
 	}
-	// The bash_bg job (sleep 30) is still running: sess.Jobs() reports it as
-	// running for the lifetime of this test.
 
 	var calls int
 	var mu sync.Mutex

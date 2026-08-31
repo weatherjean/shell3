@@ -12,9 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// fakeCmds is a sessionCmds with no runtime behind it: the model's whole
-// contract with the session is these two reads, so a struct of canned answers
-// exercises every UI path without a live agent.
 type fakeCmds struct {
 	queued bool
 	jobs   []shell3.JobInfo
@@ -23,9 +20,6 @@ type fakeCmds struct {
 func (f *fakeCmds) HasQueuedInput() bool   { return f.queued }
 func (f *fakeCmds) Jobs() []shell3.JobInfo { return f.jobs }
 
-// testModel builds a laid-out model over a controllable turn channel. sent
-// records every prompt the model started a turn with; the returned channel is
-// the one that turn streams on, so a test can feed it events and close it.
 func testModel(t *testing.T, cmds sessionCmds) (*model, chan shell3.Event, *[]string, *int) {
 	t.Helper()
 	ch := make(chan shell3.Event, 32)
@@ -40,8 +34,6 @@ func testModel(t *testing.T, cmds sessionCmds) (*model, chan shell3.Event, *[]st
 	return m, ch, &sent, &canceled
 }
 
-// typeKeys drives the model with one keystroke per string, using the same
-// String() form handleKey matches on.
 func typeKeys(m *model, keys ...string) {
 	for _, k := range keys {
 		switch k {
@@ -80,8 +72,6 @@ func TestSubmitStartsTurn(t *testing.T) {
 	}
 }
 
-// TestSubmitEmptyIsNoop: enter on blank input must not start a turn — otherwise
-// a stray keypress costs a full model round.
 func TestSubmitEmptyIsNoop(t *testing.T) {
 	m, _, sent, _ := testModel(t, &fakeCmds{})
 	typeKeys(m, "   ", "enter")
@@ -90,9 +80,6 @@ func TestSubmitEmptyIsNoop(t *testing.T) {
 	}
 }
 
-// TestSubmitMidTurnSteers: a message typed while a turn runs is interjected as
-// steering, NOT queued as a second turn — matching the Telegram front-end,
-// where mid-turn text steers the running turn.
 func TestSubmitMidTurnSteers(t *testing.T) {
 	m, _, sent, _ := testModel(t, &fakeCmds{})
 	var steered []string
@@ -164,9 +151,6 @@ func TestCanceledTurnRendersMarker(t *testing.T) {
 	}
 }
 
-// TestQueuedInputRunsFollowUpTurn: steering that lands after a turn's final
-// round has no boundary left to drain it, so the turn's end must run it as a
-// follow-up rather than leaving it stranded in the inbox.
 func TestQueuedInputRunsFollowUpTurn(t *testing.T) {
 	cmds := &fakeCmds{queued: true}
 	m, _, _, _ := testModel(t, cmds)
@@ -186,10 +170,6 @@ func TestQueuedInputRunsFollowUpTurn(t *testing.T) {
 	}
 }
 
-// TestWakeDrainsCompletion: `ask` installs no CompletionHost, so a finished
-// background job's notice arrives as a queued input plus a Wake. Without
-// draining it here the result would never be narrated — this is the TUI's
-// stand-in for cli.FollowAskJobs.
 func TestWakeDrainsCompletion(t *testing.T) {
 	cmds := &fakeCmds{queued: true}
 	m, _, _, _ := testModel(t, cmds)
@@ -200,7 +180,6 @@ func TestWakeDrainsCompletion(t *testing.T) {
 		return make(chan shell3.Event), func() {}
 	}
 
-	// A wake for another session must be ignored.
 	m.Update(wakeMsg{ev: shell3.HostEvent{Session: "other", Kind: shell3.Wake}})
 	if ran != 0 {
 		t.Fatalf("a wake for another session drained this one's inbox")
@@ -212,12 +191,10 @@ func TestWakeDrainsCompletion(t *testing.T) {
 	}
 }
 
-// TestFooterSegments pins what the footer reports: the model with its context
-// fill, the running-job count, and the agent badge.
 func TestFooterSegments(t *testing.T) {
 	cmds := &fakeCmds{jobs: []shell3.JobInfo{{Done: false}, {Done: true}}}
 	m, _, _, _ := testModel(t, cmds)
-	m.tokens = 250 // 25% of the 1000-token window
+	m.tokens = 250
 	m.refreshJobCount()
 
 	footer := strings.Join(m.uiSnapshot().footer, " | ")
@@ -263,8 +240,6 @@ func TestFoldKey(t *testing.T) {
 	}
 }
 
-// TestMouseWheelScrolls: the alternate screen has no scrollback of its own, so
-// without a captured wheel the only way through a long transcript is pgup/pgdn.
 func TestMouseWheelScrolls(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	for i := 0; i < 80; i++ {
@@ -286,9 +261,6 @@ func TestMouseWheelScrolls(t *testing.T) {
 	}
 }
 
-// TestMouseCaptureIsOn pins that the view asks for mouse reporting at all —
-// without it bubbletea never delivers a wheel event and the handler above is
-// dead code that no test of the handler alone would catch.
 func TestMouseCaptureIsOn(t *testing.T) {
 	if got := m0(t).View().MouseMode; got != tea.MouseModeCellMotion {
 		t.Errorf("MouseMode = %v, want cell-motion (wheel events, no per-pixel motion)", got)
@@ -346,8 +318,6 @@ func TestEmptyAssistantBlockDropped(t *testing.T) {
 	}
 }
 
-// TestReminderHeldDuringStream: a system reminder arriving mid-answer must be
-// held and flushed after the answer, never split it in half.
 func TestReminderHeldDuringStream(t *testing.T) {
 	tr := newTranscript()
 	tr.apply(shell3.Event{Kind: shell3.Token, Text: "part one"})
@@ -378,8 +348,6 @@ func TestErrorCarriesRecoveryHint(t *testing.T) {
 	}
 }
 
-// TestScrollReleasesFollow: scrolling up unsticks the viewport from the bottom
-// so streaming output stops yanking the view away from what you're reading.
 func TestScrollReleasesFollow(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	for i := 0; i < 60; i++ {
@@ -401,8 +369,6 @@ func TestScrollReleasesFollow(t *testing.T) {
 	}
 }
 
-// TestWelcomeCardBeforeFirstMessage: an empty transcript renders the welcome
-// card, which is also where the Telegram-separation promise is stated.
 func TestWelcomeCardBeforeFirstMessage(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	if got := m.uiSnapshot().blockCount; got != 0 {
@@ -435,9 +401,6 @@ func TestViewRendersWithoutPanic(t *testing.T) {
 	}
 }
 
-// TestDragSelectsAndCopies: capturing the mouse takes the terminal's own
-// selection away, so the app must provide one — a drag highlights the lines it
-// covers and release copies them, with the gutter and ANSI stripped.
 func TestDragSelectsAndCopies(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.addUser("alpha")
@@ -470,9 +433,6 @@ func TestDragSelectsAndCopies(t *testing.T) {
 	}
 }
 
-// TestSelectionSkipsMetaLines: a system reminder is host chrome, never
-// highlighted — so it must not land in the clipboard either (what you see
-// selected is what you copy).
 func TestSelectionSkipsMetaLines(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.addUser("keep me")
@@ -516,8 +476,6 @@ func TestClickFoldsOneBlock(t *testing.T) {
 	}
 }
 
-// TestEdgeScrollExtendsSelection: dragging to the top edge scrolls the
-// viewport, so a selection can run past the visible page.
 func TestEdgeScrollExtendsSelection(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	for i := 0; i < 80; i++ {

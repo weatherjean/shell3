@@ -13,18 +13,10 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// TestStreamTruncatedMidResponse simulates a provider that writes a partial SSE
-// response and then closes the connection without a terminating "[DONE]" event
-// (e.g. out-of-credits, rate limit, or an upstream proxy/timeout). The OpenAI
-// SDK surfaces this as io.ErrUnexpectedEOF. We assert the returned error carries
-// a clearer, human-readable message AND still wraps io.ErrUnexpectedEOF so
-// errors.Is keeps working for programmatic callers.
 func TestStreamTruncatedMidResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl, _ := w.(http.Flusher)
-		// Emit one content chunk, then hijack and slam the connection shut
-		// mid-stream with no terminating event — surfaces io.ErrUnexpectedEOF.
 		fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"index":0,"delta":{"content":"hel"}}]}`)
 		if fl != nil {
 			fl.Flush()
@@ -39,7 +31,6 @@ func TestStreamTruncatedMidResponse(t *testing.T) {
 			t.Errorf("hijack: %v", err)
 			return
 		}
-		// Close abruptly without a terminating [DONE].
 		_ = conn.Close()
 	}))
 	defer srv.Close()
@@ -62,9 +53,6 @@ func TestStreamTruncatedMidResponse(t *testing.T) {
 	}
 }
 
-// TestWrapStreamErr unit-tests the error mapping directly: EOF-class errors get
-// the clearer truncation message (and stay errors.Is-comparable), while every
-// other error keeps the generic "llm: stream:" wrap unchanged.
 func TestWrapStreamErr(t *testing.T) {
 	t.Run("unexpected EOF -> truncation message", func(t *testing.T) {
 		err := wrapStreamErr(io.ErrUnexpectedEOF)

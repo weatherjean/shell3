@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// newTestSession constructs a plain in-memory session (no sink, no store) for
-// use in compact tests.
 func newTestSession(t *testing.T) *Session {
 	t.Helper()
 	return NewSession(SessionOpts{})

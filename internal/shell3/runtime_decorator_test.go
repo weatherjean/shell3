@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// dummyTool returns a minimal valid HostTool for decoration tests.
 func dummyTool(name string) HostTool {
 	return HostTool{
 		Name:       name,
@@ -16,7 +15,6 @@ func dummyTool(name string) HostTool {
 	}
 }
 
-// hasTool reports whether the session's tool schema carries name.
 func hasTool(s *Session, name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -40,7 +38,6 @@ func TestSessionDecorator_AppliesToNewSessions(t *testing.T) {
 	if !hasTool(s, "image_generate") {
 		t.Fatal("new session missing decorated tool")
 	}
-	// Re-requesting the same live name must NOT decorate again (no dup schema).
 	again, err := rt.Session(SessionOpts{Name: "main"})
 	if err != nil {
 		t.Fatal(err)
@@ -64,8 +61,6 @@ func TestSessionDecorator_AppliesToExistingSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Decorator set AFTER the session exists (the usual boot order) must still
-	// reach it.
 	rt.SetSessionDecorator(func(s *Session) {
 		_ = s.RegisterHostTool(dummyTool("image_generate"))
 	})

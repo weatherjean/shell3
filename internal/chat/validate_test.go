@@ -26,6 +26,7 @@ func TestValidateToolArgs(t *testing.T) {
 		{"missing required", `{"reason":"test"}`, true},
 		{"empty object", `{}`, true},
 		{"nil args treated as empty object", ``, true},
+		{"json null is not an object", `null`, true},
 		{"not an object", `["array"]`, true},
 		{"invalid json", `{bad}`, true},
 	}
@@ -42,12 +43,14 @@ func TestValidateToolArgs(t *testing.T) {
 
 func TestValidateToolArgsNoRequired(t *testing.T) {
 	schema := map[string]any{"type": "object"}
-	// No required list — any object passes.
 	if err := validateToolArgs(schema, json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 	if err := validateToolArgs(schema, json.RawMessage(`{"anything":"goes"}`)); err != nil {
 		t.Fatalf("expected nil, got %v", err)
+	}
+	if err := validateToolArgs(schema, json.RawMessage(`null`)); err == nil {
+		t.Fatal("JSON null must not pass an object schema")
 	}
 }
 

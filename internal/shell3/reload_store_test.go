@@ -46,12 +46,10 @@ func TestReloadRepointsSessionStore(t *testing.T) {
 		t.Fatalf("applyReload: %v", err)
 	}
 
-	// The old store closes (stands in for the parked generation's drain).
 	if err := oldStore.Close(); err != nil {
 		t.Fatalf("close old store: %v", err)
 	}
 
-	// If s.sess still held the old (now-closed) store, this would error.
 	if err := s.sess.RestoreReminders(); err != nil {
 		t.Fatalf("session store was not repointed at the new generation: %v", err)
 	}

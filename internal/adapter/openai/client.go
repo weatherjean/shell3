@@ -195,13 +195,16 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		for _, tc := range delta.ToolCalls {
 			idx := tc.Index
 			if toolCalls[idx] == nil {
-				id := tc.ID
-				if id == "" {
-					id = fmt.Sprintf("call_%d", idx)
-				}
-				toolCalls[idx] = &llm.ToolCall{ID: id, Name: tc.Function.Name}
+				toolCalls[idx] = &llm.ToolCall{}
 				toolCallOrder = append(toolCallOrder, idx)
 			}
+			// Tool-call deltas are fragments. Most providers put ID and name in
+			// the first fragment, but OpenAI-compatible endpoints are allowed to
+			// deliver either later and may split the function name too.
+			if toolCalls[idx].ID == "" && tc.ID != "" {
+				toolCalls[idx].ID = tc.ID
+			}
+			toolCalls[idx].Name += tc.Function.Name
 			toolCalls[idx].RawArgs += tc.Function.Arguments
 		}
 	}
@@ -218,6 +221,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		tc := toolCalls[idx]
 		if tc == nil {
 			continue
+		}
+		if tc.ID == "" {
+			tc.ID = fmt.Sprintf("call_%d", idx)
 		}
 		if seen[tc.ID] > 0 {
 			tc.ID = fmt.Sprintf("%s_%d", tc.ID, i)

@@ -11,8 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// standaloneCfg is the shared TurnConfig for CompactStandalone tests: small
-// KeepRecent so seeded history has a head to summarize.
 func standaloneCfg(fake *fakellm.Client) TurnConfig {
 	return TurnConfig{
 		LLM:         fake,
@@ -22,15 +20,11 @@ func standaloneCfg(fake *fakellm.Client) TurnConfig {
 	}
 }
 
-// TestCompactStandalone_ReportsDelta pins the manual /compact path: with a
-// compactable history it summarises the head, reports a positive token delta,
-// and injects the continuation summary.
 func TestCompactStandalone_ReportsDelta(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
 	)
 	sess, _ := newCollectorSession(SessionOpts{})
-	// A big head so before > after even with the summary added.
 	big := strings.Repeat("x", 2000)
 	for i := 0; i < 20; i++ {
 		sess.messages = append(sess.messages,
@@ -55,10 +49,8 @@ func TestCompactStandalone_ReportsDelta(t *testing.T) {
 	}
 }
 
-// TestCompactStandalone_NothingToCompact pins the empty/near-empty case: no
-// head to summarise returns ErrNothingToCompact and leaves history untouched.
 func TestCompactStandalone_NothingToCompact(t *testing.T) {
-	fake := fakellm.New() // no scripts: any LLM call would fail the test
+	fake := fakellm.New()
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.messages = []llm.Message{{Role: llm.RoleUser, Content: "hi"}}
 
@@ -71,8 +63,6 @@ func TestCompactStandalone_NothingToCompact(t *testing.T) {
 	}
 }
 
-// TestCompactStandalone_LLMFailureLeavesHistory pins the failure contract: a
-// summarisation error reports the error and leaves history untouched.
 func TestCompactStandalone_LLMFailureLeavesHistory(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Err: errors.New("provider down")})
 	sess, _ := newCollectorSession(SessionOpts{})

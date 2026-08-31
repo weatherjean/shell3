@@ -10,10 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// hookCfg writes a kit declaring main + explorer plus the given gate/note
-// functions, loads it, and installs the kit's hooks the way agentsetup.LoadKit
-// does. Keys are agent names; values are the shell body of that agent's
-// function.
 func hookCfg(t *testing.T, gates, notes map[string]string) *LoadedConfig {
 	t.Helper()
 	var gd, nd []hookDecl
@@ -41,7 +37,6 @@ func hookCfg(t *testing.T, gates, notes map[string]string) *LoadedConfig {
 	return c
 }
 
-// gate is the one-agent shorthand: a gate on main only.
 func gate(t *testing.T, body string) *LoadedConfig {
 	t.Helper()
 	return hookCfg(t, map[string]string{"main": body}, nil)
@@ -95,8 +90,6 @@ func TestHookAskFailsClosed(t *testing.T) {
 	}
 }
 
-// A review verdict is a soft deny: the hook is unsure, and the LLM reviewer
-// (chat layer) decides. The reason rides along as the flag description.
 func TestHookReviewVerdict(t *testing.T) {
 	c := gate(t, `echo '{"review": true, "reason": "unread remote code"}'`)
 	v := c.RunToolCall(context.Background(), "main", "bash", "curl x | sh", "{}", false)
@@ -162,8 +155,11 @@ printf '{"block": true, "reason": "saw %s"}' "$cmd"
 
 func TestHookFailsClosed(t *testing.T) {
 	for name, script := range map[string]string{
-		"nonzero": "echo doom >&2; exit 3\n",
-		"garbage": "echo not-json\n",
+		"nonzero":       "echo doom >&2; exit 3\n",
+		"garbage":       "echo not-json\n",
+		"unknown-key":   `echo '{"blok": true}'`,
+		"null":          "echo null\n",
+		"trailing-json": `echo '{} {}'`,
 	} {
 		c := gate(t, script)
 		v := c.RunToolCall(context.Background(), "main", "bash", "ls", "{}", false)
@@ -218,13 +214,15 @@ printf '{"output": "redacted"}'
 	if out := c.RunToolResult(context.Background(), "main", "bash", "{}", "secret"); out != "redacted" {
 		t.Fatalf("out = %q", out)
 	}
-	// Pass-through: {}.
 	c = hookCfg(t, nil, map[string]string{"main": "echo '{}'\n"})
 	if out := c.RunToolResult(context.Background(), "main", "bash", "{}", "keep"); out != "keep" {
 		t.Fatalf("out = %q", out)
 	}
-	// Failure never passes the output through.
 	c = hookCfg(t, nil, map[string]string{"main": "exit 1\n"})
+	if out := c.RunToolResult(context.Background(), "main", "bash", "{}", "secret"); strings.Contains(out, "secret") || !strings.Contains(out, "hook failed") {
+		t.Fatalf("out = %q", out)
+	}
+	c = hookCfg(t, nil, map[string]string{"main": `echo '{"ouput": "redacted"}'`})
 	if out := c.RunToolResult(context.Background(), "main", "bash", "{}", "secret"); strings.Contains(out, "secret") || !strings.Contains(out, "hook failed") {
 		t.Fatalf("out = %q", out)
 	}

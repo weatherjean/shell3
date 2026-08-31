@@ -14,7 +14,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// seedRun writes one session with messages and returns (root, id).
 func seedRun(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()

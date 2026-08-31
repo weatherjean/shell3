@@ -4,7 +4,6 @@ package telegram
 
 import "testing"
 
-// A DM needs no trigger: there is nobody else in the room.
 func TestAddressedPrivateChatAlwaysCounts(t *testing.T) {
 	c := &conversation{}
 	c.setGroup("private")
@@ -13,9 +12,6 @@ func TestAddressedPrivateChatAlwaysCounts(t *testing.T) {
 	}
 }
 
-// In a group only an @mention or a reply to the bot counts. The lookalike
-// case is the one that matters: another bot named @mybottom in the same room
-// must not be able to drive this one.
 func TestAddressedGroupTrigger(t *testing.T) {
 	c := &conversation{}
 	c.setGroup("supergroup")
@@ -42,8 +38,6 @@ func TestAddressedGroupTrigger(t *testing.T) {
 	}
 }
 
-// With no resolvable bot username a room degrades to reply-only rather than
-// going deaf: @mentions cannot match, replies still do.
 func TestAddressedWithoutUsername(t *testing.T) {
 	c := &conversation{}
 	c.setGroup("group")
@@ -56,8 +50,6 @@ func TestAddressedWithoutUsername(t *testing.T) {
 	}
 }
 
-// The sent-id ring is bounded; an old id falling out of it costs one repeated
-// @mention, never a wrong yes.
 func TestSentIDRingIsBounded(t *testing.T) {
 	c := &conversation{}
 	for i := 0; i < sentIDsCap+50; i++ {
@@ -78,7 +70,6 @@ func TestSentIDRingIsBounded(t *testing.T) {
 func TestAddressedReplyToBotSurvivesRestart(t *testing.T) {
 	c := &conversation{}
 	c.setGroup("supergroup")
-	// Nothing remembered: exactly the state a fresh process is in.
 	if !c.addressed(Msg{Text: "do it", ReplyToID: "42", ReplyToBot: true}, "mybot") {
 		t.Fatal("a reply to the bot must count even when this process never sent that message")
 	}

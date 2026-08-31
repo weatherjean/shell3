@@ -33,9 +33,6 @@ func (c *gateClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDe
 	return nil
 }
 
-// TestEndOfTurn_QueuedInterjectEmitsWake proves Part A: a turn that ends with a
-// non-empty inbox (steering arrived during the final round) emits a Wake so the
-// host can run a follow-up RunQueued turn.
 func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	gc := &gateClient{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newTestRuntime(t, func() chat.Config {
@@ -47,15 +44,12 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	}
 
 	ch := s.Send(context.Background(), "go")
-	// Wait until the stream is in flight (top-of-turn inbox drain already ran).
 	select {
 	case <-gc.started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream never started")
 	}
-	// Steer mid-turn: this queues but is NOT drained (final round, no more rounds).
 	s.Interject("wait, also do X")
-	// Let the turn finish with text + no tool calls.
 	close(gc.release)
 	for range ch {
 	}
@@ -63,7 +57,6 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	if !s.HasQueuedInput() {
 		t.Fatal("interjected item should still be queued after the turn ended")
 	}
-	// The session is now idle with a non-empty inbox → expect a Wake.
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
@@ -77,8 +70,6 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	}
 }
 
-// TestEndOfTurn_EmptyInboxNoWake is the negative case: a normal turn that ends
-// with an empty inbox emits NO Wake.
 func TestEndOfTurn_EmptyInboxNoWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})

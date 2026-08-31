@@ -26,14 +26,19 @@ bm_page_kind() {
 - `description` is required. It is the only thing telling the model when to
   reach for this.
 - Param types are `string`, `int`, or `bool`.
+- `required: true` and `default:` are mutually exclusive, and a default must
+  have the parameter's declared YAML type.
 - A param name becomes an environment variable, so it must be a valid
   identifier and must not shadow `PATH`, `HOME`, `TMPDIR`, `LANG`, or `TZ`.
 - Stdout is the result. A nonzero exit is a tool error, and stderr comes back
   with it — a failing tool says why rather than returning silence.
 
-Tool bodies default to bash. A body starting with `#!` uses that interpreter
-instead, so genuinely awkward work (HTML parsing, scoring maths) can be another
-language without dragging LLM plumbing back into scripts.
+Tool bodies are bash functions because the kit is sourced by bash. Genuinely
+awkward reusable work can live in a script written in another language; the
+tool function invokes that script and remains the small model-facing adapter.
+Cancelling a live turn sends `SIGTERM` to the declared tool's whole process
+group and bounds pipe shutdown, so scripts should treat `SIGTERM` as their
+cleanup signal.
 
 ## The author's loop
 
@@ -86,7 +91,7 @@ The harness gives you six names and nothing else:
 
 | | |
 |---|---|
-| `tool <name> k=v …` | invoke a declared tool through the gate, as a real call |
+| `tool <name> k=v …` | invoke a declared tool through the test dispatcher (required/default handling; no live gate) |
 | `stub <cmd>` | read stdin; install `<cmd>` at the front of `PATH` printing exactly that |
 | `assert_eq a b` | fail if unequal |
 | `assert_contains hay needle` | substring assert |
@@ -99,9 +104,11 @@ output. Same trick for a database tool: build a schema in `$KIT_TMP` and point
 the tool at it.
 
 A test may also call the shell function directly (`url=… bm_page_kind`),
-which bypasses param validation and the gate. Use that for unit-testing the body
-and for debugging after `source shell3.sh`; use `tool` for everything else,
-because it exercises what a real call exercises.
+which bypasses even the harness's required/default handling. Use that for
+unit-testing the body and for debugging after `source shell3.sh`; use `tool`
+to exercise the manifest's shell-level calling convention. The harness does
+not run the live gate or the Go JSON binder; those are covered by shell3's own
+runtime tests.
 
 ## Health
 

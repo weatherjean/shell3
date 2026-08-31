@@ -25,7 +25,6 @@ func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Con
 	}
 }
 
-// openTestStore opens a fresh SQLite runs store rooted in a temp dir.
 func openTestStore(t *testing.T) *runs.Store {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())
@@ -48,7 +47,6 @@ func openTestStore(t *testing.T) *runs.Store {
 func TestResume_CarriesPriorContext(t *testing.T) {
 	st := openTestStore(t)
 
-	// First run: fresh session, one turn.
 	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
 	sA, err := rtA.Session(SessionOpts{WorkDir: t.TempDir()})
 	if err != nil {
@@ -67,20 +65,17 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 		t.Fatalf("first run didn't persist: len=%d err=%v", len(msgs), err)
 	}
 
-	// Resume: a new session bound to the same id, second turn.
 	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "it was 42"}}}))
 	sB, err := rtB.Session(SessionOpts{WorkDir: t.TempDir(), ResumeID: id})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The resumed session must have been seeded with the prior conversation.
 	if got := len(sB.sess.Messages()); got < len(msgs) {
 		t.Fatalf("resume did not seed prior context: in-memory=%d, persisted before=%d", got, len(msgs))
 	}
 	for range sB.Send(context.Background(), "what was the number") {
 	}
 
-	// Assert carryover: the same id now holds both turns, first user msg intact.
 	final, err := st.LoadMessages(id)
 	if err != nil {
 		t.Fatal(err)

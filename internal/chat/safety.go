@@ -38,6 +38,23 @@ type ToolCallVerdict struct {
 // transcript. The full command is already in the run replay.
 const gateLogFieldCap = 300
 
+const subagentBlockGuidance = "\n\nSubagent triage: first decide whether this action is necessary to complete " +
+	"the assigned task. If it is unnecessary, omit it and continue. If the " +
+	"block's policy permits a materially safer, policy-compliant approach that " +
+	"achieves the same result, use it; never evade the block with command " +
+	"variants or indirect tools, and never reinterpret a blanket refusal as " +
+	"permission. Complete any useful partial work. Only if this block prevents " +
+	"meaningful completion, report to the parent agent with the exact blocked " +
+	"action, why it is necessary, the block reason, alternatives considered, " +
+	"and the decision the operator must make."
+
+func guideSubagentBlock(cfg ToolConfig, msg string) string {
+	if !cfg.Headless || !cfg.HasParentAgent || msg == "" {
+		return msg
+	}
+	return msg + subagentBlockGuidance
+}
+
 // logGateVerdict records a gate decision the operator would otherwise never
 // see. An ALLOW is silent on purpose: the gate runs before EVERY tool call, so
 // logging passes would bury the refusals in the noise they exist to stand out
@@ -91,7 +108,15 @@ func resolveReview(ctx context.Context, cfg ToolConfig, name, command, reason st
 			") but no reviewer is wired — soft deny fails closed. Do not work around " +
 			"this; tell the operator the reviewer is unavailable and what you wanted to run.", true
 	}
-	approved, why := cfg.ReviewToolCall(ctx, name, command, reason)
+	approved, why := cfg.ReviewToolCall(ctx, ToolReviewRequest{
+		Name:               name,
+		Command:            command,
+		Reason:             reason,
+		WorkDir:            cfg.WorkDir,
+		Headless:           cfg.Headless,
+		TrustedUserContext: cfg.TrustedUserContext,
+		Messages:           cfg.ReviewMessages,
+	})
 	if approved {
 		return "", false
 	}
@@ -117,13 +142,14 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 		// string; there is no equivalent rendering for a structured tool
 		// call, so this fails closed like command/argv verdicts do.
 		logGateVerdict(cfg, "blocked", name, "", "review verdict on a non-bash tool fails closed: "+v.Reason)
-		return "error: blocked by tool-call hook: a {review} verdict applies only to bash tools, not " +
-			name + " — soft deny fails closed.", true
+		msg := "error: blocked by tool-call hook: a {review} verdict applies only to bash tools, not " +
+			name + " — soft deny fails closed."
+		return guideSubagentBlock(cfg, msg), true
 	}
 	allowed, msg := resolveGate(v)
 	if !allowed {
 		logGateVerdict(cfg, "blocked", name, "", v.Reason)
-		return msg, true
+		return guideSubagentBlock(cfg, msg), true
 	}
 	// A pure pass (the gate produced no command/argv verdict) is the only Run
 	// that applies to a non-bash tool. An actual {command=...}/{argv=...} verdict
@@ -131,8 +157,9 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 	// shape — is bash-only and fails closed here.
 	if v.Action == ActionRun && !v.Passthrough {
 		logGateVerdict(cfg, "blocked", name, "", "a command/argv rewrite verdict applies only to bash tools")
-		return "error: blocked by tool-call hook: a {command=...} or {argv=...} verdict " +
-			"applies only to bash tools, not " + name + ".", true
+		msg := "error: blocked by tool-call hook: a {command=...} or {argv=...} verdict " +
+			"applies only to bash tools, not " + name + "."
+		return guideSubagentBlock(cfg, msg), true
 	}
 	return "", false
 }

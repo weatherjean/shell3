@@ -16,7 +16,9 @@ EOF
 
 #---
 # agent: worker
-# use: [bash, web, mcp:tavily]
+# description: does worker jobs
+# use: [bash, web]
+# mcp: [tavily]
 #---
 worker_prompt() { cat <<'EOF'
 I do one job.
@@ -41,7 +43,6 @@ worker_local() { echo local; }
 web_search() { echo "q=$q"; }
 `
 
-// The agent you talk to gets every built-in without declaring one.
 func TestResolveMainGetsDefaultBuiltins(t *testing.T) {
 	k := mustParse(t, capKit)
 	r, err := k.Resolve(k.Agents[0], true)
@@ -53,7 +54,6 @@ func TestResolveMainGetsDefaultBuiltins(t *testing.T) {
 	}
 }
 
-// An employee gets exactly what it names, and nothing else.
 func TestResolveEmployeeGetsOnlyDeclared(t *testing.T) {
 	k := mustParse(t, capKit)
 	r, err := k.Resolve(k.Agents[1], false)
@@ -63,8 +63,8 @@ func TestResolveEmployeeGetsOnlyDeclared(t *testing.T) {
 	if len(r.Builtins) != 1 || r.Builtins[0] != "bash" {
 		t.Fatalf("builtins = %v, want [bash]", r.Builtins)
 	}
-	if len(r.MCP) != 1 || r.MCP[0] != "tavily" {
-		t.Fatalf("mcp = %v, want [tavily]", r.MCP)
+	if len(r.Agent.MCP) != 1 || r.Agent.MCP[0] != "tavily" {
+		t.Fatalf("mcp = %v, want [tavily]", r.Agent.MCP)
 	}
 	if len(r.Tools) != 2 {
 		t.Fatalf("tools = %+v, want local + search", r.Tools)
@@ -74,7 +74,6 @@ func TestResolveEmployeeGetsOnlyDeclared(t *testing.T) {
 	}
 }
 
-// A typo in use: must fail loudly, not silently mean "no capability".
 func TestResolveUnknownUseEntryFails(t *testing.T) {
 	src := `#---
 # agent: a
@@ -85,8 +84,7 @@ hi
 EOF
 }
 `
-	k := mustParse(t, src)
-	if _, err := k.Resolve(k.Agents[0], false); err == nil {
+	if _, err := Parse([]byte(src)); err == nil {
 		t.Fatal("want error for an unresolvable use: entry")
 	}
 }
@@ -116,9 +114,24 @@ a_dup() { :; }
 #---
 g_dup() { :; }
 `
-	k := mustParse(t, src)
-	if _, err := k.Resolve(k.Agents[0], false); err == nil {
+	if _, err := Parse([]byte(src)); err == nil {
 		t.Fatal("want error when a shared tool collides with a local one")
+	}
+}
+
+func TestUseMCPPrefixIsADirectedError(t *testing.T) {
+	src := `#---
+# agent: main
+# use: [mcp:tavily]
+#---
+main_prompt() { cat <<'EOF'
+hi
+EOF
+}
+`
+	_, err := Parse([]byte(src))
+	if err == nil || !strings.Contains(err.Error(), "mcp: list") {
+		t.Fatalf("want a directed mcp: error, got %v", err)
 	}
 }
 
@@ -141,10 +154,6 @@ func TestToolDefsSchema(t *testing.T) {
 	}
 }
 
-// Kit.ToolByName is the whole-kit search a cron tool: job uses (it names no
-// agent, so there is no Resolved capability set to search) — it must find a
-// tool declared under an employee's own scope AND one that only exists via a
-// shared group, and report false for a name nothing declares.
 func TestKitToolByName(t *testing.T) {
 	k := mustParse(t, capKit)
 	if tl, ok := k.ToolByName("local"); !ok || tl.Name != "local" {
@@ -158,13 +167,7 @@ func TestKitToolByName(t *testing.T) {
 	}
 }
 
-// The duplicate-tool-name check in Resolve/Check is per-scope only (see
-// TestSharedToolNameCollidesWithLocal): two agents may each legally declare a
-// tool called "sync". ToolByName resolves that ambiguity silently
-// (first-match-wins); ToolMatches must instead surface BOTH declaring scopes
-// so a caller like `shell3 health`'s cron block can refuse instead of
-// running whichever function happened to parse first.
-func TestKitToolMatchesAmbiguousAcrossAgents(t *testing.T) {
+func TestKitToolByNameUsesDeclarationOrderAcrossAgents(t *testing.T) {
 	src := `#---
 # agent: alpha
 #---
@@ -181,6 +184,7 @@ alpha_sync() { echo alpha; }
 
 #---
 # agent: beta
+# description: second test agent
 #---
 beta_prompt() { cat <<'EOF'
 b
@@ -192,19 +196,11 @@ EOF
 # description: beta's sync
 #---
 beta_sync() { echo beta; }
-`
+	`
 	k := mustParse(t, src)
-	matches := k.ToolMatches("sync")
-	if len(matches) != 2 {
-		t.Fatalf("ToolMatches(sync) = %+v, want 2 matches (declared under both alpha and beta)", matches)
-	}
-	if matches[0].Scope == matches[1].Scope {
-		t.Fatalf("both matches report the same scope %q; want one per declaring agent", matches[0].Scope)
-	}
-	for _, m := range matches {
-		if !strings.Contains(m.Scope, "alpha") && !strings.Contains(m.Scope, "beta") {
-			t.Fatalf("match scope %q names neither declaring agent", m.Scope)
-		}
+	got, ok := k.ToolByName("sync")
+	if !ok || got.Func != "alpha_sync" {
+		t.Fatalf("ToolByName(sync) = %+v, %v; want first-declared alpha_sync", got, ok)
 	}
 }
 

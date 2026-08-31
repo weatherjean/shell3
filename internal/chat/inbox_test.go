@@ -11,9 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestInterject_IdleQueuesForNextTurn: an interject pushed while no turn is
-// running is injected at the start of the next turn — visible to the model in
-// the user message and surfaced as a SystemReminder event.
 func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
@@ -41,8 +38,6 @@ func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	}
 }
 
-// TestInterject_MidTurnInjectsNextRound: an interject pushed while a tool round
-// is executing is delivered before the next LLM round.
 func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -63,7 +58,6 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
-	// Order: tool_result for echo, THEN the interject reminder, THEN tokens.
 	events := c.all()
 	toolIdx, remIdx := -1, -1
 	for i, ev := range events {
@@ -79,9 +73,6 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 	}
 }
 
-// TestInterject_MultipleInterjectionsDrainIntoOneReminder: two Interject calls
-// before a turn produce a single EventSystemReminder containing both bullets
-// (not two separate reminder events).
 func TestInterject_MultipleInterjectionsDrainIntoOneReminder(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
@@ -151,8 +142,6 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 	}
 }
 
-// TestInterjectNotice_DeliveredWithNoticeHeader: a host notification surfaces at
-// turn start under its own header — never labeled as user input.
 func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
@@ -178,10 +167,6 @@ func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
 	}
 }
 
-// TestInterjectNotice_NotDeliveredMidTurn: a notification that arrives during a
-// tool round must NOT be injected at the after-tool-round boundary (unlike user
-// steering) — it stays queued for a turn boundary so it can't interrupt the
-// in-flight turn.
 func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -207,7 +192,6 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 			t.Fatalf("a notice must not be injected mid-turn; got reminder: %q", ev.Text)
 		}
 	}
-	// It stays queued — a later turn/wake boundary delivers it.
 	if !sess.HasInbox() {
 		t.Fatal("notice should remain queued after the turn's mid-round drain")
 	}
@@ -219,7 +203,7 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
-	sess.Interject("   ") // whitespace only
+	sess.Interject("   ")
 
 	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)

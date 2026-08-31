@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// compile-time proof the console client satisfies the Bot's transport surface.
 var _ tgClient = (*ConsoleClient)(nil)
 
 func TestConsoleOutboundFormatting(t *testing.T) {
@@ -24,14 +23,13 @@ func TestConsoleOutboundFormatting(t *testing.T) {
 	id3, _ := c.SendReply(ctx, ConsoleChatID, "threaded", id1)
 	id4, _ := c.SendHTMLReply(ctx, ConsoleChatID, "<i>x</i>", id2)
 
-	// Monotonic, shared id space.
 	if id1 != "1" || id2 != "2" || id3 != "3" || id4 != "4" {
 		t.Fatalf("ids not monotonic: %s %s %s %s", id1, id2, id3, id4)
 	}
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 	want := []string{
 		"[#1] hello",
-		"[#2] <b>bold</b>", // HTML printed raw, unrendered
+		"[#2] <b>bold</b>",
 		"[#3 ↩#1] threaded",
 		"[#4 ↩#2] <i>x</i>",
 	}
@@ -75,7 +73,6 @@ func TestConsoleInboundParsing(t *testing.T) {
 
 	got := drainMsgs(t, ch, 4)
 
-	// blank line skipped: 4 messages, not 5.
 	if got[0].Text != "hello world" || got[0].ReplyToID != "" || got[0].ChatID != ConsoleChatID {
 		t.Errorf("msg0 = %+v", got[0])
 	}
@@ -85,11 +82,9 @@ func TestConsoleInboundParsing(t *testing.T) {
 	if got[2].Text != "/jobs" || got[2].ReplyToID != "" {
 		t.Errorf("msg2 (command) = %+v", got[2])
 	}
-	// Ids are opaque strings now, so "@notanint …" is a reply to id "notanint".
 	if got[3].Text != "literal" || got[3].ReplyToID != "notanint" {
 		t.Errorf("msg3 (string @id) = %+v", got[3])
 	}
-	// ids are assigned to every inbound message.
 	if got[0].ID == "" || got[1].ID == got[0].ID || got[2].ID == got[1].ID {
 		t.Errorf("inbound ids not distinct: %s %s %s", got[0].ID, got[1].ID, got[2].ID)
 	}
@@ -111,7 +106,6 @@ func TestConsoleEOFClosesChannel(t *testing.T) {
 	}
 }
 
-// drainMsgs reads exactly n messages off ch or fails on timeout.
 func drainMsgs(t *testing.T, ch <-chan Msg, n int) []Msg {
 	t.Helper()
 	var got []Msg
@@ -127,7 +121,6 @@ func drainMsgs(t *testing.T, ch <-chan Msg, n int) []Msg {
 	return got
 }
 
-// A silent send is visible in the console rendering as a 🔕 tag.
 func TestConsole_SilentTag(t *testing.T) {
 	var out bytes.Buffer
 	c := NewConsoleClient(strings.NewReader(""), &out, ConsoleChatID)
@@ -164,13 +157,11 @@ func TestConsoleParseLineRoomPrefix(t *testing.T) {
 		t.Fatalf("Text = %q", m.Text)
 	}
 
-	// The default chat stays private: no @mention needed at the console.
 	plain := c.parseLine("hello")
 	if plain.ChatID != ConsoleChatID || plain.ChatType != "private" {
 		t.Fatalf("plain line = chat %d type %q, want the default private chat", plain.ChatID, plain.ChatType)
 	}
 
-	// A "#" line that is not "#<id> text" is ordinary text, not a route.
 	notARoom := c.parseLine("#nope still text")
 	if notARoom.ChatID != ConsoleChatID || notARoom.Text != "#nope still text" {
 		t.Fatalf("unparseable room prefix = chat %d text %q, want it left alone", notARoom.ChatID, notARoom.Text)

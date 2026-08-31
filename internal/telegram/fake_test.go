@@ -26,14 +26,14 @@ type fakeClient struct {
 	videos   []sentVideo
 	replies  []sentReply
 	deleted  []string
-	silent   []bool // one entry per text/document send, true when SendOpt.Silent
+	silent   []bool
 
-	failReply error // when set, reply sends behave as a deleted target (fall back to plain)
+	failReply error
 
 	chatTitle     string
 	chatDesc      string
 	failChatInfo  error
-	blockChatInfo chan struct{} // when set, ChatInfo waits on it
+	blockChatInfo chan struct{}
 	chatInfoN     int
 
 	failDoc   error
@@ -115,7 +115,6 @@ func (f *fakeClient) DeleteMessage(ctx context.Context, chatID int64, msgID stri
 	return nil
 }
 
-// deletedSnapshot returns the ids deleted so far.
 func (f *fakeClient) deletedSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -192,7 +191,6 @@ func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, opts .
 	return strconv.Itoa(f.next), nil
 }
 
-// lastSilent reports whether the most recent text/document send was silent.
 func (f *fakeClient) lastSilent() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -211,9 +209,6 @@ func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string, op
 	return strconv.Itoa(f.next), nil
 }
 
-// SendReply records a plain threaded reply. failReply simulates a deleted
-// target: the reply degrades to a plain Send (replyTo cleared), mirroring the
-// real client's fallback.
 func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
 	if f.failReply != nil {
 		return f.Send(ctx, chatID, text, opts...)
@@ -243,7 +238,6 @@ func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html strin
 	return id, nil
 }
 
-// lastReply returns the most recent threaded reply, or ok=false if none.
 func (f *fakeClient) lastReply() (sentReply, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -253,7 +247,6 @@ func (f *fakeClient) lastReply() (sentReply, bool) {
 	return f.replies[len(f.replies)-1], true
 }
 
-// sentReplies returns a copy of every threaded reply sent so far.
 func (f *fakeClient) sentReplies() []sentReply {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -262,7 +255,6 @@ func (f *fakeClient) sentReplies() []sentReply {
 	return out
 }
 
-// lastSentID returns the message id of the most recent send of any kind.
 func (f *fakeClient) lastSentID() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -279,9 +271,6 @@ func (f *fakeClient) htmlTexts() []string {
 
 func (f *fakeClient) Typing(ctx context.Context, chatID int64) error { return nil }
 
-// sentTexts returns every user-facing message regardless of parse mode: the
-// HTML messages (the normal path) plus any plain-text fallbacks. Tests assert
-// on substrings that survive Markdown→HTML conversion unchanged.
 func (f *fakeClient) sentTexts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -296,7 +285,6 @@ func (f *fakeClient) sentTexts() []string {
 	return out
 }
 
-// plainTexts returns only messages sent without a parse mode (the fallback path).
 func (f *fakeClient) plainTexts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,7 +304,7 @@ func (f *fakeClient) ChatInfo(_ context.Context, chatID int64) (string, string, 
 	title, desc := f.chatTitle, f.chatDesc
 	f.mu.Unlock()
 	if block != nil {
-		<-block // simulates a hanging getChat
+		<-block
 	}
 	if fail != nil {
 		return "", "", fail
@@ -324,7 +312,6 @@ func (f *fakeClient) ChatInfo(_ context.Context, chatID int64) (string, string, 
 	return title, desc, nil
 }
 
-// chatInfoCalls reports how many lookups have been started.
 func (f *fakeClient) chatInfoCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

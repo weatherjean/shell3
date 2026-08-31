@@ -9,9 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// cmdCfg writes a kit declaring main plus the given commands and installs
-// them the way agentsetup.LoadKit does. Keys are command names, values are the
-// shell body of that command's function.
 func cmdCfg(t *testing.T, cmds map[string]string) *LoadedConfig {
 	t.Helper()
 	var b strings.Builder
@@ -44,7 +41,6 @@ EOF
 	return c
 }
 
-// A command's stdout is the reply text.
 func TestRunCommandReturnsStdout(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"standup": `echo "3 commits"`})
 	out, err := c.RunCommand(context.Background(), "standup", "")
@@ -56,8 +52,6 @@ func TestRunCommandReturnsStdout(t *testing.T) {
 	}
 }
 
-// Everything after the verb reaches the function as $ARG — the same
-// environment-variable convention a tool:'s params use.
 func TestRunCommandPassesArg(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"echo": `printf 'got:%s' "$ARG"`})
 	out, err := c.RunCommand(context.Background(), "echo", "last week")
@@ -83,8 +77,6 @@ func TestRunCommandFailureReportsStderr(t *testing.T) {
 	}
 }
 
-// An undeclared command is not this config's to answer; the caller falls back
-// to its own unknown-command handling.
 func TestRunCommandUnknownReportsNotFound(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"standup": "echo hi"})
 	if _, err := c.RunCommand(context.Background(), "nope", ""); err != ErrNoSuchCommand {
@@ -92,7 +84,6 @@ func TestRunCommandUnknownReportsNotFound(t *testing.T) {
 	}
 }
 
-// HasCommand is what a front-end asks before routing a verb it does not know.
 func TestHasCommand(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"standup": "echo hi"})
 	if !c.HasCommand("standup") {

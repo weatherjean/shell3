@@ -8,9 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// TestCommandJobWritesLogFile verifies a bash_bg command job tees its output
-// to runs/<parent-session>/jobs/<id>.log so the notifier (and task_status) can
-// read the full output after the in-memory ring has capped.
 func TestCommandJobWritesLogFile(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("unused"))
 	parent, err := rt.Session(SessionOpts{})
@@ -35,21 +32,17 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if !strings.Contains(string(b), "logged") {
 		t.Fatalf("log content = %q", b)
 	}
-	// task_status points at the full log.
 	if st := rt.jobs.formatJobStatus(id); !strings.Contains(st, logPath) {
 		t.Fatalf("task_status should name the log path, got: %q", st)
 	}
 }
 
-// TestCommandJobLogCapped verifies the on-disk log stops growing at its cap
-// instead of filling the disk.
 func TestCommandJobLogCapped(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("unused"))
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ~2 MiB of output against a 1 MiB cap.
 	id, err := rt.jobs.startCommand(parent, "yes", t.TempDir(),
 		[]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' 'x'"}, nil, notify.ReportAuto, "")
 	if err != nil {
@@ -68,8 +61,6 @@ func TestCommandJobLogCapped(t *testing.T) {
 	}
 }
 
-// TestCommandJobNoParentNoLog: a parentless (unit-test style) job records no
-// log path and does not crash.
 func TestCommandJobNoParentNoLog(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, notify.ReportAuto, "")

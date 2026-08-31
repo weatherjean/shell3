@@ -26,7 +26,7 @@ func TestOpen_UnreadableFilePreservedOnError(t *testing.T) {
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o644) }) // let t.TempDir() clean up afterward
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
 	if _, err := Open(root); err == nil {
 		t.Fatal("Open on an unreadable file: want error, got nil")
@@ -76,12 +76,6 @@ func TestOpen_CorruptFilePreservedOnError(t *testing.T) {
 	}
 }
 
-// TestOpen_ImplausibleUserVersionErrorsAndPreservesFile is the F-1 repro from
-// the reviewer report: a single corrupted header byte can make user_version
-// read back as an implausible value (e.g. 257) while the rest of the
-// database — tables, rows — is completely intact. Open must refuse to
-// recreate on an implausible stamp; it must error, and the file (with its
-// data) must survive untouched.
 func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 	root := t.TempDir()
 	st, err := Open(root)
@@ -101,7 +95,7 @@ func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], 0x00000101) // 257 — implausible, out of [0, schemaVersion]
+	binary.BigEndian.PutUint32(b[:], 0x00000101)
 	if _, err := f.WriteAt(b[:], 60); err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +120,6 @@ func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 		t.Fatal("Open modified the file instead of erroring out")
 	}
 
-	// Also confirm no aside/backup files were created — a refused Open
-	// should touch nothing at all.
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)
@@ -141,10 +133,6 @@ func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 	}
 }
 
-// TestOpen_GenuineMismatchStillRecreates: a real old-shape database (version
-// within [0, schemaVersion)) still gets recreated, as documented behaviour —
-// F-1's bound only rejects implausible/out-of-range stamps, not legitimate
-// old ones.
 func TestOpen_GenuineMismatchStillRecreates(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
@@ -168,17 +156,11 @@ func TestOpen_GenuineMismatchStillRecreates(t *testing.T) {
 	}
 }
 
-// TestOpen_RecreateMovesOldFilesAsideNotDeletes pins F-4: the recreate path
-// renames the old db (and its -wal/-shm siblings, if present) aside rather
-// than unlinking them, and the aside copies are cleaned up only after the
-// new store is built successfully. It also pins the delete/rename scope: a
-// sibling file in the same directory is never touched.
 func TestOpen_RecreateMovesOldFilesAsideNotDeletes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
 	buildV1DB(t, path)
 
-	// A sibling file that must survive untouched.
 	sibling := filepath.Join(root, "not-the-database.txt")
 	if err := os.WriteFile(sibling, []byte("leave me alone"), 0o644); err != nil {
 		t.Fatal(err)
@@ -193,10 +175,6 @@ func TestOpen_RecreateMovesOldFilesAsideNotDeletes(t *testing.T) {
 		t.Fatalf("sibling file did not survive a recreate: %v", err)
 	}
 
-	// Close before inspecting the directory: the freshly-opened store is in
-	// WAL mode, so shell3.db-wal/-shm legitimately exist while it's open —
-	// what this test pins is that no ".old-*" aside copies are left behind
-	// once the recreate succeeds, not the live store's own WAL files.
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

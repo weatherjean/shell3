@@ -11,8 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// drainTurn must return only the FINAL assistant message of a turn: narration
-// emitted before tool calls ("Let me check…") is progress talk, not the reply.
 func TestDrainTurnKeepsOnlyFinalSegment(t *testing.T) {
 	ch := make(chan shell3.Event, 8)
 	ch <- shell3.Event{Kind: shell3.Token, Text: "Let me check what completed."}
@@ -31,8 +29,6 @@ func TestDrainTurnKeepsOnlyFinalSegment(t *testing.T) {
 	}
 }
 
-// A turn whose final segment is empty (model ends on a tool call) falls back
-// to the last non-empty segment rather than replying with nothing.
 func TestDrainTurnFallsBackToLastNonEmpty(t *testing.T) {
 	ch := make(chan shell3.Event, 4)
 	ch <- shell3.Event{Kind: shell3.Token, Text: "Done — files updated."}
@@ -46,7 +42,6 @@ func TestDrainTurnFallsBackToLastNonEmpty(t *testing.T) {
 	}
 }
 
-// Errors surface in the reply even when they arrive before later segments.
 func TestDrainTurnAppendsErrors(t *testing.T) {
 	ch := make(chan shell3.Event, 4)
 	ch <- shell3.Event{Kind: shell3.Token, Text: "Trying."}
@@ -64,9 +59,6 @@ type errFake string
 
 func (e errFake) Error() string { return string(e) }
 
-// chunk budgets in UTF-16 code units, Telegram's actual accounting: emoji
-// (astral plane) count double, so a 3000-emoji string is 6000 units and must
-// split even though it is only 3000 runes.
 func TestChunkCountsUTF16(t *testing.T) {
 	emoji := strings.Repeat("🚀", 3000)
 	parts := chunk(emoji)
@@ -83,15 +75,11 @@ func TestChunkCountsUTF16(t *testing.T) {
 			}
 		}
 	}
-	// ASCII within budget stays whole.
 	if got := chunk(strings.Repeat("a", tgMaxMessage)); len(got) != 1 {
 		t.Fatalf("ASCII at exactly the cap must stay one chunk, got %d", len(got))
 	}
 }
 
-// The silence sentinel survives reasoning-split mangling: a provider that
-// swallows the reply's first tokens leaves a tail fragment ("_REPLY"), which
-// must still read as silence. Real text never does.
 func TestIsNoReplyMangledTails(t *testing.T) {
 	for _, s := range []string{"NO_REPLY", "no_reply.", "NO_REPLY!", "`NO_REPLY`", "_REPLY", "O_REPLY", "REPLY", ""} {
 		if !strutil.IsNoReply(s) {

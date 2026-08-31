@@ -60,7 +60,7 @@ func TestSession_ConcurrentReadsRaceTurn(t *testing.T) {
 	<-block.Started
 
 	cancel()
-	for range turn { // drain until the turn's terminal append + channel close
+	for range turn {
 	}
 	close(stop)
 	wg.Wait()

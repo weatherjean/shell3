@@ -57,7 +57,6 @@ func TestStreamOnEventSingleGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	// No reasoning or content lost by the funnel.
 	if reasoning.Len() != n {
 		t.Errorf("reasoning delivered = %d, want %d", reasoning.Len(), n)
 	}

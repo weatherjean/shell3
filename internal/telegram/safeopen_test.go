@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// safeSendTree builds a config dir holding a .env, plus a workdir, and points
-// the media dir at <cfg>/media the way a real install has it.
 func safeSendTree(t *testing.T) (cfg, work string) {
 	t.Helper()
 	cfg = t.TempDir()
@@ -47,8 +45,6 @@ func TestSafeOpenRefusesSymlinkToDotenv(t *testing.T) {
 	}
 }
 
-// A hardlink has a clean name AND a resolved path outside the config dir, so
-// only the (dev, ino) walk of the config tree can catch it.
 func TestSafeOpenRefusesHardlinkToDotenv(t *testing.T) {
 	cfg, work := safeSendTree(t)
 	hard := filepath.Join(work, "notes.md")
@@ -84,8 +80,6 @@ func TestSafeOpenRefusesConfigTreeFiles(t *testing.T) {
 	}
 }
 
-// A FIFO with no writer would park the turn forever inside a plain read —
-// host tools have no timeout of their own — so it must be refused outright.
 func TestSafeOpenRefusesFIFO(t *testing.T) {
 	cfg, work := safeSendTree(t)
 	fifo := filepath.Join(work, "pipe.txt")
@@ -110,9 +104,6 @@ func TestSafeOpenRefusesFIFO(t *testing.T) {
 	}
 }
 
-// The media dir lives under the config dir and holds exactly what the tool
-// exists to send back (generated images, saved attachments), so it stays
-// sendable while the rest of the config tree does not.
 func TestSafeOpenAllowsMediaDirAndOrdinaryFiles(t *testing.T) {
 	cfg, work := safeSendTree(t)
 	img := filepath.Join(cfg, "media", "img-1.png")
@@ -135,7 +126,6 @@ func TestSafeOpenAllowsMediaDirAndOrdinaryFiles(t *testing.T) {
 	}
 	_ = in.Close()
 
-	// A relative path resolves against the workdir.
 	in, _, err = safeOpen("report.pdf", work, cfg)
 	if err != nil {
 		t.Fatalf("a relative path must resolve against the workdir: %v", err)
@@ -143,8 +133,6 @@ func TestSafeOpenAllowsMediaDirAndOrdinaryFiles(t *testing.T) {
 	_ = in.Close()
 }
 
-// The size bound must hold at READ time: a pre-read Stat can be stale, and a
-// character device reports size 0 while never reaching EOF.
 func TestReadLimitedBoundsBeyondStat(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "big.bin")

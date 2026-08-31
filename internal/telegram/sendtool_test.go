@@ -12,9 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// hasTool reports whether sess's active agent has the named tool enabled.
-// Test-only: production code dropped its last caller when attachmentNote was
-// de-branched.
 func hasTool(sess *shell3.Session, name string) bool {
 	if sess == nil {
 		return false
@@ -289,9 +286,6 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 	}
 }
 
-// A markdown document is rendered on the way out. Sending .md SOURCE is the
-// thing writing a document was meant to escape — Telegram shows it as a file
-// of plain text with the hashes and pipes still in it.
 func TestSendMediaRendersMarkdownDocuments(t *testing.T) {
 	for _, name := range []string{"plan.md", "PLAN.MARKDOWN"} {
 		gotName, gotData := renderMarkdownDoc(name, []byte("# Plan\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"))
@@ -304,8 +298,6 @@ func TestSendMediaRendersMarkdownDocuments(t *testing.T) {
 	}
 }
 
-// Everything else passes through untouched — including the .txt escape hatch
-// for someone who genuinely wants the source.
 func TestSendMediaLeavesOtherDocumentsAlone(t *testing.T) {
 	for _, name := range []string{"notes.txt", "data.csv", "report.pdf", "archive.zip"} {
 		gotName, gotData := renderMarkdownDoc(name, []byte("# not markdown here"))

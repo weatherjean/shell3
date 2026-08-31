@@ -67,14 +67,15 @@ func (p *progressBubble) flush(ctx context.Context, force bool) {
 		return // next add or the final flush will carry it
 	}
 	text := p.render()
+	chatID := p.c.chatIDValue()
 	if p.msgID == "" {
 		// Silent: a progress bubble must never ring the phone.
-		id, err := p.c.b.client.Send(ctx, p.c.chatID, text, SendOpt{Silent: true})
+		id, err := p.c.b.client.Send(ctx, chatID, text, SendOpt{Silent: true})
 		if err != nil {
 			return // no bubble this turn; adds keep trying is pointless — stay quiet
 		}
 		p.msgID = id
-	} else if err := p.c.b.client.EditPlain(ctx, p.c.chatID, p.msgID, text); err != nil {
+	} else if err := p.c.b.client.EditPlain(ctx, chatID, p.msgID, text); err != nil {
 		return
 	}
 	p.lastEdit = time.Now()
@@ -105,7 +106,7 @@ func (p *progressBubble) finish(ctx context.Context, keep bool) {
 		p.flush(ctx, true)
 		return
 	}
-	_ = p.c.b.client.DeleteMessage(ctx, p.c.chatID, p.msgID)
+	_ = p.c.b.client.DeleteMessage(ctx, p.c.chatIDValue(), p.msgID)
 }
 
 // toolLine renders one tool call as a compact single line.

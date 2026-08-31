@@ -7,11 +7,10 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// statusLine format: "provider │ model"
 const (
-	statusSonnet = "openai │ claude-sonnet-4-6" // 1M token window
-	statusOpus   = "openai │ claude-opus-4-7"   // 1M token window
-	statusGPT4o  = "openai │ gpt-4o"            // 128k token window
+	statusSonnet = "openai │ claude-sonnet-4-6"
+	statusOpus   = "openai │ claude-opus-4-7"
+	statusGPT4o  = "openai │ gpt-4o"
 )
 
 var testContextWindowFor = func(m string) int {
@@ -37,7 +36,6 @@ func TestReminderTracker_ContextBucket(t *testing.T) {
 	r.lastContextPct = 0
 	r.lastTokens = 1000
 
-	// 1M window: 10% = 100k tokens. Push into 10% bucket.
 	got := r.check(statusSonnet, 110_000)
 	if got == "" {
 		t.Fatal("expected reminder at 10% bucket, got empty")
@@ -57,8 +55,7 @@ func TestReminderTracker_NoRepeatSameBucket(t *testing.T) {
 	r.lastContextPct = 10
 	r.lastTokens = 110_000
 
-	// Still in 10% bucket, delta < 30k — no reminder.
-	got := r.check(statusSonnet, 125_000) // delta = 15k, bucket still 10%
+	got := r.check(statusSonnet, 125_000)
 	if got != "" {
 		t.Errorf("expected no reminder in same bucket, got %q", got)
 	}
@@ -81,29 +78,18 @@ func TestReminderTracker_ModelChange(t *testing.T) {
 }
 
 func TestReminderTracker_30kDeltaThreshold(t *testing.T) {
-	// Use gpt-4o (128k window). At 5% (6400 tokens) bucket stays 0.
-	// A 30k token jump from lastTokens=100 should fire.
 	var r reminderTracker
 	r.lastModel = "gpt-4o"
-	r.lastContextPct = 0 // never emitted a context reminder
+	r.lastContextPct = 0
 	r.lastTokens = 100
 
-	// 30001 tokens — delta >= 30k, but bucket check: 30001/128000 = 23% → bucket 20 > 0
-	// so bucket condition fires before the delta condition anyway.
-	// Use a tiny initial send to isolate delta: stay inside first bucket.
-	// gpt-4o 128k: 1% = 1280 tokens. Jump 30k from 100 → 30100 = 23% → new bucket.
-	// To test PURE delta: use very large window where 30k < 10%.
-	// claude-sonnet-4-6 1M: 10% = 100k. 30100 tokens = 3% → bucket 0, same bucket.
-	// But lastContextPct=0 means "never emitted" — bucket check: 0 > 0 is FALSE.
-	// Delta check: tokenDelta >= 30000 && lastContextPct > 0 → also FALSE (lastContextPct=0).
-	// So we need lastContextPct > 0 for pure delta test.
 	r2 := reminderTracker{
 		contextWindowFor: testContextWindowFor,
 		lastModel:        "claude-sonnet-4-6",
 		lastContextPct:   10,
 		lastTokens:       100_000,
 	}
-	got := r2.check(statusSonnet, 130_001) // delta = 30001, still bucket 10 (13%)
+	got := r2.check(statusSonnet, 130_001)
 	if got == "" {
 		t.Fatal("expected reminder on 30k token delta, got empty")
 	}
@@ -130,7 +116,6 @@ func TestInjectReminder_AppendsToLastUser(t *testing.T) {
 	if !strings.Contains(last.Content, "follow up") || !strings.Contains(last.Content, "<system-reminder>") {
 		t.Errorf("unexpected last message content: %q", last.Content)
 	}
-	// Original earlier messages untouched.
 	if result[1].Content != "hello" {
 		t.Errorf("earlier user message was mutated: %q", result[1].Content)
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// feed pushes events through drainTurnProgress synchronously.
 func feed(b *Bot, evs ...shell3.Event) (string, bool) {
 	ch := make(chan shell3.Event, len(evs))
 	for _, ev := range evs {
@@ -20,8 +19,6 @@ func feed(b *Bot, evs ...shell3.Event) (string, bool) {
 	return tconv(b).drainTurnProgress(context.Background(), ch)
 }
 
-// A clean tool-using turn posts one silent bubble, edits it, and deletes it
-// after the reply resolves — the chat history stays clean.
 func TestProgressBubbleLifecycle(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))
@@ -50,7 +47,6 @@ func TestProgressBubbleLifecycle(t *testing.T) {
 	}
 }
 
-// A turn that errors keeps the bubble as a breadcrumb.
 func TestProgressBubbleKeptOnError(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))
@@ -67,7 +63,6 @@ func TestProgressBubbleKeptOnError(t *testing.T) {
 	}
 }
 
-// A turn with no tool calls never posts a bubble at all.
 func TestProgressBubbleAbsentForPlainReplies(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))

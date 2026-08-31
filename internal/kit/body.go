@@ -15,10 +15,10 @@ func extractHeredoc(lines []string, fnLine int, what, name string) (string, erro
 		return "", fmt.Errorf("%s %q: function line %d out of range", what, name, fnLine)
 	}
 
-	depth := braceDelta(lines[i])
+	var braces braceScanner
+	depth, _ := braces.advance(lines[i], 0)
 	for ; i < len(lines); i++ {
-		if hd := heredocStart.FindStringSubmatch(lines[i]); hd != nil {
-			delim := hd[1]
+		if delim, ok := braces.heredocDelimiter(lines[i]); ok {
 			var body []string
 			for j := i + 1; j < len(lines); j++ {
 				if strings.TrimSpace(lines[j]) == delim {
@@ -29,7 +29,7 @@ func extractHeredoc(lines []string, fnLine int, what, name string) (string, erro
 			return "", fmt.Errorf("%s %q: heredoc %q is never closed", what, name, delim)
 		}
 		if i > fnLine-1 {
-			depth += braceDelta(lines[i])
+			depth, _ = braces.advance(lines[i], depth)
 			if depth <= 0 {
 				break
 			}

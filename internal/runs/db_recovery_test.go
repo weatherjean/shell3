@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// TestOpen_ResetNoticeDoesNotPromiseAsidePath pins the item-1 fix: the stderr
-// notice printed on a genuine schema mismatch is unconditional (it always
-// fires), but the success path (see TestOpen_RecreateMovesOldFilesAsideNotDeletes)
-// removes the aside copies once the new store is built — so the notice must
-// not name a recovery path that the common (successful) case then deletes.
-// Before the fix it read "...old data moved aside to <path>.old-...", which
-// is false in exactly the case an operator is most likely to read it.
 func TestOpen_ResetNoticeDoesNotPromiseAsidePath(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
@@ -49,12 +42,6 @@ func TestOpen_ResetNoticeDoesNotPromiseAsidePath(t *testing.T) {
 	}
 }
 
-// TestRecreateErr_NamesEveryAsideFileAndWarnsAboutPairing pins item 2: when a
-// rebuild fails after files were moved aside, the returned error names every
-// aside file and warns that they must be renamed back together — the main db
-// and its -wal/-shm siblings share only a trailing ".old-..." suffix, not a
-// name SQLite pairs on its own, so restoring only one leaves a stale/mismatched
-// sibling next to it.
 func TestRecreateErr_NamesEveryAsideFileAndWarnsAboutPairing(t *testing.T) {
 	asided := []string{
 		"/tmp/x/shell3.db.old-v1-123",
@@ -80,9 +67,6 @@ func TestRecreateErr_NamesEveryAsideFileAndWarnsAboutPairing(t *testing.T) {
 	}
 }
 
-// TestRecreateErr_NoAsideDoesNotInventAPath: when nothing was moved aside
-// (e.g. the very first stat failed), the error must not claim a recovery
-// path exists.
 func TestRecreateErr_NoAsideDoesNotInventAPath(t *testing.T) {
 	err := recreateErr(nil, os.ErrPermission)
 	if err == nil {
@@ -93,9 +77,6 @@ func TestRecreateErr_NoAsideDoesNotInventAPath(t *testing.T) {
 	}
 }
 
-// TestMoveOldFilesAside_ScopeIsExactlyDBWalShm pins item 4: given a database
-// plus real -wal/-shm siblings plus an unrelated sibling file, moveOldFilesAside
-// touches exactly the three db-family files and leaves everything else alone.
 func TestMoveOldFilesAside_ScopeIsExactlyDBWalShm(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
@@ -137,14 +118,12 @@ func TestMoveOldFilesAside_ScopeIsExactlyDBWalShm(t *testing.T) {
 		}
 	}
 
-	// The originals are gone from their original names.
 	for _, orig := range []string{path, walPath, shmPath} {
 		if _, err := os.Stat(orig); !os.IsNotExist(err) {
 			t.Errorf("original file %q still present after aside (stat err = %v)", orig, err)
 		}
 	}
 
-	// The unrelated sibling was never touched.
 	got, err := os.ReadFile(unrelated)
 	if err != nil {
 		t.Fatalf("unrelated sibling file vanished: %v", err)
@@ -154,8 +133,6 @@ func TestMoveOldFilesAside_ScopeIsExactlyDBWalShm(t *testing.T) {
 	}
 }
 
-// TestMoveOldFilesAside_NoWalShmIsFine: a db with no -wal/-shm siblings moves
-// aside cleanly, asided containing only the main file.
 func TestMoveOldFilesAside_NoWalShmIsFine(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
@@ -170,14 +147,6 @@ func TestMoveOldFilesAside_NoWalShmIsFine(t *testing.T) {
 	}
 }
 
-// TestOpen_RecreateWithWalShmPresentSurvivesAndCleansUp is the item-4
-// integration-level counterpart: a genuine mismatched db with real -wal/-shm
-// siblings and an unrelated file present at recreate time. Open succeeds, the
-// unrelated file survives untouched, and once the store is closed no ".old-"
-// leftovers remain — the wal/shm aside-and-cleanup cycle exercised end to end
-// (the exact rename scope itself is pinned precisely by
-// TestMoveOldFilesAside_ScopeIsExactlyDBWalShm above, since the success path
-// here deletes the aside copies before we can inspect them directly).
 func TestOpen_RecreateWithWalShmPresentSurvivesAndCleansUp(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)

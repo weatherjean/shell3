@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// waitDispatchDone drains the session's JobEvents until the given job reports
-// Done (or the deadline passes).
 func waitDispatchDone(t *testing.T, s *Session, id string) {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -25,9 +23,6 @@ func waitDispatchDone(t *testing.T, s *Session, id string) {
 	}
 }
 
-// Dispatch fires a host-initiated subagent job on the normal job runtime: it
-// gets a subN id, and with Direct:true its completion notice queues into the
-// session (Wake path) so the host can RunQueued a narrating turn.
 func TestDispatchDirectWakesSession(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent done"))
 	defer rt.Close()
@@ -57,9 +52,6 @@ func TestDispatchDirectWakesSession(t *testing.T) {
 	}
 }
 
-// A default (non-direct) cron dispatch is mail to the agent: a fresh quiet
-// turn carrying its cron origin — never a post, never a wake of the dispatch
-// parent.
 func TestDispatchCronRoutesToHost(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("cron result"))
 	defer rt.Close()
@@ -94,9 +86,6 @@ func TestDispatchCronRoutesToHost(t *testing.T) {
 	}
 }
 
-// TestDispatch_CronJobReachesTheSessionRow proves CronJob survives the full
-// path — Dispatch -> subagentOpts -> child SessionOpts -> runs.Meta -> SQLite
-// -- not just that a Go field got set somewhere along the way.
 func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("worker done"))
 	defer rt.Close()
@@ -125,16 +114,13 @@ func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
 	}
 }
 
-// A relative dispatch workdir joins onto the parent's effective base (the old
-// Dispatch contract): parent workdir when set, else the runtime root — never
-// the process CWD.
 func TestResolveChildWorkDir(t *testing.T) {
 	cases := []struct{ parent, override, root, want string }{
-		{"", "", "/root", ""},                            // inherit: "" stays "" (→ root downstream)
-		{"/srv/bot", "", "/root", "/srv/bot"},            // inherit parent's exact value
-		{"/srv/bot", "notes", "/root", "/srv/bot/notes"}, // relative joins parent
-		{"", "notes", "/root", "/root/notes"},            // relative joins root when parent unset
-		{"/srv/bot", "/abs/dir", "/root", "/abs/dir"},    // absolute wins
+		{"", "", "/root", ""},
+		{"/srv/bot", "", "/root", "/srv/bot"},
+		{"/srv/bot", "notes", "/root", "/srv/bot/notes"},
+		{"", "notes", "/root", "/root/notes"},
+		{"/srv/bot", "/abs/dir", "/root", "/abs/dir"},
 	}
 	for _, c := range cases {
 		if got := resolveChildWorkDir(c.parent, c.override, c.root); got != c.want {

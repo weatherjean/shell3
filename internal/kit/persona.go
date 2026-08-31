@@ -29,14 +29,13 @@ var removedBuiltins = map[string]string{
 type Resolved struct {
 	Agent    Agent
 	Builtins []string
-	MCP      []string
 	Tools    []Tool
 }
 
 // Resolve turns an agent's `use:` list into concrete capabilities. Entries
-// resolve in order: a built-in name, `mcp:<server>`, then a shared group
-// declared in the kit. An entry matching none of those is an error — a typo in
-// `use:` must not silently mean "no capability".
+// resolve as a built-in name or a shared group declared in the kit. An entry
+// matching neither is an error — a typo in `use:` must not silently mean "no
+// capability". MCP opt-ins use Agent.MCP instead.
 //
 // isMain relaxes the rule for the agent you talk to: it gets every built-in
 // without naming one, because you are steering it in real time. An employee
@@ -50,8 +49,7 @@ func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 	for _, name := range a.Use {
 		switch {
 		case strings.HasPrefix(name, "mcp:"):
-			r.MCP = append(r.MCP, strings.TrimPrefix(name, "mcp:"))
-			continue
+			return Resolved{}, fmt.Errorf("agent %q (line %d): use: %q — MCP opt-ins belong in the agent block's mcp: list", a.Name, a.Line, name)
 		case isBuiltin(name):
 			if !isMain {
 				r.Builtins = append(r.Builtins, name)
@@ -114,55 +112,23 @@ func (r Resolved) ToolByName(name string) (Tool, bool) {
 	return Tool{}, false
 }
 
-// ToolByName finds a declared tool anywhere in the kit, regardless of which
-// agent's scope declares it. Positional scoping bounds what a MODEL may
-// call; a cron tool job names no agent at all — it is the operator
-// scheduling a tool they declared themselves, so the whole kit is in scope.
-// It returns the FIRST match (agents in declaration order, then shared
-// groups): when a name is declared in more than one scope, callers that care
-// about which one wins must use ToolMatches to detect the ambiguity — this
-// method alone cannot tell a unique declaration from an accidental collision.
+// ToolByName finds a declared tool anywhere in the kit for the kit-authoring
+// CLI. It returns the first match: agents in declaration order, then shared
+// groups. Runtime calls use Resolved.ToolByName and remain agent-scoped.
 func (k *Kit) ToolByName(name string) (Tool, bool) {
-	matches := k.ToolMatches(name)
-	if len(matches) == 0 {
-		return Tool{}, false
-	}
-	return matches[0].Tool, true
-}
-
-// ToolMatch is one scope (an agent or a shared group) that declares a tool
-// name, returned by ToolMatches.
-type ToolMatch struct {
-	// Scope names the declaring agent or shared group, prefixed to disambiguate
-	// the two kinds of scope in a diagnostic ("agent \"x\"" vs "shared \"x\"").
-	Scope string
-	Tool  Tool
-}
-
-// ToolMatches finds every scope in the kit that declares a tool named name,
-// in the same search order ToolByName resolves from (agents in declaration
-// order, then shared groups). Duplicate tool names are rejected only WITHIN
-// one scope (see kit_test.go), so two agents — or an agent and a shared
-// group — may each legally declare the same name; ToolByName then picks
-// whichever scope it visits first, silently. A cron `tool:` job names no
-// agent, so nothing else disambiguates for it: `shell3 health` calls this to
-// fail loudly, naming every declaring scope, rather than let the operator's
-// job run whichever function happened to parse first.
-func (k *Kit) ToolMatches(name string) []ToolMatch {
-	var out []ToolMatch
 	for _, a := range k.Agents {
 		for _, t := range a.Tools {
 			if t.Name == name {
-				out = append(out, ToolMatch{Scope: fmt.Sprintf("agent %q", a.Name), Tool: t})
+				return t, true
 			}
 		}
 	}
 	for _, g := range k.Shared {
 		for _, t := range g.Tools {
 			if t.Name == name {
-				out = append(out, ToolMatch{Scope: fmt.Sprintf("shared %q", g.Name), Tool: t})
+				return t, true
 			}
 		}
 	}
-	return out
+	return Tool{}, false
 }

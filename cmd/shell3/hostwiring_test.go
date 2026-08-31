@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// mediaTree points the media dir at a temp dir holding one old file and one
-// fresh one, and returns their paths.
 func mediaTree(t *testing.T) (old, fresh string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,9 +28,6 @@ func mediaTree(t *testing.T) (old, fresh string) {
 	return old, fresh
 }
 
-// media_keep_days is opt-in and DELETES user data, so both halves of the gate
-// are pinned: a file past the cutoff goes, a recent one stays, and the count
-// is reported.
 func TestRunJanitorsSweepsMediaPastTheCutoff(t *testing.T) {
 	old, fresh := mediaTree(t)
 	var out strings.Builder
@@ -49,9 +44,6 @@ func TestRunJanitorsSweepsMediaPastTheCutoff(t *testing.T) {
 	}
 }
 
-// The default is keep-forever: with media_keep_days unset (0), nothing in the
-// media dir is ever touched — a day/hour unit slip here would silently delete
-// a user's whole media history.
 func TestRunJanitorsKeepsMediaForeverByDefault(t *testing.T) {
 	old, fresh := mediaTree(t)
 	var out strings.Builder
@@ -67,8 +59,6 @@ func TestRunJanitorsKeepsMediaForeverByDefault(t *testing.T) {
 	}
 }
 
-// A janitor fault is cosmetic — it must warn and let the front-end start, not
-// panic or refuse.
 func TestRunJanitorsFailsOpen(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SHELL3_MEDIA_DIR", filepath.Join(dir, "file-not-a-dir"))
@@ -76,7 +66,7 @@ func TestRunJanitorsFailsOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	runJanitors(filepath.Join(dir, "nonexistent"), 30, 7, &out) // must not panic
+	runJanitors(filepath.Join(dir, "nonexistent"), 30, 7, &out)
 	if !strings.Contains(out.String(), "warning") {
 		t.Errorf("a janitor fault should warn; got %q", out.String())
 	}

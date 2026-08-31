@@ -16,10 +16,9 @@ func asst(calls ...llm.ToolCall) llm.Message {
 func TestExtractFileManifest(t *testing.T) {
 	head := []llm.Message{
 		asst(llm.ToolCall{Name: "edit_file", RawArgs: `{"file_path":"b.go","old_string":"x","new_string":"y"}`}),
-		asst(llm.ToolCall{Name: "edit_file", RawArgs: `{"file_path":"b.go","old_string":"y","new_string":"z"}`}), // dup edit
-		asst(llm.ToolCall{Name: "bash", RawArgs: `{"command":"cat c.go"}`}),                                      // invisible
-		asst(llm.ToolCall{Name: "edit_file", RawArgs: `{bad json`}),                                              // skipped
-		// Non-assistant role carrying tool calls must be ignored (role guard).
+		asst(llm.ToolCall{Name: "edit_file", RawArgs: `{"file_path":"b.go","old_string":"y","new_string":"z"}`}),
+		asst(llm.ToolCall{Name: "bash", RawArgs: `{"command":"cat c.go"}`}),
+		asst(llm.ToolCall{Name: "edit_file", RawArgs: `{bad json`}),
 		{Role: llm.RoleUser, ToolCalls: []llm.ToolCall{{Name: "edit_file", RawArgs: `{"file_path":"ignored.go"}`}}},
 	}
 	mod := extractFileManifest(head)

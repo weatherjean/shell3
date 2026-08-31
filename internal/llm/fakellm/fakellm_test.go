@@ -42,7 +42,6 @@ func TestClient_MultipleScripts(t *testing.T) {
 			got = append(got, ev.TextDelta)
 		})
 	}
-	// Third call should repeat the last script.
 	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "b" {
 		t.Errorf("got %v, want [a b b]", got)
 	}
@@ -59,7 +58,6 @@ func TestClient_RecordsDefensiveCopy(t *testing.T) {
 		t.Fatalf("Stream err: %v", err)
 	}
 
-	// Mutate the caller's slices after Stream returned.
 	msgs[0].Content = "mutated"
 	tools[0].Name = "mutated"
 

@@ -12,10 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestMsgTokens_CountsReasoning: the adapter re-sends assistant
-// ReasoningContent to the provider, so it occupies real prompt tokens. If
-// msgTokens omitted it, the tail-sizing walk would under-count reasoning-heavy
-// assistant turns and over-preserve the verbatim tail past compact_at.
 func TestMsgTokens_CountsReasoning(t *testing.T) {
 	plain := llm.Message{Role: llm.RoleAssistant, Content: "hello there"}
 	withReasoning := plain
@@ -24,17 +20,11 @@ func TestMsgTokens_CountsReasoning(t *testing.T) {
 		t.Fatalf("reasoning content must raise the estimate: plain=%d withReasoning=%d",
 			msgTokens(plain), got)
 	}
-	// ~400 reasoning bytes ≈ 100 tokens on top of the content estimate.
 	if got, want := msgTokens(withReasoning)-msgTokens(plain), 400/4; got != want {
 		t.Fatalf("reasoning token delta = %d, want %d", got, want)
 	}
 }
 
-// TestCompactInto_ResetsReminderLog: compaction rewrites history to a short
-// continuation+tail, so the reminderLog anchors (which index the pre-compaction
-// message slice) are stale. They must be dropped — exactly as SetMessages does —
-// or History()'s non-decreasing-Seq interleave silently hides every later
-// reminder from any reader.
 func TestCompactInto_ResetsReminderLog(t *testing.T) {
 	sess := NewSession(SessionOpts{})
 	sess.messages = []llm.Message{
@@ -53,11 +43,6 @@ func TestCompactInto_ResetsReminderLog(t *testing.T) {
 	}
 }
 
-// TestCompactInto_AbortsOnFailedRoll: when the runs store cannot start the new
-// session (e.g. a full disk), compaction must abort cleanly — leaving the
-// in-memory history and the outgoing session's JSONL untouched — rather than
-// rewrite memory to a short slice while the old file still holds the full
-// history (which the next saveHistory would then duplicate into).
 func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	dir := t.TempDir()
 	st, err := runs.Open(dir)
@@ -76,8 +61,6 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	}
 	sess.messages = orig
 
-	// Make NewSession fail: close the store's database so the roll's insert
-	// is denied.
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -94,10 +77,6 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	}
 }
 
-// TestRunTurn_QueuedCompact_FewLargeMessages: a forced :compact on a history of
-// few but very large messages (head < compactionFloor messages, yet huge in
-// tokens) must still compact. The message-count floor alone would silently
-// no-op, leaving the user unable to reclaim context exactly when they need to.
 func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of the head"}}},
@@ -109,13 +88,12 @@ func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		// auto-compaction would not trigger; tiny tail.
-		AgentKnobs: AgentKnobs{CompactAt: 100000, KeepRecent: 20},
-		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
+		AgentKnobs:  AgentKnobs{CompactAt: 100000, KeepRecent: 20},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, c := newCollectorSession(SessionOpts{})
-	big := strings.Repeat("x", 8000) // ~2000 tokens each
-	for i := 0; i < 5; i++ {         // only 5 head messages → cut < compactionFloor (8)
+	big := strings.Repeat("x", 8000)
+	for i := 0; i < 5; i++ {
 		sess.messages = append(sess.messages, llm.Message{Role: llm.RoleAssistant, Content: big})
 	}
 	sess.messages = append(sess.messages, llm.Message{Role: llm.RoleAssistant, Content: "LATEST_TAIL_MARKER"})
@@ -135,10 +113,6 @@ func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	}
 }
 
-// TestCompactNow_ResetsContextGauge: after compaction the prompt-token gauge
-// drops to a small estimate; the reminderTracker's context-usage state (the last
-// emitted bucket / token mark) must reset too, or context-usage reminders are
-// suppressed across the whole band the conversation re-grows through.
 func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY"}}},
@@ -151,7 +125,6 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	}
 	sess, _ := newCollectorSession(SessionOpts{})
 	seedHistory(sess, "MARKER", 500)
-	// Simulate a tracker that already emitted at a high bucket before compaction.
 	sess.reminders.lastContextPct = 80
 	sess.reminders.lastTokens = 90000
 
@@ -163,9 +136,6 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	}
 }
 
-// TestAddUsage_KeepsPromptWhenRoundOmitsIt: some providers stream a follow-up
-// round whose final usage carries completion tokens but PromptTokens=0. addUsage
-// must not zero the accumulated prompt count (and the derived total) in that case.
 func TestAddUsage_KeepsPromptWhenRoundOmitsIt(t *testing.T) {
 	got := addUsage(
 		llm.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110},

@@ -42,8 +42,6 @@ func TestScheduler_FireDispatches(t *testing.T) {
 	if got.Agent != "explorer" || got.Prompt != "go" || got.Name != "cron:j1" || got.Report != notify.ReportRaw {
 		t.Fatalf("bad dispatch args: %+v", got)
 	}
-	// The dispatch carries the cron job name so the runtime routes ⏰ posts
-	// and the ownerless wake path.
 	if fd.lastOpts.CronJob != "j1" {
 		t.Fatalf("CronJob = %q, want j1", fd.lastOpts.CronJob)
 	}
@@ -95,8 +93,6 @@ func TestScheduler_Run(t *testing.T) {
 	if err := s.Run("nope"); err == nil {
 		t.Fatal("Run(nope): want error for unknown job name")
 	}
-	// An unknown name is rejected synchronously (Run returns the error
-	// before spawning anything), so no wait is needed for the negative case.
 	if fd.count() != 1 {
 		t.Fatalf("unknown-name Run fired a dispatch: count=%d", fd.count())
 	}
@@ -139,6 +135,48 @@ func (b *blockingDispatcher) Dispatch(string, string, shell3.DispatchOpts) (stri
 	return "subX", nil
 }
 
+type observedBlockingDispatcher struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *observedBlockingDispatcher) Dispatch(string, string, shell3.DispatchOpts) (string, error) {
+	close(b.entered)
+	<-b.release
+	return "subX", nil
+}
+
+func TestSchedulerStopWaitsForManualFire(t *testing.T) {
+	d := &observedBlockingDispatcher{entered: make(chan struct{}), release: make(chan struct{})}
+	s, err := New(d, []shell3.CronJob{{Name: "manual", Schedule: "@every 1h", Agent: "worker", Prompt: "sync"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Run("manual"); err != nil {
+		t.Fatal(err)
+	}
+	<-d.entered
+	stopped := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a manual dispatch was still running")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(d.release)
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after the dispatch drained")
+	}
+	if err := s.Run("manual"); err == nil {
+		t.Fatal("stopped scheduler admitted a new manual fire")
+	}
+}
+
 func TestScheduler_BadScheduleRejected(t *testing.T) {
 	if _, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "x", Schedule: "not a cron", Agent: "a"}}); err == nil {
 		t.Fatal("expected error for malformed schedule")
@@ -149,21 +187,15 @@ func TestScheduler_StartStopClean(t *testing.T) {
 	s, _ := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	s.Start()
 	time.Sleep(20 * time.Millisecond)
-	s.Stop() // must not hang
+	s.Stop()
 }
 
-// errDispatcher rejects every dispatch: the one failure the fire path itself
-// can see, because no completion will ever arrive for it.
 type errDispatcher struct{ err error }
 
 func (e errDispatcher) Dispatch(agent, prompt string, opts shell3.DispatchOpts) (string, error) {
 	return "", e.err
 }
 
-// TestScheduler_OutcomeDescribesTheRun is the whole point of RecordOutcome:
-// a job that dispatches cleanly and then FAILS its work must read as a
-// failure. Before the outcome arrives the row still holds the previous run's
-// verdict — inventing one for work in flight is the thing being fixed.
 func TestScheduler_OutcomeDescribesTheRun(t *testing.T) {
 	fd := &fakeDispatcher{}
 	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"}}
@@ -187,7 +219,6 @@ func TestScheduler_OutcomeDescribesTheRun(t *testing.T) {
 	}
 }
 
-// A clean outcome flips a previously failing job back, and counts no failure.
 func TestScheduler_OutcomeClean(t *testing.T) {
 	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
@@ -219,14 +250,12 @@ func TestScheduler_OutcomeRecordedOnce(t *testing.T) {
 	}
 }
 
-// An outcome from a run a later fire has superseded is a straggler: the table
-// keeps the latest run only, so it must not backdate the row.
 func TestScheduler_OutcomeStaleSubIDDropped(t *testing.T) {
 	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.fire(shell3.CronJob{Name: "j1", Agent: "a", Prompt: "go"}) // LastSubID = subX
+	s.fire(shell3.CronJob{Name: "j1", Agent: "a", Prompt: "go"})
 	s.RecordOutcome(shell3.CronOutcome{Job: "j1", SubID: "subOLD", OK: false, ErrText: "boom"})
 	if got := s.Jobs()[0]; got.Failures != 0 || got.LastErr != "" {
 		t.Fatalf("stale outcome applied: %+v", got)
@@ -246,8 +275,6 @@ func TestScheduler_OutcomeUnknownJobDropped(t *testing.T) {
 	}
 }
 
-// A dispatch rejection is a real failure with no completion coming, so it
-// counts at once — and nothing later may overwrite it.
 func TestScheduler_DispatchRejectionCountsImmediately(t *testing.T) {
 	s, err := New(errDispatcher{err: errors.New("no such agent")},
 		[]shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "gone", Prompt: "go"}})

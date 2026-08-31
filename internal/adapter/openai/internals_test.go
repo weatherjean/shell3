@@ -10,7 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// mockTransport satisfies http.RoundTripper and returns a fixed response.
 type mockTransport struct {
 	resp *http.Response
 	err  error
@@ -28,8 +27,6 @@ func sseResponse(body string) *http.Response {
 	}
 }
 
-// ---- bodyTap ----
-
 func TestBodyTapCapturesRequestBody(t *testing.T) {
 	tap := &bodyTap{rt: &mockTransport{resp: sseResponse("data: [DONE]\n\n")}}
 	body := []byte(`{"test":true}`)
@@ -45,7 +42,7 @@ func TestBodyTapCapturesRequestBody(t *testing.T) {
 	if !bytes.Equal(req2, body) {
 		t.Fatalf("request body: got %q want %q", req2, body)
 	}
-	_ = res2 // 2xx bodies are not buffered
+	_ = res2
 }
 
 func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
@@ -80,8 +77,6 @@ func TestBodyTapNilBody(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }
-
-// ---- toMessages ----
 
 func TestToMessagesBasic(t *testing.T) {
 	msgs := []llm.Message{
@@ -141,10 +136,6 @@ func TestToMessagesAssistantReasoningContentEchoed(t *testing.T) {
 	}
 }
 
-// A thinking-mode conversation (any assistant message carrying reasoning)
-// must serialize reasoning_content on EVERY assistant message, empty string
-// included: DeepSeek's thinking mode 400s a tool-call round whose assistant
-// message lacks the field ("reasoning_content … must be passed back").
 func TestToMessagesThinkingModeEchoesEmptyReasoning(t *testing.T) {
 	msgs := []llm.Message{
 		{
@@ -154,7 +145,7 @@ func TestToMessagesThinkingModeEchoesEmptyReasoning(t *testing.T) {
 		},
 		{Role: llm.RoleTool, Content: "ok", ToolCallID: "1"},
 		{
-			Role:      llm.RoleAssistant, // hop that emitted no reasoning
+			Role:      llm.RoleAssistant,
 			ToolCalls: []llm.ToolCall{{ID: "2", Name: "edit_file", RawArgs: `{}`}},
 		},
 	}
@@ -168,8 +159,6 @@ func TestToMessagesThinkingModeEchoesEmptyReasoning(t *testing.T) {
 	}
 }
 
-// Without any reasoning in the history the vendor extension must stay off the
-// wire entirely — strict providers (api.openai.com) reject unknown fields.
 func TestToMessagesNoReasoningNoField(t *testing.T) {
 	msgs := []llm.Message{
 		{
@@ -200,8 +189,6 @@ func TestToMessagesToolResult(t *testing.T) {
 		t.Fatalf("ToolCallID: %q", out[0].OfTool.ToolCallID)
 	}
 }
-
-// ---- toTools ----
 
 func TestToTools(t *testing.T) {
 	tools := []llm.ToolDefinition{

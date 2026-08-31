@@ -10,8 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// subagentCfg returns a config whose active agent may spawn the "explorer"
-// subagent, backed by the given LLM client.
 func subagentCfg(client chat.LLMClient) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
@@ -37,7 +35,7 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first startSubagent: %v", err)
 	}
-	<-block.Started // the child turn is verifiably in flight
+	<-block.Started
 
 	if _, err := rt.jobs.startSubagent(parent, "explorer", "task2", "desc2", subagentOpts{}); err == nil ||
 		!strings.Contains(err.Error(), "cap 1 reached") {
@@ -67,10 +65,6 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	}
 	// finishSubagent wakes the parent when the job goroutine unwinds.
 	waitForWake(t, rt, parent)
-	// The wake is delivered BEFORE the job is marked done (deliberate: while
-	// the notice is in flight the job must still count as running, so /clear's
-	// running-tasks guard refuses). The wake therefore proves delivery, not
-	// completion — poll for the flag instead of asserting it instantly.
 	var found JobInfo
 	deadline := time.Now().Add(5 * time.Second)
 	for {

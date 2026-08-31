@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The Rooms section is how the dash answers "which conversations is this bot
-// holding" — one row per live room, each linked to its own transcript.
 func TestRoomsSectionHTML(t *testing.T) {
 	got := RoomsSectionHTML([]RoomInfo{
 		{ChatID: -100, Title: "backend-infra", Busy: true, Jobs: 2, Queued: 1, SessionID: "s1"},
@@ -19,15 +17,12 @@ func TestRoomsSectionHTML(t *testing.T) {
 	}
 }
 
-// No rooms renders nothing: an empty table reads as breakage.
 func TestRoomsSectionHTMLEmpty(t *testing.T) {
 	if got := RoomsSectionHTML(nil, "tok"); got != "" {
 		t.Fatalf("empty rooms rendered %q", got)
 	}
 }
 
-// A room title comes from Telegram and is attacker-adjacent text; it must be
-// escaped like everything else on the dash.
 func TestRoomsSectionHTMLEscapes(t *testing.T) {
 	got := RoomsSectionHTML([]RoomInfo{{ChatID: 1, Title: "<script>x</script>", SessionID: "s"}}, "t")
 	if strings.Contains(got, "<script>") {

@@ -3,6 +3,7 @@ package shell3
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -35,8 +36,16 @@ func TestRecoveryHint(t *testing.T) {
 	}
 }
 
-// The adapter wraps provider API errors in llm.StatusError; the hint must key
-// off the typed code (regardless of how the provider phrases the message).
+func TestRecoveryHintDoesNotRecommendUnavailableCommand(t *testing.T) {
+	hint := RecoveryHint(errors.New("400 Bad Request"))
+	if strings.Contains(hint, "/compact") {
+		t.Fatalf("RecoveryHint recommends unavailable /compact command: %q", hint)
+	}
+	if !strings.Contains(hint, "/new") {
+		t.Fatalf("RecoveryHint does not name Telegram's supported reset command: %q", hint)
+	}
+}
+
 func TestRecoveryHint_TypedStatusError(t *testing.T) {
 	badReq := &llm.StatusError{Code: 400, Err: errors.New("provider-specific phrasing with no recognizable status text")}
 	if RecoveryHint(fmt.Errorf("wrapped: %w", badReq)) == "" {

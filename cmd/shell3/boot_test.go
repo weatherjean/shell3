@@ -30,8 +30,6 @@ func TestMergeEnvAddsMissingKeysOnly(t *testing.T) {
 	if !strings.Contains(out, "FOO=bar") {
 		t.Errorf("must preserve unrelated keys; got:\n%s", out)
 	}
-	// The caller supplied a NEW non-empty value for an existing key: that key
-	// must be reported so boot can tell the user their --key was not applied.
 	if len(kept) != 1 || kept[0] != "MAIN_API_KEY" {
 		t.Errorf("kept = %v, want [MAIN_API_KEY]", kept)
 	}
@@ -50,9 +48,6 @@ func TestMergeEnvFromEmpty(t *testing.T) {
 	}
 }
 
-// TestMergeEnvKeptOnlyForNonEmptyIncoming: an existing key with a BLANK
-// incoming value is normal re-boot behavior (nothing to apply), not worth a
-// warning — only a discarded non-empty value is reported.
 func TestMergeEnvKeptOnlyForNonEmptyIncoming(t *testing.T) {
 	_, kept := mergeEnv("MAIN_API_KEY=old\nGROQ_API_KEY=t\n", [][2]string{
 		{"MAIN_API_KEY", ""},
@@ -70,7 +65,6 @@ func TestEnvKeyForName(t *testing.T) {
 	if got := envKeyForName("kimi-k2"); got != "KIMI_K2_API_KEY" {
 		t.Errorf("envKeyForName(kimi-k2) = %q, want KIMI_K2_API_KEY", got)
 	}
-	// Degenerate handles must still yield a valid identifier.
 	if got := envKeyForName("@@@"); got != "MAIN_API_KEY" {
 		t.Errorf("envKeyForName(@@@) = %q, want MAIN_API_KEY (empty -> fallback)", got)
 	}
@@ -82,8 +76,6 @@ func TestEnvKeyForName(t *testing.T) {
 	}
 }
 
-// TestCollectAnswersNonTTY covers the headless (flags-only) path: flags win,
-// blanks take defaults, model is required, and int flags are validated.
 func TestCollectAnswersNonTTY(t *testing.T) {
 	t.Run("defaults fill blanks", func(t *testing.T) {
 		a, err := collectAnswers(&bootFlags{model: "m"}, false)
@@ -98,9 +90,6 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 	})
 
-	// A chat id reaches the kit verbatim and is parsed as an int64 by the
-	// front-end at startup, far from where it was typed — so boot rejects a
-	// non-numeric one here, and lets a blank through (fill it in later).
 	t.Run("chat id validated", func(t *testing.T) {
 		if _, err := collectAnswers(&bootFlags{model: "m", tgChatID: "@me"}, false); err == nil {
 			t.Fatal("expected a non-numeric chat id to be rejected")
@@ -140,17 +129,10 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 	})
 }
 
-// TestBootEndToEnd drives the real `shell3 boot` flow against a temp HOME: it
-// asserts the cold-start redirect before boot, runs runBoot with flags (no TTY),
-// then verifies the written tree, .env (empty key + Brave placeholder, 0600),
-// that the generated config tree actually loads through internal/config,
-// the no-clobber guard, and that --force regenerates.
 func TestBootEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Cold start: no config anywhere -> ResolveConfigDir must fail (the message
-	// that points the user at `shell3 boot`). The temp HOME has no config yet.
 	if _, err := agentsetup.ResolveConfigDir("", home); err == nil {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
@@ -170,7 +152,6 @@ func TestBootEndToEnd(t *testing.T) {
 		}
 	}
 
-	// .env: empty model key (proxy handles auth), mode 0600.
 	envPath := filepath.Join(dir, ".env")
 	env, err := os.ReadFile(envPath)
 	if err != nil {
@@ -179,8 +160,6 @@ func TestBootEndToEnd(t *testing.T) {
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
 	}
-	// The token key is always written, even blank: the config references it, so
-	// a missing key is a load error rather than an empty-token startup refusal.
 	if !strings.Contains(string(env), envTelegramToken+"=") {
 		t.Errorf(".env missing %s line:\n%s", envTelegramToken, env)
 	}
@@ -190,7 +169,6 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Errorf(".env perms = %v, want 0600", fi.Mode().Perm())
 	}
 
-	// After boot, config resolution finds the home config.
 	resolved, err := agentsetup.ResolveConfigDir("", home)
 	if err != nil {
 		t.Fatalf("ResolveConfigDir after boot: %v", err)
@@ -199,16 +177,13 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Errorf("resolved = %q, want %q", resolved, dir)
 	}
 
-	// The end-to-end payoff: the generated config loads with an empty api_key.
 	if _, err := config.Load(resolved); err != nil {
 		t.Fatalf("generated config failed to load: %v", err)
 	}
-	// No-clobber: a second boot without --force refuses.
 	if err := runBoot(f); err == nil {
 		t.Error("second boot without --force should error (config exists)")
 	}
 
-	// --force regenerates with new values.
 	f.force = true
 	f.model = "changed-model"
 	if err := runBoot(f); err != nil {
@@ -245,8 +220,6 @@ func TestMergeEnvFillsBlankValueInsteadOfKeepingIt(t *testing.T) {
 	}
 }
 
-// The inverse still holds: a key with a REAL value is never overwritten, and
-// the discard is reported so the user knows their new value was not applied.
 func TestMergeEnvStillKeepsNonEmptyExisting(t *testing.T) {
 	out, kept := mergeEnv("TELEGRAM_TOKEN=999:OLD\n", [][2]string{{envTelegramToken, "123:NEW"}})
 	if !strings.Contains(out, "TELEGRAM_TOKEN=999:OLD") || strings.Contains(out, "123:NEW") {
@@ -257,8 +230,6 @@ func TestMergeEnvStillKeepsNonEmptyExisting(t *testing.T) {
 	}
 }
 
-// A blank token writes the fill-it-in-later comment; a supplied one must not
-// (a comment telling the user to fill in a line that is already filled).
 func TestMergeEnvTokenCommentOnlyWhenBlank(t *testing.T) {
 	blank, _ := mergeEnv("", [][2]string{{envTelegramToken, ""}})
 	if !strings.Contains(blank, "BotFather") {

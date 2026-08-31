@@ -10,9 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestAskResumeHint pins the exact resume line printed on exit — it is the
-// user's only pointer back into the conversation, so its wording (and the
-// `shell3 ask --resume` invocation) is load-bearing.
 func TestAskResumeHint(t *testing.T) {
 	got := askResumeHint()
 	if !strings.Contains(got, "shell3 ask --resume") {
@@ -23,10 +20,6 @@ func TestAskResumeHint(t *testing.T) {
 	}
 }
 
-// TestAskHeadless pins the flag a gate script reads as .headless. The chat UI
-// is never headless — requireTerminal already proved a terminal on stdin and
-// stdout and a human is typing — and where stderr points must not change that,
-// or `shell3 ask 2>log` marks a live session headless.
 func TestAskHeadless(t *testing.T) {
 	cases := []struct {
 		name                                       string
@@ -51,10 +44,6 @@ func TestAskHeadless(t *testing.T) {
 	}
 }
 
-// TestAskSurfaceIsNotTelegrams pins the separation that lets `shell3 ask` and
-// the bot run at once: ask's thread key must never collide with a Telegram
-// room's ("telegram:<chatid>"), or --resume would reattach to a chat's
-// conversation.
 func TestAskSurfaceIsNotTelegrams(t *testing.T) {
 	if strings.HasPrefix(askSurface, "telegram") {
 		t.Fatalf("ask surface %q collides with the Telegram front-end's namespace", askSurface)
@@ -64,9 +53,6 @@ func TestAskSurfaceIsNotTelegrams(t *testing.T) {
 	}
 }
 
-// TestAskResumeFollowsItsOwnThread: --resume must reattach to the session ask
-// itself recorded, never to whatever session happens to be newest in the same
-// workdir (which, with the bot running, is a Telegram room's).
 func TestAskResumeFollowsItsOwnThread(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -74,7 +60,6 @@ func TestAskResumeFollowsItsOwnThread(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	// No marker yet: a first run starts fresh rather than guessing.
 	if got := askResumeID(st); got != "" {
 		t.Fatalf("askResumeID with no marker = %q, want empty", got)
 	}
@@ -85,8 +70,6 @@ func TestAskResumeFollowsItsOwnThread(t *testing.T) {
 	}
 	rememberAskSession(st, askID)
 
-	// A Telegram room opens a NEWER session in the same workdir — the case a
-	// "resume the newest session here" rule would get wrong.
 	tgID, err := st.NewSession(runs.Meta{Workdir: "/w", ConfigDir: "/c"})
 	if err != nil {
 		t.Fatal(err)
@@ -100,9 +83,6 @@ func TestAskResumeFollowsItsOwnThread(t *testing.T) {
 	}
 }
 
-// TestAskResumeSkipsSweptSession: the runs janitor deletes old sessions, so a
-// marker can outlive what it points at. That must start a fresh conversation,
-// not resume a session id with no row behind it.
 func TestAskResumeSkipsSweptSession(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -116,10 +96,6 @@ func TestAskResumeSkipsSweptSession(t *testing.T) {
 	}
 }
 
-// TestAskAgentDoesNotClaimTheMarker: `--agent` refuses --resume because it
-// holds no conversation, so it must not claim ask's resume marker either — a
-// batch script looping over it would otherwise leave the user's next
-// `ask --resume` pointing at its empty parent session instead of their chat.
 func TestAskAgentDoesNotClaimTheMarker(t *testing.T) {
 	src, err := os.ReadFile("ask.go")
 	if err != nil {

@@ -27,7 +27,7 @@ A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 | **event** | a subscriber on the session event stream — observes, never refuses |
 | **mcp** | an external tool server |
 | **memory** | a per-agent `memory.md` |
-| **cron** | a schedule bound to an agent + prompt — or, for mechanical work, bound directly to a tool |
+| **cron** | a schedule bound to an agent + prompt |
 
 ## Grammar
 
@@ -54,8 +54,9 @@ apart.
 command is answered by the front-end, not by a model, and a cron job names
 its own target agent, so there is nothing for either to be scoped to.
 
-`cron:` is also the one block where `agent:` and `tool:` are payload rather
-than a declaration kind — they name what the job runs.
+`cron:` is also the one block where `agent:` is payload rather than a
+declaration kind — it names what the job runs. The removed direct `tool:` job
+form is recognized only to produce a clear load error.
 
 The file is **definitions only** at the top level. That is what makes two things
 true at once: loading a kit never executes it, and running one tool is just
@@ -128,6 +129,8 @@ web_search() { searx_query "$q"; }
 re-read into its system prompt **at the start of every turn**, resolved
 against the agent's own `workdir:` when it declares one. The agent maintains
 them with `edit_file`, so what it learned on one tick is there on the next.
+Relative agent `workdir:` paths resolve against the config directory; `~/`
+resolves against the user's home directory.
 
 Mind the size. Re-read every turn means a context file's cost is paid many
 times per run, and the agent that writes it cannot see what it costs — an
@@ -150,12 +153,15 @@ well-scoped employee often needs no shell at all.
 
 One `use:` list, resolved in order:
 
-- a built-in name — `bash`, `bash_bg`, `edit`, `media`, `history`
-- `mcp:<server>` — that server's tools
+- a built-in name — `bash`, `bash_bg`, `edit`, `history`
 - anything else — a shared group declared in the kit
 
 An entry matching none of those is a load error. A typo in `use:` must not
 silently mean "no capability".
+
+MCP servers use the agent block's dedicated `mcp: [server, …]` field (or
+`mcp: all`). The removed `use: [mcp:server]` spelling is a load error naming
+the replacement.
 
 ## Calling convention
 

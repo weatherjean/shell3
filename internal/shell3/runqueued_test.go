@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// TestInterject_IdleEmitsWake: Interject on an idle session emits a Wake for
-// that session so the host knows to run a turn.
 func TestInterject_IdleEmitsWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
@@ -26,8 +24,6 @@ func TestInterject_IdleEmitsWake(t *testing.T) {
 	}
 }
 
-// TestRunQueued_EmptyInboxNoTurn: RunQueued with an empty inbox starts no turn
-// and returns an already-closed channel.
 func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
@@ -41,16 +37,12 @@ func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 	}
 }
 
-// TestRunQueued_RunsTurnFromQueuedItems: RunQueued with queued items runs a turn
-// that surfaces the queued text to the model (as the turn's reminder/seed) and
-// drains the inbox, so a follow-up RunQueued is a no-op.
 func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Drain the idle-Interject Wake so it doesn't confuse later assertions.
 	s.Interject("do the queued thing")
 	select {
 	case <-rt.Events():
@@ -78,7 +70,6 @@ func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 		t.Fatal("inbox should be drained after RunQueued ran a turn")
 	}
 
-	// A follow-up RunQueued is a no-op: inbox is empty.
 	for range s.RunQueued(context.Background()) {
 	}
 	if s.isBusy() {
@@ -86,18 +77,13 @@ func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 	}
 }
 
-// TestRunQueued_BusyReturnsClosedChannelNoTurn: RunQueued on a busy session
-// returns an already-closed channel and starts no turn — the in-flight turn
-// drains the inbox itself.
 func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Queue an item so HasInbox() is true; the busy gate must still short-circuit.
 	s.sess.Interject("queued while busy")
-	// Hold the busy gate directly (same technique as TestInterject_BusyDoesNotWake).
 	s.mu.Lock()
 	s.busy = true
 	s.mu.Unlock()
@@ -119,22 +105,17 @@ func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
 	if !stillBusyFromGate {
 		t.Fatal("busy gate flipped unexpectedly — RunQueued may have started a turn")
 	}
-	// Inbox untouched: the (would-be) running turn drains it, not RunQueued.
 	if !s.sess.HasInbox() {
 		t.Fatal("busy RunQueued must not drain the inbox")
 	}
 }
 
-// TestInterject_BusyDoesNotWake: an Interject during a running turn must NOT
-// emit a Wake — the running turn drains the inbox itself.
 func TestInterject_BusyDoesNotWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force the busy gate without a real turn by holding s.busy directly; this is
-	// the focused branch test (isBusy() true => no wake).
 	s.mu.Lock()
 	s.busy = true
 	s.mu.Unlock()
@@ -144,7 +125,6 @@ func TestInterject_BusyDoesNotWake(t *testing.T) {
 	case ev := <-rt.Events():
 		t.Fatalf("busy Interject must not Wake, got %+v", ev)
 	case <-time.After(200 * time.Millisecond):
-		// no wake — correct
 	}
 
 	s.mu.Lock()

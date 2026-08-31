@@ -45,14 +45,16 @@ type JobStatus struct {
 
 // Scheduler arms one robfig/cron entry per job and dispatches on tick.
 type Scheduler struct {
-	disp  Dispatcher
-	store RunStore // nil = in-memory only (tests, library use); see NewWithStore
-	log   applog.Logger
-	c     *robcron.Cron
-	mu    sync.Mutex
-	jobs  []shell3.CronJob
-	last  map[string]JobStatus // by job name
-	now   func() time.Time     // injectable clock for tests
+	disp     Dispatcher
+	store    RunStore // nil = in-memory only (tests, library use); see NewWithStore
+	log      applog.Logger
+	c        *robcron.Cron
+	mu       sync.Mutex
+	wg       sync.WaitGroup // scheduled and manual dispatch calls admitted below
+	stopping bool           // closes fire admission before Stop waits
+	jobs     []shell3.CronJob
+	last     map[string]JobStatus // by job name
+	now      func() time.Time     // injectable clock for tests
 }
 
 // New validates every schedule and arms an entry per job, failing fast on a
@@ -120,9 +122,30 @@ func (s *Scheduler) SetLogger(l applog.Logger) {
 	s.mu.Unlock()
 }
 
+// beginFire admits one dispatch. Stop closes admission under the same mutex
+// before waiting, so no positive WaitGroup.Add can race a zero-count Wait.
+func (s *Scheduler) beginFire() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.wg.Add(1)
+	return true
+}
+
 // fire dispatches one job to its agent and records that the run started. The
-// run's real result arrives later, at RecordOutcome.
+// run's real result arrives later, at RecordOutcome. Direct callers run it
+// synchronously; robfig invokes it on its own worker goroutine.
 func (s *Scheduler) fire(j shell3.CronJob) {
+	if !s.beginFire() {
+		return
+	}
+	defer s.wg.Done()
+	s.fireAdmitted(j)
+}
+
+func (s *Scheduler) fireAdmitted(j shell3.CronJob) {
 	opts := shell3.DispatchOpts{
 		WorkDir: j.WorkDir, Description: "cron:" + j.Name,
 		CronJob: j.Name, Report: j.Report,
@@ -215,10 +238,16 @@ func (s *Scheduler) persist(name string, st JobStatus) {
 	}
 }
 
-// Start begins firing on schedule. Stop blocks until the running dispatch
-// calls return; in-flight subagents are joined by Runtime.Close.
+// Start begins firing on schedule. Stop blocks until scheduled and manual
+// dispatch calls return; in-flight subagents are joined by Runtime.Close.
 func (s *Scheduler) Start() { s.c.Start() }
-func (s *Scheduler) Stop()  { s.c.Stop() }
+func (s *Scheduler) Stop() {
+	s.mu.Lock()
+	s.stopping = true
+	s.mu.Unlock()
+	s.c.Stop()
+	s.wg.Wait()
+}
 
 // Run fires a job by name, erroring immediately on an unknown one and
 // returning before a known one completes. A scheduled tick already has its own
@@ -228,8 +257,14 @@ func (s *Scheduler) Stop()  { s.c.Stop() }
 func (s *Scheduler) Run(name string) error {
 	for _, j := range s.jobs {
 		if j.Name == name {
+			if !s.beginFire() {
+				return fmt.Errorf("cron scheduler is stopped")
+			}
 			job := j
-			go s.fire(job)
+			go func() {
+				defer s.wg.Done()
+				s.fireAdmitted(job)
+			}()
 			return nil
 		}
 	}

@@ -51,8 +51,6 @@ func (b *fakeBot) PostCompletion(p shell3.CompletionPost) error {
 	return nil
 }
 
-// fakeDispatcher satisfies cron.Dispatcher so cron.New can build a real
-// scheduler without a live session.
 type fakeDispatcher struct{}
 
 func (fakeDispatcher) Dispatch(agent, prompt string, opts shell3.DispatchOpts) (string, error) {
@@ -133,9 +131,6 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 	}
 }
 
-// A malformed-but-non-empty schedule passes config validation (validateCron
-// doesn't parse expressions) and fails only at cron.New. The old scheduler
-// must survive that failure — build-new-before-stop-old.
 func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
@@ -154,7 +149,6 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	if ns != old {
 		t.Error("scheduler should be unchanged when the new schedule fails to arm")
 	}
-	// The surviving scheduler must still fire manually.
 	if err := old.Run("j"); err != nil {
 		t.Errorf("old scheduler should still be running: %v", err)
 	}
@@ -195,8 +189,6 @@ func TestSchedulerJobsReflectsRunAsync(t *testing.T) {
 	waitForCondition(t, hasFired)
 }
 
-// waitForCondition polls cond until it returns true or a 1s deadline passes,
-// failing the test on timeout.
 func waitForCondition(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

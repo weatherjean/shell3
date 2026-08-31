@@ -12,8 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// writeTree writes a config tree into dir: the given files plus a default
-// .env (TEST_KEY) unless the map carries one.
 func writeTree(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	if _, ok := files[".env"]; !ok {
@@ -45,9 +43,6 @@ const minimalWiring = `#---
 #---
 `
 
-// kitAgent renders one `agent:` declaration plus its prompt function. extra
-// holds additional frontmatter lines (already "# "-prefixed content, one per
-// entry) and body is the prompt text.
 func kitAgent(name, body string, extra ...string) string {
 	var b strings.Builder
 	b.WriteString("\n#---\n# agent: " + name + "\n# model: main\n")
@@ -58,17 +53,13 @@ func kitAgent(name, body string, extra ...string) string {
 	return b.String()
 }
 
-// minimalKit is the smallest kit BuildParts can load.
 var minimalKit = minimalWiring + kitAgent("main", "you are a tester")
 
-// writeMinimalConfig writes a tree Build can load.
 func writeMinimalConfig(t *testing.T, dir string) {
 	t.Helper()
 	writeTree(t, dir, map[string]string{"shell3.sh": minimalKit})
 }
 
-// writeSubagentConfig writes a kit with an employee ("researcher") beside the
-// main agent.
 func writeSubagentConfig(t *testing.T, dir string) {
 	t.Helper()
 	writeTree(t, dir, map[string]string{
@@ -78,9 +69,6 @@ func writeSubagentConfig(t *testing.T, dir string) {
 	})
 }
 
-// buildConfig composes the single-session path (BuildParts + a headless
-// SessionConfig) the tests below exercise. agent "" selects the main agent.
-// The production front-ends compose these two phases inline.
 func buildConfig(opts agentsetup.Options, agent string) (chat.Config, func(), error) {
 	parts, cleanup, err := agentsetup.BuildParts(opts)
 	if err != nil {
@@ -150,8 +138,6 @@ func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 	if cfg.ModeLabel != "main" {
 		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "main")
 	}
-	// The persona is the kit prompt function's body verbatim; the host Environment facts
-	// live in a standing reminder (set by internal/shell3), NOT the system prompt.
 	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are a coder") {
 		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Personality.SystemPrompt)
 	}
@@ -206,14 +192,13 @@ func TestBuild_RunProxy_SpawnsOnActivation(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(marker); err == nil {
-			return // proxy command ran
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("run_proxy command was not spawned on model activation")
 }
 
-// subagentParts builds Parts from writeSubagentConfig in a fresh temp dir.
 func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -283,7 +268,6 @@ func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 		}
 	}
 
-	// Edit the brain, then build a second session — it must see the new body.
 	if err := os.WriteFile(filepath.Join(tmp, "memory.md"), []byte("MEMORY-V2"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -297,15 +281,11 @@ func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 	if strings.Contains(cfg2.Personality.SystemPrompt, "MEMORY-V1") {
 		t.Errorf("second session prompt still carries the stale body:\n%s", cfg2.Personality.SystemPrompt)
 	}
-	// The first session captured the old body at build time.
 	if !strings.Contains(cfg1.Personality.SystemPrompt, "MEMORY-V1") {
 		t.Errorf("first session prompt should retain the old body:\n%s", cfg1.Personality.SystemPrompt)
 	}
 }
 
-// TestBuild_MalformedConfig_Errors characterizes the post-log-open error path:
-// a present but invalid kit resolves (so the log opens), then config.Load
-// fails — Build must surface the error.
 func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
@@ -342,13 +322,9 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 	if cfg.Store == nil {
 		t.Fatal("expected store to be opened unconditionally, got nil")
 	}
-	cleanup() // closes store + config + log; must not panic
+	cleanup()
 }
 
-// TestEnvironmentReminder asserts the host Environment standing reminder (no
-// longer part of the system prompt) carries the model, session id, config dir,
-// the database path and the history-tool recall pointer — and none of the
-// retired CLIs/UUID — all wrapped in a <system-reminder> envelope.
 func TestEnvironmentReminder(t *testing.T) {
 	rem := agentsetup.EnvironmentReminder("/c", "/root/.shell3_project/runs", "gpt-x", "sess-42")
 	if !strings.HasPrefix(rem, "<system-reminder>") || !strings.HasSuffix(rem, "</system-reminder>") {
@@ -371,18 +347,11 @@ func TestEnvironmentReminder(t *testing.T) {
 			t.Errorf("Environment reminder still advertises retired %q:\n%s", gone, rem)
 		}
 	}
-	// Empty runs dir → no reminder (never advertise an unusable path).
 	if got := agentsetup.EnvironmentReminder("/c", "", "gpt-x", "sess-42"); got != "" {
 		t.Errorf("EnvironmentReminder with empty runsDir = %q, want empty", got)
 	}
 }
 
-// TestAgentRuntime_SubagentResolvesAsAgent asserts that a registered subagent
-// name passed to AgentRuntime (the task-tool spawn path) resolves the
-// subagent's own config — correct name, and (in THIS kit) an empty Subagents
-// bundle: main is never a dispatch target and an agent is never its own, so
-// the kit's only employee has nobody to dispatch. An employee with a PEER
-// does get the task tool — see TestAgentRuntime_EmployeesGetTaskToo.
 func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -400,7 +369,6 @@ func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	if len(srt.Subagents) != 0 {
 		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty — no peer to dispatch", srt.Subagents)
 	}
-	// With no peer there is no target, so no task tool to advertise.
 	for _, td := range srt.Personality.Tools {
 		if td.Name == "task" {
 			t.Error("an employee with no peer must not carry the task tool — its enum would be empty")
@@ -408,8 +376,6 @@ func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	}
 }
 
-// TestSessionConfig_ResolvesSubagentAsAgent asserts that SessionConfig with
-// Agent set to a registered subagent name builds the session as that subagent.
 func TestSessionConfig_ResolvesSubagentAsAgent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -423,9 +389,31 @@ func TestSessionConfig_ResolvesSubagentAsAgent(t *testing.T) {
 	}
 }
 
-// TestRefreshPromptFor_Subagent asserts that RefreshPromptFor returns the
-// employee's own system prompt when called with an employee name — the
-// per-turn refresh path for a session running an employee's config.
+func TestSubagentWorkdir_ResolvesRelativeToConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	home := t.TempDir()
+	writeTree(t, configDir, map[string]string{
+		"shell3.sh": minimalWiring +
+			kitAgent("main", "you are a coder", "use: [bash]") +
+			kitAgent("researcher", "you are a researcher",
+				"description: investigate things", "workdir: projects/researcher", "use: [bash]"),
+	})
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigDir: configDir,
+		CWD:       t.TempDir(),
+		HomeDir:   home,
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	want := filepath.Join(configDir, "projects", "researcher")
+	if got := parts.SubagentWorkdir("researcher"); got != want {
+		t.Errorf("SubagentWorkdir(researcher) = %q, want %q", got, want)
+	}
+}
+
 func TestRefreshPromptFor_Subagent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -446,7 +434,6 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 // baked into the tool's subagent_type parameter, which is the model's only
 // source for it.
 func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
-	// --- Kit WITH an employee: task + management tools must be in schema ---
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
@@ -476,7 +463,6 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 		}
 	}
 
-	// --- Kit with only a main agent: management tools must NOT be in schema ---
 	tmp2 := t.TempDir()
 	writeMinimalConfig(t, tmp2)
 	parts2, cleanup2, err := agentsetup.BuildParts(agentsetup.Options{
@@ -502,8 +488,6 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	}
 }
 
-// TestAgentRuntime_UnknownErrors asserts that AgentRuntime returns an error
-// for a name the kit does not declare.
 func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -517,12 +501,6 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	}
 }
 
-// Delegation is TWO levels, not one. Every agent that has someone to dispatch
-// is advertised the task tool — an employee included — because an ABSENT tool
-// is an invitation to improvise (the failure this exists to stop was an
-// employee hand-rolling an HTTP client against a model API rather than saying
-// "this needs delegating"). The depth bound is enforced at dispatch time by
-// the handler, not by hiding the schema. An agent is never its own target.
 func TestAgentRuntime_EmployeesGetTaskToo(t *testing.T) {
 	tmp := t.TempDir()
 	writeTree(t, tmp, map[string]string{

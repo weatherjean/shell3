@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// openTestStore is a throwaway store on a temp dir.
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	st, err := Open(t.TempDir())
@@ -17,8 +16,6 @@ func openTestStore(t *testing.T) *Store {
 	return st
 }
 
-// The point of the table: a stored conversation must record what the model was
-// TOLD, not only what it said.
 func TestSavePromptRoundTrip(t *testing.T) {
 	st := openTestStore(t)
 	now := time.Now()
@@ -37,9 +34,6 @@ func TestSavePromptRoundTrip(t *testing.T) {
 	}
 }
 
-// An unchanged prompt is the steady state — every turn of a conversation where
-// nobody edited anything. Recording it again would carry no information, so
-// only CHANGES are kept.
 func TestSavePromptSkipsUnchanged(t *testing.T) {
 	st := openTestStore(t)
 	now := time.Now()
@@ -61,7 +55,6 @@ func TestSavePromptSkipsUnchanged(t *testing.T) {
 	}
 }
 
-// Bodies are shared: the same prompt in two sessions is one stored copy.
 func TestSavePromptDedupesAcrossSessions(t *testing.T) {
 	st := openTestStore(t)
 	now := time.Now()
@@ -83,8 +76,6 @@ func TestSavePromptDedupesAcrossSessions(t *testing.T) {
 	}
 }
 
-// Prompts are debugging records, never search results: a 20 KB prompt in the
-// FTS index would swamp every history query with matches from the machinery.
 func TestSavePromptIsNotSearchable(t *testing.T) {
 	st := openTestStore(t)
 	if err := st.SavePrompt("s1", 0, "gravitational singularity", time.Now()); err != nil {
@@ -99,8 +90,6 @@ func TestSavePromptIsNotSearchable(t *testing.T) {
 	}
 }
 
-// A deleted session takes its references with it, and a body nothing points at
-// any more is collected — otherwise the table grows forever.
 func TestSweepCollectsOrphanPrompts(t *testing.T) {
 	st := openTestStore(t)
 	now := time.Now()
@@ -131,7 +120,6 @@ func TestSweepCollectsOrphanPrompts(t *testing.T) {
 	}
 }
 
-// A nil store is the library/test case and must stay a no-op, not a panic.
 func TestSavePromptNilStore(t *testing.T) {
 	var st *Store
 	if err := st.SavePrompt("s1", 0, "body", time.Now()); err != nil {

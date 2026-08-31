@@ -11,11 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// Tool output is arbitrary bytes. A result carrying "</details>" or "<script>"
-// must land as TEXT — if it lands as markup it closes the message it belongs
-// to and swallows every message after it, so one hostile-looking log line
-// silently truncates the transcript. mdhtml was bitten by this exact class,
-// where raw HTML in prose was dropped and cut words out of a reply mid-sentence.
 func TestRunHTMLEscapesHostileToolOutput(t *testing.T) {
 	nasty := "</details></main><script>alert(1)</script> & <b>bold</b> ]]> \x00\xff end"
 	page := renderRunHTML("run-1", []llm.Message{
@@ -29,23 +24,18 @@ func TestRunHTMLEscapesHostileToolOutput(t *testing.T) {
 			t.Errorf("page contains unescaped %q — tool output escaped into markup", forbidden)
 		}
 	}
-	// The page carries exactly one <script>: the expand/collapse helper this
-	// renderer writes. A second one means the tool's output opened its own.
 	if n := strings.Count(page, "<script"); n != 1 {
 		t.Errorf("page has %d <script> tags, want 1 (the renderer's own)", n)
 	}
 	if !strings.Contains(page, "&lt;script&gt;") {
 		t.Error("the tool's <script> was not rendered as escaped text")
 	}
-	// The message AFTER the hostile one must still be there: proof the page
-	// structure survived rather than being closed early.
 	if !strings.Contains(page, "after the nasty one") {
 		t.Error("the message following hostile tool output is missing — the page was truncated")
 	}
 	if !strings.Contains(page, "&lt;this&gt;") {
 		t.Error("user text was not escaped")
 	}
-	// One <details> per message, plus none left unbalanced.
 	if o, c := strings.Count(page, "<details"), strings.Count(page, "</details>"); o != c {
 		t.Errorf("unbalanced details: %d open, %d close", o, c)
 	}
@@ -54,8 +44,6 @@ func TestRunHTMLEscapesHostileToolOutput(t *testing.T) {
 	}
 }
 
-// Invalid UTF-8 must not reach the browser: a truncated multibyte sequence
-// makes a page the parser rejects mid-document.
 func TestRunHTMLDropsInvalidUTF8(t *testing.T) {
 	page := renderRunHTML("run-2", []llm.Message{
 		{Role: llm.RoleTool, Name: "cat", Content: "before \xc3\x28 after"},
@@ -68,9 +56,6 @@ func TestRunHTMLDropsInvalidUTF8(t *testing.T) {
 	}
 }
 
-// Reasoning and tool results are folded shut; what a person or the model
-// actually wrote stays open. That default is the entire point — a 455-message
-// run is unreadable with every result expanded.
 func TestRunHTMLFoldsTheBulkShut(t *testing.T) {
 	page := renderRunHTML("run-3", []llm.Message{
 		{Role: llm.RoleAssistant, Content: "the answer", ReasoningContent: "long private thinking"},
@@ -87,7 +72,6 @@ func TestRunHTMLFoldsTheBulkShut(t *testing.T) {
 	}
 }
 
-// A run with no messages still renders a valid page rather than a fragment.
 func TestRunHTMLEmptyRun(t *testing.T) {
 	page := renderRunHTML("run-4", nil, nil)
 	if !strings.Contains(page, "no messages") {
@@ -109,7 +93,6 @@ func TestRunHTMLRejectsTraversalIDs(t *testing.T) {
 	}
 }
 
-// A replay must show what the model was TOLD, folded in where it took effect.
 func TestRunReplayShowsSystemPrompts(t *testing.T) {
 	page := renderRunHTML("run-p", []llm.Message{
 		{Role: llm.RoleUser, Content: "first"},
@@ -124,8 +107,6 @@ func TestRunReplayShowsSystemPrompts(t *testing.T) {
 			t.Errorf("replay missing %q", want)
 		}
 	}
-	// Order matters: the second version must appear after the first message,
-	// or the page claims the model was told something it was not.
 	if strings.Index(page, "original prompt") > strings.Index(page, "edited prompt") {
 		t.Error("prompt versions rendered out of order")
 	}
@@ -134,7 +115,6 @@ func TestRunReplayShowsSystemPrompts(t *testing.T) {
 	}
 }
 
-// Prompt text is escaped like everything else on the dash.
 func TestRunReplayEscapesPromptText(t *testing.T) {
 	page := renderRunHTML("run-e", nil, []runs.PromptRecord{
 		{Seq: 0, Hash: "aaaaaaaabbbb", Text: "<script>x</script>"},

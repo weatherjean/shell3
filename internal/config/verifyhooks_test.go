@@ -10,10 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// A command's function must exist, but health must NOT run it: unlike a gate
-// (a decision function whose whole contract is to return a verdict), a command
-// is an action — running one to check it would post the message, push the
-// commit, or send the mail every time someone typed `shell3 health`.
 func TestVerifyHooksChecksDefinitionWithoutRunning(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
@@ -52,9 +48,6 @@ cmd_publish() {
 	}
 }
 
-// A declaration whose function the shell cannot find is the failure this
-// catches: at runtime a broken command is only a reply nobody reads, and a
-// broken event subscriber is silent entirely.
 func TestVerifyHooksReportsMissingFunction(t *testing.T) {
 	dir := t.TempDir()
 	writeTree(t, dir, nil)
@@ -71,7 +64,6 @@ func TestVerifyHooksReportsMissingFunction(t *testing.T) {
 	}
 }
 
-// Event subscribers are checked the same way and for the same reason.
 func TestVerifyHooksChecksEventSubscribers(t *testing.T) {
 	dir := t.TempDir()
 	writeTree(t, dir, nil)

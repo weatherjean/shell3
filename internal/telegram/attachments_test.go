@@ -66,12 +66,6 @@ func TestAttachmentNote_Empty(t *testing.T) {
 	}
 }
 
-// TestMediaMessage_AttachmentNoteReachesTurnPrompt is the end-to-end
-// must-not-regress check that a message carrying an attachment, with no text
-// of its own, still gets its saved file's path injected into the prompt the
-// model receives. Unit-testing attachmentNote alone (above) proves the
-// function is correct; this proves the wiring that calls it from the
-// composeText closure is still connected.
 func TestMediaMessage_AttachmentNoteReachesTurnPrompt(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})

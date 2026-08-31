@@ -57,7 +57,6 @@ func TestConcurrentTokensAndPrune(t *testing.T) {
 	if !ts.Valid(a) || !ts.Valid(b) {
 		t.Fatal("concurrent tokens should both be valid")
 	}
-	// a expires at t+60m; minting c after that must prune it.
 	now = now.Add(55 * time.Minute)
 	c := ts.Mint()
 	if ts.Valid(a) {

@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// captureBootSuccess runs printBootSuccess with stdout redirected and returns
-// what it printed.
 func captureBootSuccess(t *testing.T) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -29,16 +27,14 @@ func captureBootSuccess(t *testing.T) string {
 	return string(out)
 }
 
-// TestBootSuccessMessage verifies the rendered success message carries the
-// load-bearing pointers for running the bot.
 func TestBootSuccessMessage(t *testing.T) {
 	base := captureBootSuccess(t)
 	for _, want := range []string{
-		"/home/u/.shell3/shell3.sh", // config paths
-		"shell3 ask",                // the local ask mode must be advertised
-		"shell3 telegram",           // how to run the front-end
-		"TELEGRAM_TOKEN",            // where the token lives
-		"docs/deploying.md",         // service management is user-owned, and documented there
+		"/home/u/.shell3/shell3.sh",
+		"shell3 ask",
+		"shell3 telegram",
+		"TELEGRAM_TOKEN",
+		"docs/deploying.md",
 	} {
 		if !strings.Contains(base, want) {
 			t.Errorf("boot success message missing %q", want)

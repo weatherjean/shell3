@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// A session's OnEvent observer sees every emitted event, independently of the
-// Sink. The two are separate: Sink is the front-end's render/audit path,
-// OnEvent is the kit subscriber seam.
 func TestOnEventObservesEmittedEvents(t *testing.T) {
 	var seen []EventKind
 	s := NewSession(SessionOpts{
@@ -21,8 +18,6 @@ func TestOnEventObservesEmittedEvents(t *testing.T) {
 	}
 }
 
-// OnEvent fires even when no Sink is installed — a headless session with no
-// front-end still has observable events.
 func TestOnEventFiresWithoutSink(t *testing.T) {
 	n := 0
 	s := NewSession(SessionOpts{OnEvent: func(Event) { n++ }})
@@ -32,7 +27,6 @@ func TestOnEventFiresWithoutSink(t *testing.T) {
 	}
 }
 
-// A nil OnEvent is the normal case and must not panic.
 func TestOnEventNilIsSafe(t *testing.T) {
 	s := NewSession(SessionOpts{})
 	emitAssistantMessage(s, "hi")

@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// baseYAML + baseAgentMD are the minimal valid config tree every runtime test
-// starts from.
 const baseWiring = `#---
 # shell3:
 #   models:
@@ -29,11 +27,8 @@ func kitAgentDecl(name, body string, opts ...string) string {
 	return out + "#---\n" + name + "_prompt() { cat <<'SHELL3_EOF'\n" + body + "\nSHELL3_EOF\n}\n"
 }
 
-// baseKit is the minimal valid config: wiring plus one agent.
 var baseKit = baseWiring + kitAgentDecl("main", "hi")
 
-// writeTreeFiles writes the given files (path → content, relative to dir,
-// subdirs created) into dir.
 func writeTreeFiles(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	for name, body := range files {
@@ -47,7 +42,6 @@ func writeTreeFiles(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// writeBaseTree writes the minimal valid config tree into dir plus extras.
 func writeBaseTree(t *testing.T, dir string, extra map[string]string) {
 	t.Helper()
 	files := map[string]string{"shell3.sh": baseKit}

@@ -133,6 +133,25 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		if m.BaseURL == "" || m.Model == "" {
 			return fmt.Errorf(wiringLabel+": model %q needs base_url and model", name)
 		}
+		for _, field := range []struct {
+			name  string
+			value int
+		}{
+			{"context_window", m.ContextWindow},
+			{"compact_at", m.CompactAt},
+			{"keep_recent", m.KeepRecent},
+			{"max_tokens", m.MaxTokens},
+		} {
+			if field.value < 0 {
+				return fmt.Errorf(wiringLabel+": model %q %s must not be negative; got %d", name, field.name, field.value)
+			}
+		}
+		if m.PruneAt != nil && *m.PruneAt < 0 {
+			return fmt.Errorf(wiringLabel+": model %q prune_at must not be negative; got %d", name, *m.PruneAt)
+		}
+		if m.ContextWindow > 0 && m.CompactAt > m.ContextWindow {
+			return fmt.Errorf(wiringLabel+": model %q compact_at (%d) exceeds context_window (%d)", name, m.CompactAt, m.ContextWindow)
+		}
 		// Defaults to compact_at*0.6, so the cheap tier is on wherever
 		// compaction is; at or above compact_at it clamps to 0 rather than
 		// firing after it. Both tiers key off compact_at, so a prune_at
@@ -163,7 +182,11 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		})
 	}
 	if tc := f.Telegram; tc != nil {
+		if tc.MaxConcurrentTurns < 0 {
+			return fmt.Errorf(wiringLabel+": telegram.max_concurrent_turns must not be negative; got %d", tc.MaxConcurrentTurns)
+		}
 		chats := make([]ChatConfig, 0, len(tc.Chats))
+		seenChat := map[string]bool{}
 		for _, ch := range tc.Chats {
 			id := strings.TrimSpace(ch.ID)
 			if id == "" {
@@ -174,6 +197,10 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 				// never match a room, so it would silently do nothing.
 				return fmt.Errorf(wiringLabel+": telegram.chats id %q is not a number", id)
 			}
+			if seenChat[id] {
+				return fmt.Errorf(wiringLabel+": telegram.chats id %q is declared more than once", id)
+			}
+			seenChat[id] = true
 			chats = append(chats, ChatConfig{ID: id, UseDescription: ch.UseDescription, Context: ch.Context})
 		}
 		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir,
@@ -190,12 +217,18 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		if len(s.Allow) > 0 && len(s.Deny) > 0 {
 			return fmt.Errorf(wiringLabel+": mcp server %q: set at most one of allow/deny", name)
 		}
+		if s.Timeout < 0 {
+			return fmt.Errorf(wiringLabel+": mcp server %q timeout must not be negative; got %d", name, s.Timeout)
+		}
 		c.mcpServers = append(c.mcpServers, MCPServer{
 			Name: name, Command: s.Command, Env: s.Env, URL: s.URL,
 			Headers: s.Headers, TimeoutSecs: s.Timeout, Allow: s.Allow, Deny: s.Deny,
 		})
 	}
 	if b := f.Background; b != nil {
+		if b.MaxConcurrent < 0 {
+			return fmt.Errorf(wiringLabel+": background.max_concurrent must not be negative; got %d", b.MaxConcurrent)
+		}
 		c.BackgroundMaxConcurrent = b.MaxConcurrent
 	}
 	// Defaults to 30; an explicit 0 means keep forever, so the default cannot

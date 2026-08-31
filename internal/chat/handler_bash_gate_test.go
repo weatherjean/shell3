@@ -25,7 +25,6 @@ func TestBashHandlerBlocks(t *testing.T) {
 	}
 }
 
-// reviewVerdict is the gate stub every review test shares.
 func reviewVerdict(reason string) func(context.Context, string, string, string, bool) ToolCallVerdict {
 	return func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionReview, Reason: reason}
@@ -42,14 +41,13 @@ func TestBashHandlerReviewNoReviewerBlocks(t *testing.T) {
 	}
 }
 
-// Reviewer approves: the ORIGINAL command runs unchanged.
 func TestBashHandlerReviewApproved(t *testing.T) {
-	var sawCmd, sawReason string
+	var saw ToolReviewRequest
 	cfg := ToolConfig{
 		WorkDir:     t.TempDir(),
 		RunToolCall: reviewVerdict("flagged: script execution"),
-		ReviewToolCall: func(ctx context.Context, name, command, reason string) (bool, string) {
-			sawCmd, sawReason = command, reason
+		ReviewToolCall: func(ctx context.Context, req ToolReviewRequest) (bool, string) {
+			saw = req
 			return true, ""
 		},
 	}
@@ -57,31 +55,31 @@ func TestBashHandlerReviewApproved(t *testing.T) {
 	if !strings.Contains(out, "reviewed-ok") {
 		t.Fatalf("approved review should run the command, got %q", out)
 	}
-	if sawCmd != "echo reviewed-ok" || sawReason != "flagged: script execution" {
-		t.Fatalf("reviewer saw cmd=%q reason=%q", sawCmd, sawReason)
+	if saw.Command != "echo reviewed-ok" || saw.Reason != "flagged: script execution" || saw.WorkDir != cfg.WorkDir {
+		t.Fatalf("reviewer saw request=%+v", saw)
 	}
 }
 
 // Reviewer denies: blocked, deny message surfaces to the model.
 func TestBashHandlerReviewDenied(t *testing.T) {
 	cfg := ToolConfig{
-		RunToolCall: reviewVerdict("risky"),
-		ReviewToolCall: func(ctx context.Context, name, command, reason string) (bool, string) {
+		Headless:       true,
+		HasParentAgent: true,
+		RunToolCall:    reviewVerdict("risky"),
+		ReviewToolCall: func(ctx context.Context, req ToolReviewRequest) (bool, string) {
 			return false, "reviewer denied: wipes a disk"
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("dd if=/dev/zero"), cfg)
-	if !strings.Contains(out, "reviewer denied: wipes a disk") {
+	if !strings.Contains(out, "reviewer denied: wipes a disk") || !strings.Contains(out, "whether this action is necessary") {
 		t.Fatalf("want the reviewer's deny message, got %q", out)
 	}
 }
 
-// Review is bash-only in v1: a review verdict on a non-bash tool fails
-// closed with a named reason, like command/argv verdicts do.
 func TestNonBashToolReviewFailsClosed(t *testing.T) {
 	cfg := ToolConfig{
 		RunToolCall: reviewVerdict("hm"),
-		ReviewToolCall: func(ctx context.Context, name, command, reason string) (bool, string) {
+		ReviewToolCall: func(ctx context.Context, req ToolReviewRequest) (bool, string) {
 			return true, "" // even an approving reviewer must not unlock non-bash
 		},
 	}
@@ -110,8 +108,6 @@ func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 	cfg := ToolConfig{
 		WorkDir: dir,
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
-			// argv: bash -c 'echo safe' bash '; touch <sentinel>'
-			// $0=bash, $1="; touch <sentinel>" — $1 must NOT be executed.
 			return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "echo safe", "bash", "; touch " + sentinel}}
 		},
 	}

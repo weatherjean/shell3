@@ -44,8 +44,6 @@ SHELL3_EOF
 	}
 }
 
-// A command needs a description: it is registered into the front-end's command
-// menu, where an undescribed verb is unusable.
 func TestParseCommandWithoutDescriptionFails(t *testing.T) {
 	src := `#---
 # command: standup
@@ -67,7 +65,6 @@ SHELL3_EOF
 	}
 }
 
-// Two commands of the same name is a typo, not a redefinition.
 func TestParseDuplicateCommandFails(t *testing.T) {
 	src := `#---
 # command: standup
@@ -130,8 +127,6 @@ ev_log() { cat >> /tmp/x; }
 	}
 }
 
-// on: is mandatory. assistant_token fires per streamed token, so an
-// unfiltered subscriber would fork a shell thousands of times per turn.
 func TestParseEventWithoutOnFails(t *testing.T) {
 	src := `#---
 # agent: main
@@ -153,8 +148,6 @@ ev_log() { cat; }
 	}
 }
 
-// An unknown event kind is a typo that would otherwise present as a
-// subscriber that silently never fires.
 func TestParseEventUnknownKindFails(t *testing.T) {
 	src := `#---
 # agent: main
@@ -177,8 +170,6 @@ ev_log() { cat; }
 	}
 }
 
-// event: names agents, so a name the kit does not declare is a load error —
-// the same rule gate:/note: already follow.
 func TestParseEventUnknownAgentFails(t *testing.T) {
 	src := `#---
 # agent: main
@@ -201,9 +192,6 @@ ev_log() { cat; }
 	}
 }
 
-// A command named after a built-in is a load error, not a silent shadow: the
-// built-in always wins at dispatch, so the declaration would never fire and
-// the author would have no way to see why.
 func TestParseCommandShadowingBuiltinFails(t *testing.T) {
 	src := `#---
 # command: stop

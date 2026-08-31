@@ -21,6 +21,11 @@ type Message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	// OperatorContent is the human-authored portion of a root-session user
+	// message. It is ephemeral provenance for contextual review: adapters and
+	// persisted transcripts must never serialize it. A generated reminder may
+	// be appended to Content without gaining operator authority.
+	OperatorContent string `json:"-"`
 	// ReasoningContent holds the non-standard chain-of-thought text the openai
 	// adapter populates from streaming and echoes back on the next turn:
 	// Moonshot 400s when thinking mode is on and an assistant tool-call message

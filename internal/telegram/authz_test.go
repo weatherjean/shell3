@@ -11,9 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
-// An existing single-DM config never names allow_from. It must keep working:
-// in a direct chat the chat id IS the user id, so the owner is allowed by
-// default and nobody else is.
 func TestAllowlistDefaultsToChatOwner(t *testing.T) {
 	a, err := newSenderAllowlist(42, nil)
 	if err != nil {
@@ -45,9 +42,6 @@ func TestAllowlistExplicitReplacesDefault(t *testing.T) {
 	}
 }
 
-// An unattributable message (a channel post, or a transport that cannot say
-// who sent it) is denied: there is nobody to hold responsible for a turn that
-// runs an unrestricted shell.
 func TestAllowlistDeniesZeroSender(t *testing.T) {
 	a, _ := newSenderAllowlist(42, []string{"42"})
 	if a.allows(0) {
@@ -59,9 +53,6 @@ func TestAllowlistDeniesZeroSender(t *testing.T) {
 	}
 }
 
-// A malformed allow_from entry fails loudly at startup. Silently skipping it
-// would narrow who can drive the bot without saying so — or, read the other
-// way, leave an operator believing they granted access they did not.
 func TestAllowlistRejectsNonNumeric(t *testing.T) {
 	_, err := newSenderAllowlist(42, []string{"@someuser"})
 	if err == nil || !strings.Contains(err.Error(), "not a numeric user id") {
@@ -79,13 +70,11 @@ func TestUnauthorizedSenderCannotRunCommands(t *testing.T) {
 	rt := storeRuntimeClient(t, client)
 	b := newBot(t, fc, rt)
 
-	// /status from a stranger: no reply, no work.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 99, ID: "1", Text: "/status"})
 	if n := len(fc.sent); n != 0 {
 		t.Fatalf("an unauthorized /status produced %d message(s): %v", n, fc.sent)
 	}
 
-	// And a plain message from the same stranger starts no turn.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 99, ID: "2", Text: "hello"})
 	if client.CallCount() != 0 {
 		t.Fatalf("an unauthorized message started %d model call(s)", client.CallCount())

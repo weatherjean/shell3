@@ -32,7 +32,6 @@ const minWiring = `#---
 #---
 `
 
-// minKit is the smallest valid shell3.sh: wiring plus one agent.
 const minKit = minWiring + `
 #---
 # agent: main
@@ -45,8 +44,6 @@ EOF
 }
 `
 
-// writeTree writes a minimal valid config tree plus the given extra files
-// (path → content, paths relative to dir, subdirs created).
 func writeTree(t *testing.T, dir string, extra map[string]string) {
 	t.Helper()
 	if _, ok := extra[kit.FileName]; !ok {
@@ -57,7 +54,6 @@ func writeTree(t *testing.T, dir string, extra map[string]string) {
 	}
 }
 
-// mustLoad writes a minimal tree (plus extras) and loads it. Fatal on error.
 func mustLoad(t *testing.T, extra map[string]string) *LoadedConfig {
 	t.Helper()
 	dir := t.TempDir()
@@ -69,13 +65,10 @@ func mustLoad(t *testing.T, extra map[string]string) *LoadedConfig {
 	return c
 }
 
-// kitWith renders a kit declaring main + explorer, plus the given gate/note
-// functions. gates and notes map a shell function name to its body; each is
-// declared for the agents named in its `for` list.
 type hookDecl struct {
-	fn    string   // function name
-	body  string   // function body (shell statements)
-	forAg []string // agents the declaration governs
+	fn    string
+	body  string
+	forAg []string
 }
 
 func kitWith(gates, notes []hookDecl) string {

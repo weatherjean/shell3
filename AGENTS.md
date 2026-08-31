@@ -93,6 +93,15 @@ change. `docs/internals.md` contains the full detail.
 - Gate verdict precedence is block, review, argv, command. Rewrites and review
   apply only to bash tools. Notes may rewrite output but cannot refuse a call.
   Events only observe and must never block a turn.
+- Contextual review trusts only ephemeral human-origin content captured in an
+  interactive root session. Generated RoleUser carriers, subagent prompts, and
+  cron input are untrusted authorization evidence. Critical risk always denies;
+  high risk requires approval of the exact action and side effects. The public
+  gate verdict remains `{"review": true}` with no ask mode.
+- Every subagent gate block first requires the agent to decide whether the action is
+  necessary, use a policy-permitted safer route or finish partial work when it
+  can, and escalate only a meaningful-completion blocker. That handoff names the
+  exact action, necessity, reason, alternatives, and operator decision needed.
 - The shipped gate is a speed bump, not a security boundary. Hard isolation is
   an operating-system concern. Preserve the distinction between hard `block`
   refusals and `route` refusals that name the sanctioned alternative.

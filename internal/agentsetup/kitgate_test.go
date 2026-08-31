@@ -11,12 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 )
 
-// A kit-declared `gate:` must reach the tool-call gate execution path
-// reaches. Testing the shell function directly proves the RULES; only going
-// through RunToolCall proves the WIRING — that the declaration was parsed,
-// installed onto the LoadedConfig, and is actually consulted before a tool
-// runs. Without this, a gate could parse cleanly, pass every rule test, and
-// govern nothing.
 const gateKit = `#---
 # shell3:
 #   models:
@@ -93,8 +87,6 @@ func TestKitGateGovernsToolCalls(t *testing.T) {
 		t.Fatal("a kit declaring gate: installed no tool-call hook")
 	}
 
-	// Both named agents are governed by the one function: a subagent left
-	// ungated is a way around every rule the main agent has.
 	for _, agent := range []string{"main", "helper"} {
 		v := lc.RunToolCall(context.Background(), agent, "bash", "echo forbidden", "{}", true)
 		if v.Action != config.ActionBlock {

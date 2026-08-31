@@ -33,10 +33,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestConsoleDrivesBotLoop wires the REAL Bot loop over the console transport
-// and drives it like a script: a plain stdin line runs a turn whose reply prints
-// to stdout with the "[#id ↩#reply]" framing, a "@<id>" line continues that
-// thread (no can't-continue notice), and EOF cleanly stops Bot.Run.
 func TestConsoleDrivesBotLoop(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "hello from agent")
 	pr, pw := io.Pipe()
@@ -49,8 +45,6 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 	done := make(chan struct{})
 	go func() { b.Run(ctx); close(done) }()
 
-	// Fresh message → a threaded reply "[#2 ↩#1] hello from agent" (inbound "hi"
-	// is id 1, the reply is id 2).
 	if _, err := io.WriteString(pw, "hi\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +53,6 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 			strings.Contains(out.String(), "↩#1")
 	})
 
-	// Reply to the bot's message #2 → the thread resumes (a second turn runs),
-	// never the "can't continue" notice.
 	if _, err := io.WriteString(pw, "@2 more please\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +63,6 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 		t.Fatalf("thread continuation hit the can't-continue notice:\n%s", out.String())
 	}
 
-	// EOF stops the loop cleanly.
 	_ = pw.Close()
 	select {
 	case <-done:
@@ -80,9 +71,6 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 	}
 }
 
-// TestConsoleCompletionPosts exercises the completion-post path over the
-// console transport: a cron completion posts "⏰ <job>: <result>" to stdout,
-// a non-cron completion posts with the 🔔 prefix.
 func TestConsoleCompletionPosts(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "unused")
 	out := &syncBuffer{}

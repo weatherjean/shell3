@@ -52,8 +52,6 @@ func TestParseBookmarksFixture(t *testing.T) {
 	}
 }
 
-// TestFixtureIsValidBash is the point of choosing .sh: the whole kit is
-// checkable with one command, no extraction and no line remapping.
 func TestFixtureIsValidBash(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

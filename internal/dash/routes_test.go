@@ -15,8 +15,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// startFullServer wires the files explorer and cron sources so the new routes
-// have something to serve.
 func startFullServer(t *testing.T, root, configDir string, statuses []cron.JobStatus) *dash.Server {
 	t.Helper()
 	s := dash.New(0, dash.Sources{
@@ -44,7 +42,6 @@ func TestFilesRoutes(t *testing.T) {
 	base := "http://" + s.Addr()
 	tok := s.Mint()
 
-	// Listing needs a token.
 	if code, _ := get(t, base+"/files"); code != http.StatusForbidden {
 		t.Fatalf("/files without token: %d, want 403", code)
 	}
@@ -85,7 +82,6 @@ func TestCronDetailRoute(t *testing.T) {
 	if !contains(body, "nightly") || !contains(body, "sync things") {
 		t.Errorf("cron detail missing fields: %s", body)
 	}
-	// Unknown job 404s.
 	if code, _ := get(t, base+"/cron?name=nope&t="+tok); code != http.StatusNotFound {
 		t.Errorf("unknown cron: %d, want 404", code)
 	}
@@ -93,9 +89,6 @@ func TestCronDetailRoute(t *testing.T) {
 
 func TestJobLogRoute(t *testing.T) {
 	root := t.TempDir()
-	// Derive the path from the store that WRITES it rather than hand-building
-	// a layout: an invented fixture is what let the dash link 404 against
-	// every real install while this test stayed green.
 	st, err := runs.Open(root)
 	if err != nil {
 		t.Fatal(err)

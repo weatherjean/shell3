@@ -28,10 +28,6 @@ func captureKey(t *testing.T) string {
 	return ""
 }
 
-// Captures real MiniMax streams into testdata/ as one raw chunk JSON per line,
-// so the partitioner is developed and regression-tested against traffic that
-// actually happened rather than against assumptions about the format.
-// Run: go test -tags probe ./internal/adapter/openai/ -run TestCaptureStreams
 func TestCaptureStreams(t *testing.T) {
 	cl := openai.NewClient(
 		option.WithAPIKey(captureKey(t)),

@@ -25,12 +25,6 @@ func TestToolDefs_Gates(t *testing.T) {
 	}
 }
 
-// The built-in names live in two packages that cannot reference each other:
-// kit.Builtins is what an agent may write in `use:` (kit imports nothing of
-// ours), and the builtins table here maps those names to schemas. If they
-// drift, a name accepted by `use:` silently yields no tool — the agent is
-// told it has a capability the model never receives. Nothing else catches
-// that, so this test is the seam.
 func TestBuiltinsTableMatchesKitBuiltins(t *testing.T) {
 	inTable := make([]string, 0, len(builtins))
 	for _, b := range builtins {
@@ -46,9 +40,6 @@ func TestBuiltinsTableMatchesKitBuiltins(t *testing.T) {
 	}
 }
 
-// Every name in the table must render a def, and the order must be the
-// table's regardless of the order the caller passes — a tool list that
-// reshuffles between turns invalidates the prompt cache.
 func TestToolDefsIsOrderStable(t *testing.T) {
 	all := slices.Clone(kit.Builtins)
 	forward := ToolDefs(all)
@@ -66,9 +57,6 @@ func TestToolDefsIsOrderStable(t *testing.T) {
 	}
 }
 
-// read_media was a built-in reaching a hard-coded loader; perception is now
-// a tool an agent declares in its own kit, not something shipped in the
-// binary's tool table.
 func TestReadMediaIsNotAToolAnyMore(t *testing.T) {
 	for _, b := range builtins {
 		if b.Def.Name == "read_media" {

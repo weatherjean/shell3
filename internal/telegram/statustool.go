@@ -96,10 +96,11 @@ func (b *Bot) roomsStatus() string {
 		if sess == nil {
 			continue // enrolled but no live conversation: nothing to collide with
 		}
-		r := row{chatID: c.chatID, busy: c.busy(), sessID: sess.ID()}
-		meta := b.chatMetaFor(c.chatID)
+		chatID := c.chatIDValue()
+		r := row{chatID: chatID, busy: c.busy(), sessID: sess.ID()}
+		meta := b.chatMetaFor(chatID)
 		r.title = meta.title
-		r.brief = briefState(meta, c.isGroupRoom(), b.settingsFor(c.chatID).useDescription())
+		r.brief = briefState(meta, c.isGroupRoom(), b.settingsFor(chatID).useDescription())
 		r.jobs = runningJobs(sess)
 		rows = append(rows, r)
 	}

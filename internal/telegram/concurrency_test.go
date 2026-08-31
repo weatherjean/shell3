@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// Rooms are independent conversations, so a slow turn in one must not hold up
-// another. This is the whole point of a slot per room.
 func TestRoomsRunTurnsConcurrently(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -19,9 +17,6 @@ func TestRoomsRunTurnsConcurrently(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Hold both rooms' turns open by taking their slots directly: the fake
-	// model answers instantly, so a real turn would finish before the second
-	// one started and prove nothing.
 	a, second := b.conv(-100), b.conv(-200)
 	a.mu.Lock()
 	_, cancelA, okA := a.takeSlotLocked(ctx)
@@ -51,7 +46,6 @@ func TestCapQueuesAndDrains(t *testing.T) {
 	b.SetMaxConcurrentTurns(1)
 	ctx := context.Background()
 
-	// Room A holds the only slot.
 	a := b.conv(-100)
 	a.mu.Lock()
 	_, cancelA, ok := a.takeSlotLocked(ctx)
@@ -60,7 +54,6 @@ func TestCapQueuesAndDrains(t *testing.T) {
 		t.Fatal("the first room must get the slot")
 	}
 
-	// Room B's message cannot run — it must queue, not be dropped.
 	b.handleMsg(ctx, Msg{ChatID: -200, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot hello"})
 	waitFor(t, func() bool {
 		c := b.peekConv(-200)
@@ -72,7 +65,6 @@ func TestCapQueuesAndDrains(t *testing.T) {
 		return len(c.mailQueue) == 1
 	})
 
-	// Freeing A's slot is B's only possible waker.
 	a.releaseSlot(cancelA)
 	b.startNextWorkAll(ctx, a)
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
@@ -143,9 +135,6 @@ func TestReloadRefusedWhileAnotherRoomIsBusy(t *testing.T) {
 	b.endReload()
 }
 
-// A command carrying another bot's @suffix is not ours. With privacy mode off
-// we are delivered it anyway, and routing on the bare verb would let another
-// bot's users stop our turns.
 func TestCommandForAnotherBotIsIgnored(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -171,8 +160,6 @@ func TestCommandForAnotherBotIsIgnored(t *testing.T) {
 	}
 }
 
-// Ordinary group chatter must not leave a phantom room behind: the registry
-// feeds the inbox, the dash and the status tool.
 func TestUnaddressedChatterCreatesNoRoom(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	if err := b.SetAllowFrom([]string{"7"}); err != nil {
@@ -184,9 +171,6 @@ func TestUnaddressedChatterCreatesNoRoom(t *testing.T) {
 	}
 }
 
-// /ask is the group entry point that works with Telegram privacy mode ON:
-// a privacy-mode bot is never delivered a plain @mention, but "/ask@bot …"
-// and replies to its own messages always arrive.
 func TestAskOpensAConversationInAGroup(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -206,14 +190,11 @@ func TestAskOpensAConversationInAGroup(t *testing.T) {
 	if b.conv(-100).session() == nil {
 		t.Fatal("/ask must open that room's conversation")
 	}
-	// And the reply is now something the user can reply TO, which is the
-	// trigger that continues the thread without another /ask.
 	if !b.conv(-100).wasSent(r.msgID) {
 		t.Fatal("the answer must be recorded as ours, or replying to it won't count as addressing the bot")
 	}
 }
 
-// /ask with nothing after it explains itself rather than starting an empty turn.
 func TestAskWithoutTextExplainsItself(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -227,8 +208,6 @@ func TestAskWithoutTextExplainsItself(t *testing.T) {
 	}
 }
 
-// /help has to answer the two things an operator forgets: each chat is its
-// own conversation, and why an @mention can look ignored in a group.
 func TestHelpExplainsRoomsAndTheMentionCaveat(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -244,10 +223,6 @@ func TestHelpExplainsRoomsAndTheMentionCaveat(t *testing.T) {
 	}
 }
 
-// The help text has to say the TRUE reason a description can be missing:
-// Telegram serves it only to a bot that can see group info. Telling the user
-// to convert the group instead sends them down an irreversible path for a
-// problem a promotion fixes.
 func TestHelpNamesTheAdminRequirementForDescriptions(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))

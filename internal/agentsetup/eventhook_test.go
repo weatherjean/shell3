@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// Delivery is off the caller's critical path: Post returns immediately and the
-// worker runs the hook afterwards. A turn must never wait on an observer.
 func TestEventDispatcherDeliversAsynchronously(t *testing.T) {
 	var mu sync.Mutex
 	var got []string
@@ -46,7 +44,7 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 	var got []string
 	d := newEventDispatcher(2, func(_ context.Context, _, kind string, _ []byte) error {
 		if kind == "first" {
-			<-release // hold the worker so the queue fills behind it
+			<-release
 		}
 		mu.Lock()
 		got = append(got, kind)
@@ -56,8 +54,6 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 	defer d.Close()
 
 	d.Post("main", "first", nil) // claimed by the worker, blocks on release
-	// Give the worker a moment to claim "first" so the queue is genuinely
-	// empty behind it before we fill it.
 	for i := 0; i < 100; i++ {
 		if d.Dropped() == 0 && len(d.q) == 0 {
 			break
@@ -66,7 +62,7 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 	}
 	d.Post("main", "a", nil)
 	d.Post("main", "b", nil)
-	d.Post("main", "c", nil) // queue full: drops "a"
+	d.Post("main", "c", nil)
 	close(release)
 
 	deadline := time.After(2 * time.Second)
@@ -95,12 +91,10 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 	}
 }
 
-// Post on a closed dispatcher is a no-op, not a panic: a session can emit a
-// final event while the runtime is tearing down.
 func TestEventDispatcherPostAfterCloseIsNoop(t *testing.T) {
 	d := newEventDispatcher(1, func(context.Context, string, string, []byte) error { return nil }, nil)
 	d.Close()
-	d.Close() // idempotent
+	d.Close()
 	d.Post("main", "turn_done", nil)
 }
 
@@ -148,7 +142,7 @@ func TestEventDispatcherCloseDrainsQueue(t *testing.T) {
 // forever. Close gives the backlog a grace budget and then gives up.
 func TestEventDispatcherCloseIsBounded(t *testing.T) {
 	d := newEventDispatcher(8, func(ctx context.Context, _, _ string, _ []byte) error {
-		<-ctx.Done() // never finishes on its own
+		<-ctx.Done()
 		return ctx.Err()
 	}, nil)
 	for i := 0; i < 8; i++ {

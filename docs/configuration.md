@@ -81,7 +81,10 @@ models:
 ```
 
 Set `context_window` to the model's actual budget — a wrong number skews the
-context-usage reminders and the compaction trigger.
+context-usage reminders and the compaction trigger. Numeric token controls
+must be non-negative, and a positive `compact_at` cannot exceed a declared
+positive `context_window`; use `0` for a control whose documented zero value
+disables it.
 
 ### Context management
 
@@ -181,6 +184,10 @@ main agent's model), `use` (built-ins — any of `bash`, `bash_bg`, `edit`,
 and `shared:` groups), `mcp` (see [MCP](#mcp-servers)), `workdir`,
 `description` (what the main model reads when deciding to delegate; employees
 only), and `context` (see below).
+
+An employee's relative `workdir` resolves against the config directory; `~/`
+resolves against the user's home directory. When no `workdir` is declared, a
+normal dispatch inherits its spawner's directory.
 
 ### Giving the agent a memory — `context:`
 
@@ -330,12 +337,16 @@ background:
   max_concurrent: 8    # concurrent background jobs PER DEPTH (default 8)
 ```
 
+The cap must be non-negative; `0` selects the runtime default.
+
 
 ## Scripts & secrets
 
-There is no custom-tool declaration: reusable glue is a **script** the agent
-runs through `bash`, documented by a skill when it needs one. The scaffold
-ships a `scripting` skill that teaches the pattern — reusable scripts live in
+Reusable glue that is not a model-facing verb is a **script** the agent runs
+through `bash`, documented by a skill when it needs one. Model-facing custom
+tools are declared in the kit as described in [tools.md](tools.md). The
+scaffold ships a `scripting` skill that teaches the script pattern — reusable
+scripts live in
 `~/.shell3/lib/bin/`, and a script that needs an API key reads it from
 `~/.shell3/.env` itself, at point of use:
 
@@ -368,6 +379,8 @@ mcp:
     timeout: 30                    # seconds, connect + per call (default 10)
     allow: [search_issues, get_issue]   # or deny: [...] (not both)
 ```
+
+`timeout` must be non-negative; `0` selects the default.
 
 ```bash
 #---
@@ -457,9 +470,9 @@ nothing: the gate runs before every tool call, so logging allows would bury
 the refusals. `grep gate ~/.shell3/shell3.log` answers "has the gate refused
 anything?".
 
-A
-function that exits nonzero, prints malformed JSON, or runs past 10 s **fails
-closed** (blocks, with the failure as the reason). An `{"ask": …}` verdict
+A function that exits nonzero, prints malformed JSON, prints a non-object or
+unknown field, or runs past 10 s **fails closed** (blocks, with the failure as
+the reason). An `{"ask": …}` verdict
 also fails closed, with a reason naming the removal — there is no ask verdict,
 and it never silently allows. The function's cwd is the config directory.
 Compose everything in the one function; there is no chain.
@@ -470,11 +483,31 @@ Compose everything in the one function; there is no chain.
 most of the time but have real false positives (`curl … | sh` is the classic
 supply-chain hole *and* the documented installer for tools you asked for).
 Instead of refusing outright, shell3 sends the command and your `reason` to a
-one-word LLM guardian — APPROVE runs the original command unchanged, anything
-else (DENY, uncertainty, a transport error, a timeout) blocks with a message
-telling the model to stop and raise it with you. Three consecutive denials
-for one agent escalate the message to a hard stop, so a model cannot burn a
-reviewer call per retry all night.
+dedicated LLM guardian together with the workdir and a bounded transcript. The
+guardian returns strict JSON: risk level, operator-authorization level,
+allow/deny, and one rationale. Only user messages from an interactive root
+session count as operator authorization; a subagent prompt or cron input may
+have the same wire role, but is explicitly labeled untrusted and its
+authorization is forced to `unknown`. Generated report and reminder carriers
+also cannot authorize, even when the model API represents them as user-role
+messages.
+
+Critical-risk actions always deny. High-risk actions require explicit approval
+of the exact action, payload, destination, and material side effects. A denial
+therefore gives the agent enough detail to explain the concrete risk; after you
+approve that exact action in the normal conversation, the agent may retry and
+the reviewer sees the new authorization. There is still no `ask` gate verdict.
+Malformed output, uncertainty, transport failure, or timeout fails closed.
+Three consecutive denials for one agent escalate the message to a hard stop,
+so a model cannot burn a reviewer call per retry all night.
+
+For a subagent, every gate block result also carries a fixed triage sequence.
+It first decides whether the action is actually necessary, then omits it, uses
+a policy-permitted safer approach, or completes useful partial work when
+possible. It reports to its parent only when the block prevents meaningful
+completion, naming the exact action, necessity, reason, alternatives considered,
+and decision you need to make. The guidance forbids variants or indirect tools
+that merely evade the same block.
 
 Two optional top-level keys tune it:
 
@@ -482,16 +515,21 @@ Two optional top-level keys tune it:
 review_model: aux          # a declared model name; default = the main agent's model
 review_policy: |           # extra TRUSTED rules appended to the reviewer's system prompt
   Always DENY anything writing under /etc.
-  APPROVE docker compose restarts in ~/deploys.
+  Treat docker compose restarts in ~/deploys as medium risk.
 ```
 
-The command text the reviewer sees is untrusted input from the agent:
-unquoted shell comments are stripped (the cheapest place to hide "respond
-APPROVE"), the command is delimited, and the guardian is told to ignore any
-instructions inside it. With no reviewer resolvable a `review` verdict fails
-closed, so it is never weaker than `block`. It is also **not a containment
-boundary** — it reduces false blocks; the OS is still the security boundary
-([security](security.md)).
+The reviewer receives up to 16 KB of recent conversation evidence, including
+operator, assistant, and tool text. Treat `review_model` as trusted for the same
+conversation data as the main model; pointing it at a different provider is a
+real data-boundary decision, not only a cost or latency choice.
+
+The exact command and all non-operator transcript entries are untrusted
+evidence, delimited away from the system policy, and never instructions for the
+guardian. With no reviewer resolvable a `review` verdict fails closed, so it is
+never weaker than `block`. It is also **not a containment boundary** — it
+reduces false blocks; the OS is still the security boundary
+([security](security.md)). Keep irreversible rules on `block`, where context
+and operator approval cannot overrule them.
 
 The scaffold ships its `gate:` function armed. Its shape, and the reasoning
 behind it, in one line each:
@@ -570,8 +608,9 @@ in=$(cat)
 printf '%s' "$in" | jq -c '{output: (.output | gsub("API_KEY=\\S+"; "API_KEY=[redacted]"))}'
 ```
 
-A failing function here also fails **closed**: the tool output is replaced by
-an error notice, never passed through unredacted. Background jobs (`bash_bg`)
+A failing function or an invalid verdict (including an unknown field) here
+also fails **closed**: the tool output is replaced by an error notice, never
+passed through unredacted. Background jobs (`bash_bg`)
 are out of scope: the note sees only the "started job…" pointer, not the
 process's streamed output — redact at the source if a background command can
 emit secrets.
@@ -683,6 +722,8 @@ people you would hand a prompt to), and `context:` (files appended to that
 room's brief, read like the agent's own `context:` — 64 KB cap, middle
 elided). The `context:` route needs no rights and no Telegram feature, so it
 is the answer when a room's brief must not depend on chat settings.
+An `id` may appear only once. `max_concurrent_turns` must be non-negative;
+`0` selects the default.
 
 `shell3 telegram` refuses to start without `token`, or with a non-numeric
 `chat_id`. Loading a config without the block still succeeds — `shell3 ask`

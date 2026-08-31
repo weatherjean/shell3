@@ -182,9 +182,10 @@ func decodeBlock(b block) (decl, error) {
 		{declTool, y.Tool}, {declTest, y.Test},
 		{declCommand, y.Command}, {declCron, y.Cron},
 	}
-	// On a cron block, agent: and tool: name the job's target rather than
-	// opening an agent scope or declaring a verb, so they are skipped in the
-	// kind scan below. Only those two — a cron block that also names
+	// On a cron block, agent: names the job's target; tool: is a removed target
+	// spelling retained for a directed error. Neither opens an agent scope or
+	// declares a verb, so they are skipped in the kind scan. Only those two —
+	// a cron block that also names
 	// skill:/command:/gate: is genuinely ambiguous and must still be refused.
 	isCron := y.Cron != ""
 	if isCron {

@@ -12,7 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// A room is one conversation, and two chats are two rooms.
 func TestConvIsPerChat(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	a := b.conv(111)
@@ -30,8 +29,6 @@ func TestConvIsPerChat(t *testing.T) {
 	}
 }
 
-// The two gates, end to end on the update loop: a stranger enrols nothing,
-// and group chatter that is not aimed at the bot starts no turn.
 func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -53,7 +50,6 @@ func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
 		t.Fatalf("unaddressed group chatter started a turn (%d posts)", got)
 	}
 
-	// Addressed: this one runs.
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "3", Text: "@mybot deploy"})
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
 	if b.conv(-100).session() == nil {
@@ -61,8 +57,6 @@ func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
 	}
 }
 
-// Two rooms hold two conversations: different sessions, and a reply lands in
-// the room it was asked in.
 func TestTwoRoomsHoldSeparateSessions(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -114,8 +108,6 @@ func TestRoomSessionsPersistPerSurface(t *testing.T) {
 	}
 }
 
-// A completion whose owning room is not live yet — every completion recovered
-// at boot — still finds its room through the runs store.
 func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -140,8 +132,6 @@ func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
 	}
 }
 
-// The inbox is a whole-bot view now: it must name the room a message is
-// waiting in, or a queued message in a quiet room is invisible.
 func TestInboxNamesRooms(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	c := b.conv(-100)
@@ -168,8 +158,6 @@ func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
 	rt := mustRuntime(t)
 
-	// A room whose conversation exists in the store but not in memory: what
-	// every room looks like at boot.
 	seed, err := rt.Session(shell3.SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -187,8 +175,6 @@ func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 	}
 }
 
-// An owner whose room has moved on (a /new since the job started) is an
-// orphan: it belongs in the home chat, not grafted onto the new conversation.
 func TestWakeOwnerRejectsAStaleOwner(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	if b.WakeOwner(shell3.Mail{OwnerID: "a-session-nobody-owns", Note: "note"}) {
@@ -196,8 +182,6 @@ func TestWakeOwnerRejectsAStaleOwner(t *testing.T) {
 	}
 }
 
-// Converting a group to a supergroup changes its chat id. The conversation
-// must follow, or it is stranded under an id nobody can post to again.
 func TestRoomSurvivesSupergroupMigration(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -209,7 +193,6 @@ func TestRoomSurvivesSupergroupMigration(t *testing.T) {
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
 	sessID := b.conv(-100).session().ID()
 
-	// Telegram's announcement: a service message, no sender.
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "group", MigratedTo: -1009999})
 
 	if b.peekConv(-100) != nil {

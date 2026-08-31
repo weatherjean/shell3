@@ -12,10 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 )
 
-// fakeServer builds an in-process SDK server exposing the given tools, each
-// returning fixed content. Returned dial connects a fresh in-memory session
-// per call (so renewal tests get a live server again) and records the server
-// sessions it opened.
 type fakeServer struct {
 	srv      *sdk.Server
 	mu       sync.Mutex
@@ -61,7 +57,6 @@ func (f *fakeServer) dial(ctx context.Context, _ config.MCPServer) (sdk.Transpor
 	return ct, nil
 }
 
-// killSessions closes every server-side session, simulating a died server.
 func (f *fakeServer) killSessions() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -103,7 +98,6 @@ func TestConnectListAndToolDefs(t *testing.T) {
 	if !names["mcp_github_search"] || !names["mcp_github_get"] {
 		t.Errorf("bad prefixed names: %v", names)
 	}
-	// Opt-in filtering: unknown server or none selected → no defs.
 	if got := m.Tools(nil, false); len(got) != 0 {
 		t.Errorf("no opt-in must yield no defs, got %v", got)
 	}
@@ -154,8 +148,6 @@ func TestCallHappyPath(t *testing.T) {
 	}
 }
 
-// TestListToolsPagination proves connect follows nextCursor: with a server
-// page size of 1, all three tools must still be indexed.
 func TestListToolsPagination(t *testing.T) {
 	fs := newFakeServerOpts("gh", &sdk.ServerOptions{PageSize: 1}, map[string]sdk.ToolHandler{
 		"a": textHandler("a"), "b": textHandler("b"), "c": textHandler("c"),
@@ -214,6 +206,19 @@ func TestCallUnknownTool(t *testing.T) {
 	}
 }
 
+func TestCallRejectsNullArguments(t *testing.T) {
+	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"echo": textHandler("should not run")})
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m.Connect(context.Background())
+	out, err := m.Call(context.Background(), "mcp_g_echo", `null`)
+	if err != nil {
+		t.Fatalf("invalid model arguments must stay in-band: %v", err)
+	}
+	if !strings.Contains(out, "JSON object") {
+		t.Fatalf("null arguments were not rejected: %q", out)
+	}
+}
+
 func TestReconnectOnce(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"echo": textHandler("ok")})
 	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
@@ -221,7 +226,7 @@ func TestReconnectOnce(t *testing.T) {
 	if out, err := m.Call(context.Background(), "mcp_g_echo", `{}`); err != nil || out != "ok" {
 		t.Fatalf("first call: %q %v", out, err)
 	}
-	fs.killSessions() // server dies
+	fs.killSessions()
 	out, err := m.Call(context.Background(), "mcp_g_echo", `{}`)
 	if err != nil {
 		t.Fatalf("call after kill should renew: %v", err)

@@ -24,8 +24,58 @@ func TestGateNonBashToolBlocks(t *testing.T) {
 	}
 }
 
-// A pure pass (no handler produced a command/argv verdict) for a non-bash tool
-// passes it through.
+func TestSubagentBlockRequiresNecessityTriageBeforeEscalation(t *testing.T) {
+	cfg := ToolConfig{
+		Headless:       true,
+		HasParentAgent: true,
+		RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
+			return ToolCallVerdict{Action: ActionBlock, Reason: "publishing is not authorized"}
+		},
+	}
+	msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", "{}")
+	if !blocked {
+		t.Fatal("subagent block unexpectedly allowed")
+	}
+	for _, want := range []string{
+		"whether this action is necessary",
+		"materially safer, policy-compliant approach",
+		"never reinterpret a blanket refusal",
+		"Complete any useful partial work",
+		"Only if this block prevents meaningful completion",
+		"report to the parent agent",
+		"exact blocked action",
+		"alternatives considered",
+		"decision the operator must make",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("subagent guidance missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestInteractiveBlockOmitsHeadlessTriage(t *testing.T) {
+	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
+		return ToolCallVerdict{Action: ActionBlock, Reason: "blocked"}
+	}}
+	msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", "{}")
+	if !blocked || strings.Contains(msg, "Subagent triage") {
+		t.Fatalf("interactive block got subagent guidance: blocked=%v msg=%q", blocked, msg)
+	}
+}
+
+func TestOwnerlessHeadlessBlockOmitsParentTriage(t *testing.T) {
+	cfg := ToolConfig{
+		Headless: true,
+		RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
+			return ToolCallVerdict{Action: ActionBlock, Reason: "blocked"}
+		},
+	}
+	msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", "{}")
+	if !blocked || strings.Contains(msg, "report to the parent agent") {
+		t.Fatalf("ownerless headless block got parent guidance: blocked=%v msg=%q", blocked, msg)
+	}
+}
+
 func TestGateNonBashToolPasses(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", ""}, Passthrough: true}
@@ -49,15 +99,12 @@ func TestGateNonBashToolEmptyRewriteFailsClosed(t *testing.T) {
 	}
 }
 
-// No hooks declared ⇒ non-bash tools are ungated.
 func TestGateNonBashToolNoHooksPasses(t *testing.T) {
 	if _, blocked := gateNonBashTool(context.Background(), ToolConfig{}, "edit_file", "{}"); blocked {
 		t.Fatal("no hooks: read must not be gated")
 	}
 }
 
-// A {command=...}/{argv=...} verdict makes no sense for a non-bash tool, so it
-// fails closed rather than silently no-op'ing.
 func TestGateNonBashToolRewriteFailsClosed(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "rewritten"}}
@@ -68,15 +115,6 @@ func TestGateNonBashToolRewriteFailsClosed(t *testing.T) {
 	}
 }
 
-// No hooks declared → unsafe default: the command runs verbatim.
-
-// A {command=...} rewrite is honored — the rewritten command runs.
-
-// A runner-swap (argv) verdict can't run through a non-bash tool, so it
-// fails closed rather than silently running un-sandboxed.
-
-// TestGatesForwardHeadless: each gate site passes cfg.Headless into the
-// tool-call hook chain unmodified.
 func TestGatesForwardHeadless(t *testing.T) {
 	for _, headless := range []bool{true, false} {
 		var got *bool

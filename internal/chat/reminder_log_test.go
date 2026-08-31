@@ -6,14 +6,10 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// TestReminderLog_AnchorsToMessageIndex verifies a recorded reminder is anchored
-// to the message index it precedes (the count at record time), and that the
-// snapshot is a copy.
 func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	s := NewSession(SessionOpts{})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
 
-	// Reminder emitted before the assistant reply lands → anchored at index 1.
 	emitSystemReminder(s, "<system-reminder>context: 10%</system-reminder>")
 	s.append(llm.Message{Role: llm.RoleAssistant, Content: "hello"})
 
@@ -29,8 +25,6 @@ func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	}
 }
 
-// TestReminderLog_ClearedOnSetMessages confirms replacing history wholesale
-// (SetMessages) drops stale reminder anchors.
 func TestReminderLog_ClearedOnSetMessages(t *testing.T) {
 	s := NewSession(SessionOpts{})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})

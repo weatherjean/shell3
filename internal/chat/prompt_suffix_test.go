@@ -9,10 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// The suffix is a closure so a source edited mid-conversation lands on the
-// NEXT turn. A cached string would freeze it at session creation — which is
-// exactly the bug a per-room brief would hit the first time someone edited a
-// group description.
 func TestRenderSystemPromptCallsSuffixEveryTurn(t *testing.T) {
 	n := 0
 	cfg := TurnConfig{
@@ -27,7 +23,6 @@ func TestRenderSystemPromptCallsSuffixEveryTurn(t *testing.T) {
 	}
 }
 
-// The suffix appends to the refreshed prompt, never replaces it.
 func TestRenderSystemPromptKeepsRefreshedPrompt(t *testing.T) {
 	cfg := TurnConfig{
 		Personality:   persona.Persona{SystemPrompt: "stale"},
@@ -43,7 +38,6 @@ func TestRenderSystemPromptKeepsRefreshedPrompt(t *testing.T) {
 	}
 }
 
-// No suffix wired, or an empty one, changes nothing.
 func TestRenderSystemPromptWithoutSuffix(t *testing.T) {
 	base := TurnConfig{Personality: persona.Persona{SystemPrompt: "base"}}
 	if got := renderSystemPrompt(base); got != "base" {
@@ -56,8 +50,6 @@ func TestRenderSystemPromptWithoutSuffix(t *testing.T) {
 	}
 }
 
-// A turn must leave behind the prompt it ran with: the whole point is that a
-// stored conversation records what the model was told, not only what it said.
 func TestTurnRecordsItsSystemPrompt(t *testing.T) {
 	dir := t.TempDir()
 	st, err := runs.Open(dir)
@@ -77,7 +69,6 @@ func TestTurnRecordsItsSystemPrompt(t *testing.T) {
 	}
 }
 
-// No store (library use, a test harness) must be a no-op, never a panic.
 func TestTurnPromptRecordingIsOptional(t *testing.T) {
 	recordTurnPrompt(TurnConfig{}, &Session{id: "s"}, "body", 0)
 	recordTurnPrompt(TurnConfig{}, nil, "body", 0)

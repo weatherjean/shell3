@@ -74,8 +74,6 @@ func gatedRuntime(t *testing.T, g *gatedFirstClient) *shell3.Runtime {
 	return rt
 }
 
-// A message queued mid-turn drains once the turn ends: it runs its own turn
-// and gets its own reply. Sending always succeeds; nothing is dropped.
 func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	fc := newFakeClient()
 	g := newGatedFirst("first reply", "second reply")
@@ -88,7 +86,6 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	// Arrives mid-turn: queues silently.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "two"})
 	close(g.Release)
 
@@ -96,30 +93,24 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 		all := strings.Join(fc.sentTexts(), "\n")
 		return strings.Contains(all, "first reply") && strings.Contains(all, "second reply")
 	})
-	// The queued message became its own thread: its reply anchors at msg 2.
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
 		return ok && r.replyTo == "2" && strings.Contains(r.text, "second reply")
 	})
 }
 
-// Replies queued into the SAME thread while a turn runs drain as ONE batch
-// turn: one model call over the concatenated mail, one reply, anchored at the
-// newest message.
 func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	fc := newFakeClient()
 	g := newGatedFirst("first reply", "batched reply")
 	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	// Start thread: msg 1 → session recorded under msg 1 and its reply id.
 	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	// Two replies to the thread anchor arrive mid-turn.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", ReplyToID: "1", Text: "also this"})
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "3", ReplyToID: "1", Text: "and this"})
 	close(g.Release)
@@ -146,7 +137,6 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	}
 }
 
-// Inbox() renders the queued state (surfaced on the dash index).
 func TestInboxView(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused")
@@ -175,11 +165,6 @@ func TestInboxView(t *testing.T) {
 	tconv(b).mu.Unlock()
 }
 
-// A model that over-generalizes the wake-turn NO_REPLY sentinel into a USER
-// turn must not post the literal string — it degrades to the empty-reply
-// placeholder instead. This drives the REAL production path (handleMsg ->
-// dispatchMail -> runUserTurn), so it exercises the guard inlined at
-// bot.go's runUserTurn, not a copy of it.
 func TestRunUserTurn_NoReplySentinelNotPosted(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "NO_REPLY.")
@@ -196,9 +181,6 @@ func TestRunUserTurn_NoReplySentinelNotPosted(t *testing.T) {
 	}
 }
 
-// A corrupt reply (raw tool-call template markup) must never reach the chat
-// verbatim in a USER turn — it is replaced by malformedReplyNotice. Drives
-// the real production path through runUserTurn, same as above.
 func TestRunUserTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	corrupt := "]<]minimax[>[<tool_call>\nbash: git show 9cc4ffc\n</tool_call>"
 	fc := newFakeClient()
@@ -216,10 +198,6 @@ func TestRunUserTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	}
 }
 
-// Same two guards, but through runPostedQueuedTurn: a Wake that finds queued
-// user steering (Contract 12) runs a POSTED turn whose reply passes through
-// the SAME inline guards as runUserTurn, at a different call site in bot.go.
-// This mirrors TestContract12_WakeWithSteerPostsReply's drive pattern.
 func TestRunPostedQueuedTurn_NoReplySentinelNotPosted(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "NO_REPLY.")

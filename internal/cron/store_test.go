@@ -11,8 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// fakeRunStore is an in-memory RunStore for testing the scheduler's use of
-// the seam, without a real database.
 type fakeRunStore struct {
 	mu      sync.Mutex
 	status  map[string]JobStatus
@@ -57,9 +55,6 @@ func TestScheduler_RestoresStatusOnStart(t *testing.T) {
 	if got.Runs != 12 || got.Failures != 2 {
 		t.Fatalf("history not restored: %+v", got)
 	}
-	// The restored status must not clobber config-derived fields — the
-	// schedule/agent the freshly loaded config declares, not whatever was
-	// serialized alongside the old counts.
 	if got.Schedule != "@every 3h" || got.Agent != "bookmarks" {
 		t.Fatalf("config fields overwritten by restored status: %+v", got)
 	}
@@ -78,9 +73,6 @@ func TestScheduler_PersistsEveryRun(t *testing.T) {
 	}
 }
 
-// A job with no restored entry (never run before, or a brand-new job in the
-// config) must still arm cleanly with a zero-value history, not a nil-map
-// panic.
 func TestScheduler_NewJobNoRestoredHistory(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{}}
 	jobs := []shell3.CronJob{{Name: "brand-new", Schedule: "@every 1h", Agent: "worker"}}
@@ -94,22 +86,18 @@ func TestScheduler_NewJobNoRestoredHistory(t *testing.T) {
 	}
 }
 
-// New (the Task-3 signature) must still work with no store at all — the
-// nil-store path callers other than the host use (tests, library use).
 func TestNew_NilStoreNoPanic(t *testing.T) {
 	jobs := []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "worker"}}
 	s, err := New(&fakeDispatcher{}, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.fire(jobs[0]) // must not panic reaching for a nil store
+	s.fire(jobs[0])
 	if got := s.Jobs()[0]; got.Runs != 1 {
 		t.Fatalf("in-memory recording still works without a store: %+v", got)
 	}
 }
 
-// A failed save must not fail the run: the fire already happened, and a
-// bookkeeping fault must never look like a job fault.
 func TestScheduler_SaveFailureIsNotFatal(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{}, saveErr: errPersist}
 	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1s", Agent: "worker"}}
@@ -196,10 +184,6 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The actual startup janitor — runs.Sweep — opens its own handle on the
-	// same database, exactly like runStartupJanitors does at process start,
-	// runs_keep_days=0 ("keep forever") included: the defect this pins was
-	// present regardless of that setting.
 	if _, _, err := runs.Sweep(root, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -223,9 +207,6 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 	}
 }
 
-// A job store has never seen (LoadStatus returns no entry for it) must not
-// appear at all — the scheduler's zip-by-name join must treat "absent" as
-// "never run", not as some other default.
 func TestStoreRunStore_LoadStatusEmpty(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)

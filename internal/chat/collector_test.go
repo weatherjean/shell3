@@ -18,7 +18,6 @@ func (c *collector) sink(ev Event) {
 	c.mu.Unlock()
 }
 
-// all returns a snapshot of every event recorded so far, in emit order.
 func (c *collector) all() []Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -27,8 +26,6 @@ func (c *collector) all() []Event {
 	return out
 }
 
-// newCollectorSession builds a Session whose events are recorded by the
-// returned collector. opts.Sink is overwritten.
 func newCollectorSession(opts SessionOpts) (*Session, *collector) {
 	c := &collector{}
 	opts.Sink = c.sink

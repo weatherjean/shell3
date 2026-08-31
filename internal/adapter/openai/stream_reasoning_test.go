@@ -11,13 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// ---- thinkLeakFilter unit tests ----
-
-// run feeds deltas through a fresh filter and returns the concatenated output,
-// including the end-of-stream flush. reasoning arms the wider glued-tail net
-// (set when the stream also carried a split reasoning field).
-// ---- integration: Stream drops a leaked leading </think> ----
-
 func TestStreamStripsLeakedThinkTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -45,9 +38,6 @@ func TestStreamStripsLeakedThinkTag(t *testing.T) {
 	}
 }
 
-// MiniMax-M3 over the OpenAI-compatible endpoint streams its reasoning twice:
-// once in delta.reasoning and again inline in delta.content wrapped in
-// <think>…</think>. Only the real reply may reach the caller as text.
 func TestStreamStripsInlineThinkBlock(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -82,8 +72,6 @@ func TestStreamStripsInlineThinkBlock(t *testing.T) {
 	}
 }
 
-// finish_reason "length" means the provider cut the response at the output
-// token cap. It must surface, not pass as a complete reply.
 func TestStreamReportsLengthTruncation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -110,7 +98,6 @@ func TestStreamReportsLengthTruncation(t *testing.T) {
 	}
 }
 
-// A normal stop must NOT be reported as truncated.
 func TestStreamCleanStopNotTruncated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -132,8 +119,6 @@ func TestStreamCleanStopNotTruncated(t *testing.T) {
 	}
 }
 
-// A leaked tag that is the ENTIRE content (tool-call turn) must yield no
-// text deltas at all — not even whitespace.
 func TestStreamStripsBareLeakedTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -162,5 +147,39 @@ func TestStreamStripsBareLeakedTag(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0] != "bash" {
 		t.Fatalf("tool calls: got %v", calls)
+	}
+}
+
+func TestStreamAssemblesFragmentedToolMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ba"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"real-id","function":{"name":"sh","arguments":"{\"command\":"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"pwd\"}"}}]}}]}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model")
+	var calls []llm.ToolCall
+	err := c.Stream(context.Background(),
+		[]llm.Message{{Role: llm.RoleUser, Content: "hi"}}, nil,
+		func(ev llm.StreamEvent) {
+			if ev.ToolCall != nil {
+				calls = append(calls, *ev.ToolCall)
+			}
+		})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("tool calls: %+v", calls)
+	}
+	if got := calls[0]; got.ID != "real-id" || got.Name != "bash" || got.RawArgs != `{"command":"pwd"}` {
+		t.Fatalf("fragmented tool call assembled as %+v", got)
 	}
 }

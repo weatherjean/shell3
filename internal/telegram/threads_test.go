@@ -60,7 +60,6 @@ func TestThreadIndexUnknown(t *testing.T) {
 	}
 }
 
-// An empty recorded id (the /new that cleared the marker) reads as absent.
 func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
 	st := testStore(t)
 	idx := NewThreadIndex(st, "telegram")
@@ -79,7 +78,6 @@ func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
 	}
 }
 
-// Two front-end surfaces over one store never cross-resolve each other's markers.
 func TestThreadIndexSurfaceIsolation(t *testing.T) {
 	st := testStore(t)
 	tg := NewThreadIndex(st, "telegram")
@@ -98,14 +96,6 @@ func TestThreadIndexSurfaceIsolation(t *testing.T) {
 	}
 }
 
-// newResumeTestBot builds a Bot whose session store and current-marker store
-// are the SAME runs.Store — unlike newBot/mkThreads, which give the bot's
-// ThreadIndex its own throwaway store disconnected from the runtime's. That
-// separation is fine for the marker tests above, but a marker/session
-// divergence test needs EndSession (on the store sessions actually live in)
-// and Current() (on the store the marker actually lives in) to agree on which
-// store that is, the way production wiring does (openThreads in
-// cmd/shell3/hostwiring.go resolves both from the same rt.Parts().Store()).
 func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())
@@ -220,7 +210,7 @@ func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = b.rt.Reload() // swap Parts generation (a no-op on this Parts-less test runtime)
+	_, _ = b.rt.Reload()
 	c := tconv(b)
 	c.mu.Lock()
 	c.main = nil
@@ -256,28 +246,19 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	// 12 "builder" turns pile up real history (big user messages so the
-	// eventual compaction has a substantial head to summarize, clearing the
-	// compactionFloor without needing to fake the estimator). Only the last
-	// builder turn reports a prompt-token usage above CompactAt, so
-	// maybeCompact fires at the START of turn 13 — exactly the auto path a
-	// live conversation takes, never a forced/manual compact.
 	const builderTurns = 12
 	scripts := make([]fakellm.Script, 0, builderTurns+2)
 	for i := 0; i < builderTurns; i++ {
-		usage := &llm.Usage{PromptTokens: 10, TotalTokens: 10} // below CompactAt=100: no trigger yet
+		usage := &llm.Usage{PromptTokens: 10, TotalTokens: 10}
 		if i == builderTurns-1 {
-			usage = &llm.Usage{PromptTokens: 5000, TotalTokens: 5000} // primes the threshold for turn 13
+			usage = &llm.Usage{PromptTokens: 5000, TotalTokens: 5000}
 		}
 		scripts = append(scripts, fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "ok"},
 			{Usage: usage},
 		}})
 	}
-	// Turn 13, call 1: the quiet compaction summary (maybeCompact fires before
-	// the turn's own answer).
 	scripts = append(scripts, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}})
-	// Turn 13, call 2: the turn's own answer, against the now-compacted history.
 	scripts = append(scripts, fakellm.Script{Events: []llm.StreamEvent{
 		{TextDelta: "final answer"},
 		{Usage: &llm.Usage{PromptTokens: 50, TotalTokens: 50}},
@@ -297,7 +278,7 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 	b := NewBot(fc, rt, 42, idx)
 	b.debounce = time.Millisecond
 
-	big := strings.Repeat("x", 2000) // ~500 estimated tokens per message
+	big := strings.Repeat("x", 2000)
 	ctx := context.Background()
 	var before string
 	for i := 0; i < builderTurns+1; i++ {

@@ -23,7 +23,6 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 
 	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "do work"})
 
-	// Wait for the turn to be in flight (proves handleMsg launched it).
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
@@ -43,7 +42,6 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 	// /stop runs synchronously on the test goroutine and must return promptly.
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
-	// The turn must unwind: turnActive clears.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		c.mu.Lock()
@@ -58,7 +56,6 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// A "stopped" reply must have been sent.
 	found := false
 	for _, txt := range fc.sentTexts() {
 		if strings.Contains(txt, "stopped") {

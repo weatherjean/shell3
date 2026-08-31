@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
-// outcomeSink collects what the completion router reports back to cron.
 type outcomeSink struct {
 	mu  sync.Mutex
 	got []CronOutcome
@@ -45,8 +44,6 @@ func newOutcomeRuntime(t *testing.T) (*Runtime, *fakeHost, *outcomeSink) {
 	return rt, host, sink
 }
 
-// A failed cron run must reach the scheduler as a failure: this is the whole
-// point — Dispatch only ever said the subagent was accepted.
 func TestCronOutcomeReportsFailure(t *testing.T) {
 	rt, _, sink := newOutcomeRuntime(t)
 	ev := cronEvent()
@@ -64,9 +61,6 @@ func TestCronOutcomeReportsFailure(t *testing.T) {
 	}
 }
 
-// The NO_REPLY drop is a DELIVERY decision — an idempotent tick with nothing
-// to say — and returns before the owner branch. The run still happened, so
-// its outcome must not be swallowed with the report.
 func TestCronOutcomeReportedForOwnerlessNoReply(t *testing.T) {
 	rt, host, sink := newOutcomeRuntime(t)
 	ev := cronEvent()
@@ -81,8 +75,6 @@ func TestCronOutcomeReportedForOwnerlessNoReply(t *testing.T) {
 	}
 }
 
-// /superstop replaces N floor posts with one summary. That is a decision about
-// the CHAT; a suppressed job's run still belongs in its job's history.
 func TestCronOutcomeReportedForSuppressedJob(t *testing.T) {
 	rt, host, sink := newOutcomeRuntime(t)
 	ev := cronEvent()
@@ -99,7 +91,6 @@ func TestCronOutcomeReportedForSuppressedJob(t *testing.T) {
 	}
 }
 
-// A non-cron completion has no job history to update.
 func TestNonCronCompletionReportsNoOutcome(t *testing.T) {
 	rt, _, sink := newOutcomeRuntime(t)
 	ev := cleanEvent()
@@ -110,9 +101,6 @@ func TestNonCronCompletionReportsNoOutcome(t *testing.T) {
 	}
 }
 
-// A lingering cron subagent's follow-up turn is the SAME run continuing. Its
-// outcome is the main turn's, already recorded; counting it again would make
-// one run look like two.
 func TestCronFollowUpReportsNoOutcome(t *testing.T) {
 	rt, _, sink := newOutcomeRuntime(t)
 	ev := cronEvent()

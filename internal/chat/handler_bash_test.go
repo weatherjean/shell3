@@ -95,8 +95,6 @@ func TestParseBashArgsClampsTimeout(t *testing.T) {
 // child no longer holds but the surviving grandchild still does.
 func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 	h := BashHandler{}
-	// Spawn a backgrounded grandchild that keeps stdout open for 30s.
-	// Parent bash exits immediately on the outer `sleep 5` timeout.
 	args := json.RawMessage(`{"command":"bash -c 'sleep 30 & echo started; sleep 5'","timeout_seconds":1}`)
 	start := time.Now()
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
@@ -104,7 +102,6 @@ func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Timeout (1s) + WaitDelay (2s) + a bit of slack.
 	if elapsed > 5*time.Second {
 		t.Fatalf("did not return promptly despite grandchild: elapsed %s", elapsed)
 	}
@@ -115,7 +112,6 @@ func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 
 func TestBashHandler_Execute_outputTruncation(t *testing.T) {
 	h := BashHandler{}
-	// Emit ~60KB; cap is 30KB. Use yes piped to head for speed.
 	cmd := fmt.Sprintf(`yes a | head -c %d`, maxBashOutputBytes*2)
 	args := json.RawMessage(fmt.Sprintf(`{"command":%q,"timeout_seconds":5}`, cmd))
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
@@ -150,22 +146,16 @@ func TestBashHandler_Execute_nonzeroExit(t *testing.T) {
 	args := json.RawMessage(`{"command":"echo oops && exit 1"}`)
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{WorkDir: t.TempDir()})
 	if err != nil {
-		t.Fatal(err) // Execute never returns an error — exit codes are in output
+		t.Fatal(err)
 	}
 	if !strings.Contains(out, "oops") {
 		t.Fatalf("expected 'oops' in output, got %q", out)
 	}
-	// A quiet failure must be distinguishable from success: the exit code is
-	// surfaced as an error: prefix line (which also flips the tool_result
-	// error flag via classifyHandlerOutput).
 	if !strings.HasPrefix(out, "error: command exited 1") {
 		t.Fatalf("expected exit-code marker, got %q", out)
 	}
 }
 
-// A malformed args blob must never fall back to executing the raw JSON as the
-// shell command (e.g. {"command": 5} passes schema presence checks but fails
-// unmarshal).
 func TestBashHandler_Execute_malformedArgs(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command": 5}`)

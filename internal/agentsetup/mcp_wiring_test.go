@@ -70,7 +70,6 @@ func TestMCPWiringLiveServer(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 
-	// Agent opted in via "all": mcp_fake_echo is advertised + host-routed.
 	rt, err := p.AgentRuntime("")
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +90,6 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		t.Error("mcp_fake_echo not routed to host-tool dispatch")
 	}
 
-	// The employee did NOT opt in: no MCP tools, no host routing.
 	srt, err := p.AgentRuntime("s")
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +103,6 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		t.Error("employee must not host-route MCP tools")
 	}
 
-	// Dispatch through the session config's HostTool round-trips the call.
 	cfg, err := p.SessionConfig(SessionOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -121,8 +118,6 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		t.Error("unowned name must error (ErrHostToolNotFound path)")
 	}
 
-	// Status reports the server up with one tool — via Parts and via the
-	// session config's status closure.
 	st := p.MCPStatus()
 	if len(st) != 1 || !st[0].Up || st[0].ToolCount != 1 {
 		t.Errorf("bad MCPStatus: %+v", st)

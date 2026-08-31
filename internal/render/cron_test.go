@@ -11,14 +11,10 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// cronRow renders one JobStatus through the dash index and returns the page.
 func cronRow(statuses []cron.JobStatus, costs map[string]runs.JobCost) string {
 	return render.DashIndexHTML(nil, nil, "", nil, statuses, costs, "")
 }
 
-// An agent job's outcome is labeled "dispatched", never "ok": Dispatch only
-// reports whether the subagent was ACCEPTED, not whether its run succeeded,
-// so claiming success would be a dashboard that lies.
 func TestCronAgentJobOutcomeIsLabeledNotClaimedAsSuccess(t *testing.T) {
 	out := cronRow([]cron.JobStatus{{
 		Name: "digest", Schedule: "0 8 * * *", Agent: "analyst",
@@ -44,8 +40,6 @@ func TestCronAgentJobDispatchRejected(t *testing.T) {
 	}
 }
 
-// Cost column: a known figure renders; a job with no rollup row shows NOTHING,
-// because missing must never look like zero.
 func TestCronCostColumn(t *testing.T) {
 	agent := cron.JobStatus{Name: "digest", Schedule: "@daily", Agent: "a", LastRun: "2026-08-01T08:00:00Z", LastOK: true, Runs: 1}
 

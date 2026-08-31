@@ -5,6 +5,8 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // The completion outbox makes background-work delivery restart-durable
@@ -40,17 +42,47 @@ type runningMarker struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
+// The store pointer is generation state guarded by Runtime.mu. Keep the lock
+// through each short outbox operation so Reload cannot close the selected
+// handle between the pointer read and the SQL call.
+func (rt *Runtime) outboxPut(kind, body string) (int64, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.store == nil {
+		return 0, nil
+	}
+	return rt.store.OutboxPut(kind, body)
+}
+
+func (rt *Runtime) outboxDelete(id int64) error {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.store == nil {
+		return nil
+	}
+	return rt.store.OutboxDelete(id)
+}
+
+func (rt *Runtime) outboxLoadAll() ([]runs.OutboxRow, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.store == nil {
+		return nil, nil
+	}
+	return rt.store.OutboxLoadAll()
+}
+
 // persistEvent writes ev's row, 0 when there is no store or the write fails:
 // durability rides on top of normal delivery and must not block it.
 func (m *jobManager) persistEvent(ev CompletionEvent) int64 {
-	if m.rt == nil || m.rt.store == nil {
+	if m.rt == nil {
 		return 0
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {
 		return 0
 	}
-	id, err := m.rt.store.OutboxPut("event", string(b))
+	id, err := m.rt.outboxPut("event", string(b))
 	if err != nil {
 		return 0
 	}
@@ -59,10 +91,10 @@ func (m *jobManager) persistEvent(ev CompletionEvent) int64 {
 
 // deleteOutboxRow removes one outbox row; 0 (nothing persisted) is a no-op.
 func (m *jobManager) deleteOutboxRow(id int64) {
-	if id == 0 || m.rt == nil || m.rt.store == nil {
+	if id == 0 || m.rt == nil {
 		return
 	}
-	_ = m.rt.store.OutboxDelete(id)
+	_ = m.rt.outboxDelete(id)
 }
 
 // shutdownCancelled distinguishes a job cancelAll killed from one that
@@ -77,7 +109,7 @@ func (m *jobManager) shutdownCancelled(jobID string) bool {
 // putRunningMarker persists j's "running" row and records its id. Call
 // without m.mu — this writes to SQLite; the id store takes the lock.
 func (m *jobManager) putRunningMarker(j *bgJob, ownerID string) {
-	if m.rt == nil || m.rt.store == nil {
+	if j.store == nil {
 		return
 	}
 	mk := runningMarker{
@@ -89,7 +121,7 @@ func (m *jobManager) putRunningMarker(j *bgJob, ownerID string) {
 	if err != nil {
 		return
 	}
-	id, err := m.rt.store.OutboxPut("running", string(b))
+	id, err := j.store.OutboxPut("running", string(b))
 	if err != nil {
 		return
 	}
@@ -109,7 +141,9 @@ func (m *jobManager) clearRunningMarker(j *bgJob) {
 	if keep {
 		return
 	}
-	m.deleteOutboxRow(id)
+	if id != 0 && j.store != nil {
+		_ = j.store.OutboxDelete(id)
+	}
 }
 
 // rememberUndelivered queues a row whose post failed for retry. rowID 0 means
@@ -142,14 +176,11 @@ func (m *jobManager) takeUndelivered() map[int64]struct{} {
 // re-enters the retry set on another failure, then delete the stale one.
 // Called periodically by the front-end host; a no-op when nothing failed.
 func (rt *Runtime) RedeliverUndelivered() int {
-	if rt.store == nil {
-		return 0
-	}
 	ids := rt.jobs.takeUndelivered()
 	if len(ids) == 0 {
 		return 0
 	}
-	rows, err := rt.store.OutboxLoadAll()
+	rows, err := rt.outboxLoadAll()
 	if err != nil {
 		// Store hiccup: put the ids back so a later tick retries.
 		for id := range ids {
@@ -164,11 +195,11 @@ func (rt *Runtime) RedeliverUndelivered() int {
 		}
 		var ev CompletionEvent
 		if err := json.Unmarshal([]byte(r.JSON), &ev); err != nil {
-			_ = rt.store.OutboxDelete(r.ID)
+			_ = rt.outboxDelete(r.ID)
 			continue
 		}
 		rt.jobs.dispatchCompletion(ev)
-		_ = rt.store.OutboxDelete(r.ID)
+		_ = rt.outboxDelete(r.ID)
 		redelivered++
 	}
 	return redelivered
@@ -192,10 +223,7 @@ func pidAlive(pid int) bool {
 // as failures so the loss is visible. Call once at startup, after
 // SetCompletionHost.
 func (rt *Runtime) RecoverCompletions() int {
-	if rt.store == nil {
-		return 0
-	}
-	rows, err := rt.store.OutboxLoadAll()
+	rows, err := rt.outboxLoadAll()
 	if err != nil {
 		return 0
 	}
@@ -205,7 +233,7 @@ func (rt *Runtime) RecoverCompletions() int {
 		case "event":
 			var ev CompletionEvent
 			if err := json.Unmarshal([]byte(r.JSON), &ev); err != nil {
-				_ = rt.store.OutboxDelete(r.ID)
+				_ = rt.outboxDelete(r.ID)
 				continue
 			}
 			// Redeliver FIRST, delete after: dispatchCompletion persists its
@@ -213,12 +241,12 @@ func (rt *Runtime) RecoverCompletions() int {
 			// the next boot. Deleting first opens a loss window.
 			ev.Note = joinNote(ev.Note, "recovered after a shell3 restart — this completion was never delivered")
 			rt.jobs.dispatchCompletion(ev)
-			_ = rt.store.OutboxDelete(r.ID)
+			_ = rt.outboxDelete(r.ID)
 			recovered++
 		case "running":
 			var mk runningMarker
 			if err := json.Unmarshal([]byte(r.JSON), &mk); err != nil {
-				_ = rt.store.OutboxDelete(r.ID)
+				_ = rt.outboxDelete(r.ID)
 				continue
 			}
 			if pidAlive(mk.PID) {
@@ -239,7 +267,7 @@ func (rt *Runtime) RecoverCompletions() int {
 			// Same ordering: a crash mid-recovery re-reports rather than
 			// losing the loss.
 			rt.jobs.dispatchCompletion(ev)
-			_ = rt.store.OutboxDelete(r.ID)
+			_ = rt.outboxDelete(r.ID)
 			recovered++
 		}
 	}

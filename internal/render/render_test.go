@@ -14,7 +14,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// fixtureRun writes a session to a fresh store root and returns (root, id).
 func fixtureRun(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -46,8 +45,6 @@ func fixtureRun(t *testing.T) (string, string) {
 	return root, id
 }
 
-// fixtureRuns writes n one-message sessions and returns (root, ids) in
-// creation order (ListSessions returns newest first).
 func fixtureRuns(t *testing.T, n int) (string, []string) {
 	t.Helper()
 	root := t.TempDir()
@@ -69,17 +66,12 @@ func fixtureRuns(t *testing.T, n int) (string, []string) {
 	return root, ids
 }
 
-// The dash index replaces /status, so a live session's snapshot must surface
-// the same facts /status carried: model, tools, employees, skills, warnings,
-// the gate — and never the system prompt.
 func TestDashIndexHTMLLiveSession(t *testing.T) {
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		cfg := chat.Config{
 			LLM:       fakellm.New(),
 			ModeLabel: "agent",
 
-			// The live builder is chat.AgentStatusLine; a literal in the shape it
-			// produces keeps this render test independent of that wiring.
 			StatusLine:     "moonshot │ kimi-k2-0905-preview │ high",
 			ActiveSkills:   []string{"scripting"},
 			ConfigWarnings: []string{"skill x skipped"},
@@ -116,8 +108,6 @@ func TestDashIndexHTMLLiveSession(t *testing.T) {
 	if !strings.Contains(strings.ToLower(out), "armed") {
 		t.Errorf("index missing the gate line:\n%s", out)
 	}
-	// The system prompt is deliberately absent: it is thousands of tokens the
-	// operator already has in shell3.sh.
 	if strings.Contains(out, "You are shell3.") {
 		t.Errorf("index dumps the system prompt:\n%s", out)
 	}
@@ -132,7 +122,6 @@ func TestRunsPageHTMLPagination(t *testing.T) {
 	if total != 3 {
 		t.Errorf("want 3 pages of 4 over 10 runs, got %d", total)
 	}
-	// Newest first: page 1 carries the last-created runs.
 	if !strings.Contains(frag, "prompt 9") || strings.Contains(frag, "prompt 0") {
 		t.Errorf("page 1 should hold the newest runs:\n%s", frag)
 	}
@@ -151,15 +140,13 @@ func TestRunsPageHTMLPagination(t *testing.T) {
 	}
 }
 
-// Message-less sessions (dispatch parents, crash leftovers) are invisible in
-// the listing — nothing to replay.
 func TestRunsPageHTMLSkipsEmptySessions(t *testing.T) {
 	root, _ := fixtureRuns(t, 2)
 	st, err := runs.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.NewSession(runs.Meta{}); err != nil { // empty: no messages
+	if _, err := st.NewSession(runs.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()

@@ -72,8 +72,6 @@ func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "got your file")
 	b := newBot(t, fc, rt)
 
-	// A media-only message (no text) must still run a turn — the attachment is
-	// transformed into a note, not dropped.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, Media: []Media{
 		{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"},
 	}})
@@ -103,12 +101,7 @@ func TestChunk_SplitsAt4096(t *testing.T) {
 	}
 }
 
-// A long reply with no newline near the cut must not be split mid-UTF-8-rune:
-// Telegram rejects invalid UTF-8 with a 400, silently losing the chunk.
 func TestChunk_NeverSplitsARune(t *testing.T) {
-	// 3 bytes each but ONE UTF-16 unit each: 3000 units fits a single
-	// message even at 9000 bytes — Telegram bills units, not bytes. A longer
-	// run must split on rune boundaries, never mid-rune.
 	long := strings.Repeat("字", 4500)
 	for i, c := range chunk(long) {
 		if !utf8.ValidString(c) {
@@ -118,7 +111,6 @@ func TestChunk_NeverSplitsARune(t *testing.T) {
 			t.Fatalf("chunk %d exceeds max: %d UTF-16 units", i, utf16Len(c))
 		}
 	}
-	// No content may be lost across the split.
 	if got := strings.Join(chunk(long), ""); got != long {
 		t.Fatalf("chunking lost content: %d bytes in, %d bytes out", len(long), len(got))
 	}

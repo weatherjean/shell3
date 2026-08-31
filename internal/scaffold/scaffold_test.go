@@ -10,9 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// writeEnv writes the .env the rendered config references (empty values are
-// fine — api_key is optional under a proxy setup), matching exactly the keys
-// `shell3 boot` writes.
 func writeEnv(t *testing.T, dir string) {
 	t.Helper()
 	body := "MAIN_API_KEY=\nTELEGRAM_TOKEN=\n"
@@ -106,7 +103,6 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
 		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
-		// DefaultContextWindow (128000) and 80% of it (102400).
 		for _, want := range []string{"context_window: 128000", "compact_at: 102400"} {
 			if !strings.Contains(string(cfg), want) {
 				t.Errorf("shell3.sh missing defaulted %q", want)
@@ -161,8 +157,6 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	// Empty MAIN_API_KEY mirrors a proxy setup (e.g. run_proxy handles auth):
-	// the config must still load — api_key is optional.
 	writeEnv(t, dir)
 
 	c, err := config.Load(dir)
@@ -173,8 +167,6 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Models) < 1 {
 		t.Errorf("expected >= 1 model, got %d", len(c.Models))
 	}
-	// Under the kit model the agents come from shell3.sh and the skills from
-	// scanning skills/ — config.Load only lifts the wiring.
 	src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
 		t.Fatalf("read kit: %v", err)
@@ -207,10 +199,6 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
 	}
-	// The gate ships in the kit — a scaffolded config
-	// has no hooks dir at all, so LoadedConfig alone discovers nothing. The
-	// gate's own wiring is covered where the kit is loaded (kitagent) and its
-	// rules in hooks_test.go.
 	if c.HasToolCall() {
 		t.Error("a scaffolded config should have no hooks/ dir — the gate is declared in the kit")
 	}
@@ -257,17 +245,14 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	}
 }
 
-// TestRenderBaseConfigEscapesYAMLSpecials ensures inputs containing YAML
-// metacharacters (a quote, a backslash) produce a config that still parses,
-// rather than a scalar that closes early.
 func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{
 		Name:    "main",
-		BaseURL: `http://x/v1" oops: [`, // a quote + YAML specials
+		BaseURL: `http://x/v1" oops: [`,
 		EnvKey:  "MAIN_API_KEY",
-		Model:   `weird\model`,     // a backslash
-		Proxy:   `sh -c "echo hi"`, // quotes in a proxy command
+		Model:   `weird\model`,
+		Proxy:   `sh -c "echo hi"`,
 	}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
@@ -277,7 +262,6 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config with YAML-special inputs failed to load: %v", err)
 	}
-	// The raw (unescaped) values must round-trip into the loaded model.
 	m := c.Models[0]
 	if m.BaseURL != v.BaseURL {
 		t.Errorf("base_url = %q, want %q", m.BaseURL, v.BaseURL)
@@ -331,9 +315,6 @@ func TestScaffoldCronExampleIsInert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse kit: %v", err)
 	}
-	// harness-audit is the ONE job that ships armed. The checklist example
-	// must stay inert, or every install starts paying for a job nobody asked
-	// for.
 	for _, j := range k.Crons {
 		if j.Name == "checklist" {
 			t.Fatalf("the commented example armed itself: %+v", j)
@@ -341,9 +322,6 @@ func TestScaffoldCronExampleIsInert(t *testing.T) {
 	}
 }
 
-// The self-knowledge skill is what stops the agent inventing answers about its
-// own runtime — it cannot read the binary it runs inside, so the alternative
-// to this file is confabulation the user cannot check.
 func TestScaffoldShipsSelfKnowledgeSkill(t *testing.T) {
 	files, err := PromptFiles(Values{Name: "main"})
 	if err != nil {
@@ -354,11 +332,11 @@ func TestScaffoldShipsSelfKnowledgeSkill(t *testing.T) {
 		t.Fatal("skills/self-knowledge.md is not shipped — new installs would have no self-knowledge skill")
 	}
 	for _, want := range []string{
-		"cannot see your own internals", // the premise
-		"status",                        // the primary introspection tool
-		"turn_prompts",                  // how to answer "what was I told"
-		"you did not see it",            // the group-visibility rule that caused a wrong answer live
-		"absence claim needs a command", // claiming X does not exist without listing X
+		"cannot see your own internals",
+		"status",
+		"turn_prompts",
+		"you did not see it",
+		"absence claim needs a command",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("self-knowledge skill missing %q", want)
@@ -409,9 +387,6 @@ func TestScaffoldShipsTheAuditor(t *testing.T) {
 	if job.Agent != "auditor" {
 		t.Errorf("harness-audit targets %q, want the auditor", job.Agent)
 	}
-	// The four checks live in the cron heredoc, which is the text the turn
-	// actually receives. A prompt that forgets NO_REPLY spends a main-agent
-	// turn every single day on a clean audit.
 	if !strings.Contains(job.Prompt, "NO_REPLY") {
 		t.Errorf("harness-audit prompt must end a clean run with NO_REPLY, or the audit costs a turn a day:\n%s", job.Prompt)
 	}
@@ -422,12 +397,6 @@ func TestScaffoldShipsTheAuditor(t *testing.T) {
 	}
 }
 
-// Task 6 deleted the gate rule that caught a model API endpoint written into
-// a script at write time; that judgment now lives only here, in a model
-// reading the script, because only a model can tell whether a given call
-// converts between forms or decides. The old check-1 text told a script to
-// call `shell3 ask --agent` instead — which using-llms rule 1 forbids for a
-// tool — so two shipped texts disagreed about the same rule.
 func TestAuditPromptJudgesConvertVsDecide(t *testing.T) {
 	dir := t.TempDir()
 	if err := RenderBaseConfig(dir, Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}, false); err != nil {
@@ -460,9 +429,6 @@ func TestAuditPromptJudgesConvertVsDecide(t *testing.T) {
 	}
 }
 
-// shell3 tool run/test prove a tool's plumbing and can never see a
-// wrong-layer bug. The skill that says so ships to every install, and reaches
-// existing ones through `shell3 boot --prompts`.
 func TestScaffoldShipsTestingWorkflowsSkill(t *testing.T) {
 	files, err := PromptFiles(Values{Name: "main"})
 	if err != nil {

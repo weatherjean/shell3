@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 )
 
-// The payload names the event and the session, so a subscriber appending to a
-// log can attribute a line without joining against anything else.
 func TestEventPayloadCarriesIdentity(t *testing.T) {
 	b := eventPayload("main", chat.Event{
 		Kind:      chat.EventTurnDone,
@@ -25,8 +23,6 @@ func TestEventPayloadCarriesIdentity(t *testing.T) {
 	}
 }
 
-// Tool fields ride along on tool events; a subscriber watching tool_result
-// needs the name and the output, not just the kind.
 func TestEventPayloadCarriesToolFields(t *testing.T) {
 	b := eventPayload("main", chat.Event{
 		Kind:       chat.EventToolResult,
@@ -43,8 +39,6 @@ func TestEventPayloadCarriesToolFields(t *testing.T) {
 	}
 }
 
-// Usage rides along on usage/turn_done, which is what makes per-agent spend
-// tracking possible from a shell function.
 func TestEventPayloadCarriesUsage(t *testing.T) {
 	b := eventPayload("main", chat.Event{
 		Kind:  chat.EventTurnDone,
@@ -64,8 +58,6 @@ func TestEventPayloadCarriesUsage(t *testing.T) {
 	}
 }
 
-// Text is capped: a subscriber gets a summary line, not an unbounded assistant
-// message pushed through a shell argument-sized pipe on every turn.
 func TestEventPayloadCapsText(t *testing.T) {
 	long := make([]byte, eventTextCap*2)
 	for i := range long {

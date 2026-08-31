@@ -20,8 +20,6 @@ func TestLoadFullTree(t *testing.T) {
 	}
 }
 
-// The kit IS the config: a directory without one does not load, and the error
-// names the file to create.
 func TestLoadMissingKit(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Load(dir)

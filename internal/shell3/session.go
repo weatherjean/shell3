@@ -289,6 +289,18 @@ func (s *Session) runtimeHandle() *Runtime {
 	return s.runtime
 }
 
+// sessionStore returns the Parts-generation store bound to s. Subagent
+// sessions deliberately keep that generation across reloads, so child jobs
+// must not reach through Runtime.store for a newer handle.
+func sessionStore(s *Session) *runs.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Store
+}
+
 // isBusy reports whether a turn is in flight (see Send's contract).
 func (s *Session) isBusy() bool {
 	s.mu.Lock()
@@ -362,7 +374,7 @@ func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
 	}
-	const hint = "This usually means the last turn left the conversation in a state the model rejects — /compact (which rewrites the history into a summary) or starting a new conversation will normally clear it."
+	const hint = "This usually means the last turn left the conversation in a state the model rejects. Starting a new conversation (for Telegram, /new) will normally clear it."
 	var se *llm.StatusError
 	if errors.As(err, &se) {
 		if se.Code == 400 {
@@ -400,8 +412,8 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 				}
 				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
 			}
-			// Single-level by construction: subagents never get the task tool,
-			// so this closure only runs on top-level sessions.
+			// Dispatch depth is enforced centrally by the job manager; this
+			// session-local closure enforces the active agent's peer allowlist.
 			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{report: report, note: note})
 		}
 		tc.ListJobs = func() string {

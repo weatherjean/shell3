@@ -103,11 +103,6 @@ func TestParseYAMLKeepDaysRejectsNegative(t *testing.T) {
 }
 
 func TestParseYAMLKeepDaysRejectsOverflowRisk(t *testing.T) {
-	// 213504 days is the reviewer's repro: time.Duration(days)*24*time.Hour
-	// overflows int64 nanoseconds and wraps around to a small POSITIVE
-	// duration (~25 minutes), silently inverting "keep basically forever"
-	// into "delete almost everything". Must be rejected at load, well below
-	// where the wraparound happens.
 	for _, key := range []string{"runs_keep_days", "media_keep_days"} {
 		_, err := parseY(t, fullYAML+key+": 213504\n", fullSecrets)
 		if err == nil {
@@ -127,7 +122,6 @@ func TestParseYAMLKeepDaysAllowsReasonableValues(t *testing.T) {
 	if c.RunsKeepDays != 30 || c.MediaKeepDays != 7 {
 		t.Fatalf("RunsKeepDays=%d MediaKeepDays=%d, want 30/7", c.RunsKeepDays, c.MediaKeepDays)
 	}
-	// 0 (keep forever) must still be allowed explicitly.
 	c, err = parseY(t, fullYAML+"runs_keep_days: 0\n", fullSecrets)
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +169,47 @@ func TestParseYAMLMCPValidation(t *testing.T) {
 	if _, err := parseY(t, base+"  BadName:\n    url: u\n", nil); err == nil {
 		t.Fatal("bad server name accepted")
 	}
+	if _, err := parseY(t, base+"  bad:\n    url: u\n    timeout: -1\n", nil); err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("negative timeout: want a named load error, got %v", err)
+	}
+}
+
+func TestParseYAMLRejectsNegativeControlValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		key  string
+	}{
+		{"context window", "models:\n  m: {base_url: u, model: x, context_window: -1}\n", "context_window"},
+		{"compact at", "models:\n  m: {base_url: u, model: x, compact_at: -1}\n", "compact_at"},
+		{"keep recent", "models:\n  m: {base_url: u, model: x, keep_recent: -1}\n", "keep_recent"},
+		{"prune at", "models:\n  m: {base_url: u, model: x, prune_at: -1}\n", "prune_at"},
+		{"max tokens", "models:\n  m: {base_url: u, model: x, max_tokens: -1}\n", "max_tokens"},
+		{"background cap", "models:\n  m: {base_url: u, model: x}\nbackground: {max_concurrent: -1}\n", "max_concurrent"},
+		{"telegram cap", "models:\n  m: {base_url: u, model: x}\ntelegram: {max_concurrent_turns: -1}\n", "max_concurrent_turns"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseY(t, tc.yaml, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("want a load error naming %s, got %v", tc.key, err)
+			}
+		})
+	}
+}
+
+func TestParseYAMLCompactAtCannotExceedContextWindow(t *testing.T) {
+	_, err := parseY(t, "models:\n  m: {base_url: u, model: x, context_window: 100, compact_at: 101}\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "exceeds context_window") {
+		t.Fatalf("want a threshold ordering error, got %v", err)
+	}
+}
+
+func TestParseYAMLDuplicateTelegramChatFails(t *testing.T) {
+	y := "models:\n  m: {base_url: u, model: x}\ntelegram:\n  chats:\n    - {id: \"123\"}\n    - {id: \"123\", use_description: false}\n"
+	_, err := parseY(t, y, nil)
+	if err == nil || !strings.Contains(err.Error(), "declared more than once") {
+		t.Fatalf("want a duplicate chat error, got %v", err)
+	}
 }
 
 // TestParseYAMLMediaBlockIsUnknownKey pins the subtraction: the media: block
@@ -200,7 +235,6 @@ func TestParseYAMLPruneDefault(t *testing.T) {
 	if m, _ := c.Model("m"); m.PruneAt != 60000 {
 		t.Fatalf("derived prune_at = %d, want 60000", m.PruneAt)
 	}
-	// Explicit 0 disables; explicit >= compact_at clamps to 0.
 	c, _ = parseY(t, "models:\n  m:\n    base_url: u\n    model: x\n    compact_at: 100000\n    prune_at: 0\n", nil)
 	if m, _ := c.Model("m"); m.PruneAt != 0 {
 		t.Fatalf("explicit 0 prune_at = %d", m.PruneAt)
@@ -212,13 +246,10 @@ func TestParseYAMLPruneDefault(t *testing.T) {
 }
 
 func TestParseYAMLPruneWithoutCompact(t *testing.T) {
-	// An explicit prune_at with no compact_at would be silently dead at
-	// runtime (both tiers key off compact_at), so it must fail the load.
 	_, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\n    prune_at: 60000\n", nil)
 	if err == nil || !strings.Contains(err.Error(), "prune_at without compact_at") {
 		t.Fatalf("err = %v", err)
 	}
-	// prune_at: 0 (explicitly disabled) stays fine without compact_at.
 	if _, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\n    prune_at: 0\n", nil); err != nil {
 		t.Fatalf("explicit prune_at: 0 rejected: %v", err)
 	}
@@ -298,8 +329,6 @@ func TestYAMLTypeNamesCoverEveryWireStruct(t *testing.T) {
 }
 
 func TestParseYAMLReviewKeys(t *testing.T) {
-	// Defaults: no review model name (callers fall back to the main agent's
-	// model), no policy.
 	c, err := parseY(t, fullYAML, fullSecrets)
 	if err != nil {
 		t.Fatal(err)
@@ -314,8 +343,6 @@ func TestParseYAMLReviewKeys(t *testing.T) {
 	if c.ReviewModel != "aux" || c.ReviewPolicy != "always DENY /etc writes" {
 		t.Fatalf("got %q/%q", c.ReviewModel, c.ReviewPolicy)
 	}
-	// A review_model naming no declared model is a load error — a config
-	// that loads is a config whose reviewer can actually run.
 	if _, err := parseY(t, fullYAML+"review_model: nope\n", fullSecrets); err == nil ||
 		!strings.Contains(err.Error(), "review_model") {
 		t.Fatalf("want error naming review_model, got %v", err)

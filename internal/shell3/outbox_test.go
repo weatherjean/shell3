@@ -86,15 +86,13 @@ func TestDispatchDuringShutdownDropsCancelledJobsEvent(t *testing.T) {
 	rt.jobs.jobs["bg2"] = &bgJob{id: "bg2", shutdownCancel: true}
 	rt.jobs.mu.Unlock()
 
-	rt.jobs.dispatchCompletion(failedEvent()) // failedEvent is job bg2
+	rt.jobs.dispatchCompletion(failedEvent())
 
 	if rows := outboxRows(t, rt); len(rows) != 0 {
 		t.Fatalf("outbox = %+v, want no row for a shutdown-cancelled job", rows)
 	}
 }
 
-// An event row left by a dead process is redelivered at startup, labeled as
-// recovered, and its row removed.
 func TestRecoverCompletionsRedeliversEvent(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{}
@@ -120,8 +118,6 @@ func TestRecoverCompletionsRedeliversEvent(t *testing.T) {
 	}
 }
 
-// A running marker whose process is dead is reported as a lost job — a
-// visible failure post, never silence — and its row removed.
 func TestRecoverCompletionsReportsDeadRunningMarker(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{}
@@ -171,14 +167,12 @@ func TestRecoverCompletionsSkipsLiveRunningMarker(t *testing.T) {
 	}
 }
 
-// A completion whose user-facing post fails to send (transport outage) keeps
-// its event row: the ⚠️ floor must survive until it can actually be posted.
 func TestFailedPostKeepsEventRow(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{postErr: fmt.Errorf("telegram is down")}
 	rt.SetCompletionHost(host)
 
-	rt.jobs.dispatchCompletion(failedEvent()) // failure path: post + (no owner)
+	rt.jobs.dispatchCompletion(failedEvent())
 
 	rows := outboxRows(t, rt)
 	if len(rows) != 1 || rows[0].Kind != "event" {
@@ -186,9 +180,6 @@ func TestFailedPostKeepsEventRow(t *testing.T) {
 	}
 }
 
-// RedeliverUndelivered retries kept rows: once the transport heals, the post
-// lands and the row is removed. A retry that fails again keeps the row for
-// the next tick.
 func TestRedeliverUndelivered(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{postErr: fmt.Errorf("telegram is down")}
@@ -199,7 +190,6 @@ func TestRedeliverUndelivered(t *testing.T) {
 		t.Fatalf("outbox = %+v, want one kept row", rows)
 	}
 
-	// Still down: the retry re-keeps the row (fresh id, same event).
 	if n := rt.RedeliverUndelivered(); n != 1 {
 		t.Fatalf("redelivered = %d, want 1 (attempted)", n)
 	}
@@ -221,7 +211,6 @@ func TestRedeliverUndelivered(t *testing.T) {
 	if rows := outboxRows(t, rt); len(rows) != 0 {
 		t.Fatalf("outbox = %+v, want empty after successful redelivery", rows)
 	}
-	// Nothing pending: the next tick is a no-op.
 	if n := rt.RedeliverUndelivered(); n != 0 {
 		t.Fatalf("redelivered = %d, want 0 when nothing is pending", n)
 	}
@@ -241,8 +230,6 @@ func waitOutboxEmpty(t *testing.T, rt *Runtime) {
 	t.Fatalf("outbox never drained: %+v", outboxRows(t, rt))
 }
 
-// A bash_bg job writes a running marker at start and removes it when the job
-// finishes: nothing is left for the next boot to report.
 func TestCommandJobMarkerLifecycle(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}

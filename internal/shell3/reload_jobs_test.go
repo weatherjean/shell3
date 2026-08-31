@@ -33,7 +33,6 @@ func fakeReloadState(rt *Runtime, mk func() chat.Config, cleanup func()) reloadS
 	}
 }
 
-// closedWithin reports whether ch is closed within d.
 func closedWithin(ch <-chan struct{}, d time.Duration) bool {
 	select {
 	case <-ch:
@@ -76,7 +75,6 @@ func TestReloadProceedsWhileJobRunning(t *testing.T) {
 		t.Fatalf("reload result = %+v, want 1 agent", res)
 	}
 
-	// End the job; its completion notice must still wake the parent.
 	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -104,12 +102,10 @@ func TestOldPartsCloseAfterDrain(t *testing.T) {
 	if _, err := rt.applyReload(fakeReloadState(rt, fakeCfg("x"), func() {})); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	// The job is still running, so the old generation must NOT be closed yet.
 	if isClosed(oldClosed) {
 		t.Fatal("old generation closed while a job was still running (should be parked)")
 	}
 
-	// Drain the job; the parked closer must now run.
 	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -147,7 +143,6 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 		t.Fatalf("reload 2: %v", err)
 	}
 
-	// Neither old generation may close while the job lingers; the newest stays live.
 	if isClosed(gen0) || isClosed(gen1) {
 		t.Fatal("an old generation closed while the job was still running")
 	}
@@ -155,7 +150,6 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 		t.Fatal("the newest (live) generation must not be closed")
 	}
 
-	// Drain the lingering job; both parked generations must close.
 	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -166,7 +160,6 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 	if !closedWithin(gen1, 3*time.Second) {
 		t.Fatal("gen1 never closed after the job drained")
 	}
-	// The newest generation is current and must remain live until Close.
 	if isClosed(gen2) {
 		t.Fatal("the newest generation closed after a drain — it must stay live")
 	}

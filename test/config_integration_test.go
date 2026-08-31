@@ -18,8 +18,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// writeConfigTree writes a config tree (path → content, relative, subdirs
-// created) into dir.
 func writeConfigTree(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	for name, body := range files {
@@ -44,12 +42,11 @@ const integWiring = `#---
 #---
 `
 
-// integAgent declares one agent named main.
 const integAgent = `
 #---
 # agent: main
 # model: m
-# use: [bash, read]
+# use: [bash]
 #---
 main_prompt() { cat <<'SHELL3_EOF'
 you are a test agent
@@ -57,8 +54,6 @@ SHELL3_EOF
 }
 `
 
-// loadKitConfig writes body as the config dir's kit, loads it, and installs
-// the kit's gate/note the way agentsetup.LoadKit does on the real path.
 func loadKitConfig(t *testing.T, dir, body string, gates, notes map[string]string) *config.LoadedConfig {
 	t.Helper()
 	writeConfigTree(t, dir, map[string]string{kit.FileName: body})
@@ -126,7 +121,6 @@ main_note() {
 		assertToolResultContains(t, events, "blocked by tool-call hook")
 	})
 
-	// --- Turn 2: the tool-result hook redacts the model-visible bash output ---
 	t.Run("tool_result_redacts_via_turn", func(t *testing.T) {
 		events := runToolCallTurn(t, lc, dir, "echo a secret",
 			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"echo SECRET-TOKEN"}`},
@@ -164,10 +158,6 @@ main_note() {
 	})
 }
 
-// runToolCallTurn drives one scripted turn against lc's loaded config: the
-// fake LLM issues tc, the dispatch loop runs it (tool-call hook included),
-// and a second script ends the turn. tweak, when non-nil, adjusts the
-// TurnConfig before the run. Returns every event the session emitted.
 func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, tc llm.ToolCall, tweak func(*chat.TurnConfig)) []chat.Event {
 	t.Helper()
 	fake := fakellm.New(
@@ -205,8 +195,6 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 	return events
 }
 
-// assertToolResultContains fails unless some tool-result event's output
-// contains want; on failure it renders the full event list for debugging.
 func assertToolResultContains(t *testing.T, events []chat.Event, want string) {
 	t.Helper()
 	for _, ev := range events {
@@ -230,8 +218,6 @@ func assertToolResultContains(t *testing.T, events []chat.Event, want string) {
 // invariant end-to-end through the real dispatch loop.
 func TestConfigIntegration_EmptyRewriteOnNonBashFailsClosed(t *testing.T) {
 	dir := t.TempDir()
-	// No name guard on purpose: always emit a command rewrite, even for a
-	// non-bash tool whose payload command is null.
 	lc := loadKitConfig(t, dir, integWiring+integAgent+`
 #---
 # gate: [main]

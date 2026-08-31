@@ -16,14 +16,12 @@ func TestEnsureGlobal(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	// Only Root should exist; no data/ dir.
 	if _, err := os.Stat(g.Root); err != nil {
 		t.Fatalf("Root dir missing: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(g.Root, "data")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must NOT create data/; stat err = %v", err)
 	}
-	// EnsureGlobal must NOT write shell3.lua or .env.example.
 	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
 	}
@@ -60,7 +58,6 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
-	// EnsureGlobal no longer writes shell3.lua or .env.example.
 	for _, path := range []string{
 		filepath.Join(g.Root, "shell3.lua"),
 		filepath.Join(g.Root, ".env.example"),
@@ -70,7 +67,6 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		}
 	}
 
-	// .shell3_project/ and .shell3_project/runs/ must exist.
 	if _, err := os.Stat(l.Root); err != nil {
 		t.Fatalf(".shell3_project/ missing: %v", err)
 	}
@@ -96,7 +92,6 @@ func TestEnsureProject(t *testing.T) {
 		t.Fatalf(".shell3_project/runs/ missing: %v", err)
 	}
 
-	// .shell3_project/ self-ignores via a "*" .gitignore written inside it.
 	gi, err := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	if err != nil {
 		t.Fatalf(".shell3_project/.gitignore missing: %v", err)
@@ -104,12 +99,10 @@ func TestEnsureProject(t *testing.T) {
 	if !hasLine(string(gi), "*") {
 		t.Fatalf(".shell3_project/.gitignore missing '*' entry:\n%s", gi)
 	}
-	// The enclosing repo's own .gitignore is NOT touched (self-contained).
 	if _, err := os.Stat(filepath.Join(cwd, ".gitignore")); !os.IsNotExist(err) {
 		t.Fatalf("cwd/.gitignore should not be created by EnsureProject; stat err = %v", err)
 	}
 
-	// No .ref file, no .shell3/ subdir.
 	if _, err := os.Stat(filepath.Join(cwd, ".shell3")); !os.IsNotExist(err) {
 		t.Fatalf(".shell3/ should not exist; stat err = %v", err)
 	}
@@ -128,7 +121,6 @@ func TestEnsureProjectIdempotent(t *testing.T) {
 		t.Fatalf("EnsureProject 2: %v", err)
 	}
 
-	// "*" must appear exactly once in .shell3_project/.gitignore.
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	if n := strings.Count(string(gi), "*"); n != 1 {
 		t.Errorf("'*' appears %d times in .shell3_project/.gitignore, want 1:\n%s", n, gi)
@@ -146,7 +138,6 @@ func TestGlobalGitignore(t *testing.T) {
 		t.Fatalf("global .gitignore missing: %v", err)
 	}
 	content := string(gi)
-	// data/ must NOT appear (no more SQLite).
 	if strings.Contains(content, "data/") {
 		t.Errorf("global .gitignore must not contain data/:\n%s", content)
 	}
@@ -161,7 +152,6 @@ func TestGlobalGitignore(t *testing.T) {
 		}
 	}
 
-	// Idempotent: second call must not duplicate.
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal second call: %v", err)
 	}
@@ -171,7 +161,6 @@ func TestGlobalGitignore(t *testing.T) {
 	}
 }
 
-// hasLine reports whether content contains want as its own whole trimmed line.
 func hasLine(content, want string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		if strings.TrimSpace(line) == want {

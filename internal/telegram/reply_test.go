@@ -8,17 +8,12 @@ import (
 	"testing"
 )
 
-// A reply longer than replyMaxChunks bubbles posts its first chunk plus the
-// FULL text as a RENDERED HTML document — never a machine-gun of chat
-// messages, and never raw markdown source, which only relocated the wall of
-// unformatted text into a file. Both message ids are recorded so the thread
-// anchor lands on the document.
 func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	long := strings.Repeat("line of reply text\n", 900) // ≫ 2·4096 bytes
+	long := strings.Repeat("line of reply text\n", 900)
 	tconv(b).postReply(context.Background(), sess, "7", long)
 
 	if got := len(fc.replies); got != 1 {
@@ -32,8 +27,6 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	if !strings.HasPrefix(body, "<!doctype html>") {
 		t.Fatalf("the attachment must be a rendered page, got: %.80s", body)
 	}
-	// Every line of the reply survives into the page: the attachment is the
-	// FULL answer, not a preview of it.
 	if n := strings.Count(body, "line of reply text"); n != 900 {
 		t.Fatalf("page carries %d of 900 lines — the full reply must survive", n)
 	}
@@ -46,7 +39,6 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	}
 }
 
-// A short reply (within the cap) posts as plain bubbles, no document.
 func TestPostReplyShortStaysInline(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
@@ -61,8 +53,6 @@ func TestPostReplyShortStaysInline(t *testing.T) {
 	}
 }
 
-// If the overflow document fails to send, the remaining chunks post as
-// bubbles — degraded, never lost.
 func TestPostReplyDocFailureFallsBackToChunks(t *testing.T) {
 	fc := newFakeClient()
 	fc.failDoc = errFakeHTML
@@ -99,9 +89,6 @@ func TestWithReplyContext(t *testing.T) {
 	}
 }
 
-// The overflow page renders structure Telegram cannot: mdhtml parses no
-// tables at all, so a long comparison posted inline arrives as literal pipe
-// characters. In the attachment it must be a real table.
 func TestPostReplyOverflowRendersTables(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")

@@ -22,10 +22,6 @@ func TestToTelegramHTML(t *testing.T) {
 		{"plain paragraph", "just text", "just text"},
 		{"unterminated bold stays literal", "**oops", "**oops"},
 		{"angle brackets in code escaped", "`a<b>c`", "<code>a&lt;b&gt;c</code>"},
-		// Markdown reads a bare <tag> in prose as inline raw HTML. Telegram
-		// accepts only a handful of tags, so we cannot pass it through — but
-		// dropping it silently deletes text the agent wrote. An agent
-		// discussing <think> tags, generics, or XML must survive the trip.
 		{"raw inline html kept as literal text", "a <think> tag in prose", "a &lt;think&gt; tag in prose"},
 		{"raw inline html pair kept", `re.compile(r"<think>.*?</think>")`, `re.compile(r"&lt;think&gt;.*?&lt;/think&gt;")`},
 		{"raw html block kept as literal text", "<div>\nhello\n</div>", "&lt;div&gt;\nhello\n&lt;/div&gt;"},

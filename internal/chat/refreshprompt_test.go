@@ -9,10 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// The system prompt is re-rendered at every turn when RefreshPrompt is wired:
-// a long-lived session must see current context-file contents, not the
-// session-creation snapshot. Nil RefreshPrompt (and an empty render) keep the
-// construction-time prompt.
 func TestRefreshPromptRerendersPerTurn(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a1"}}},
@@ -29,7 +25,7 @@ func TestRefreshPromptRerendersPerTurn(t *testing.T) {
 	sess, _ := newCollectorSession(SessionOpts{})
 
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q1"}, nil)
-	current = "prompt v2" // the config dir changed between turns
+	current = "prompt v2"
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q2"}, nil)
 
 	calls := fake.CallsSnapshot()
@@ -44,8 +40,6 @@ func TestRefreshPromptRerendersPerTurn(t *testing.T) {
 	}
 }
 
-// A nil RefreshPrompt — and a refresher that renders empty — keep the
-// construction-time Personality prompt.
 func TestRefreshPromptNilOrEmptyKeepsSnapshot(t *testing.T) {
 	for name, refresh := range map[string]func() string{
 		"nil":   nil,

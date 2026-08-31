@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// NotifyTextNoWake queues a notice for the next turn without waking the
-// session — /superstop's summary must not spend a turn announcing itself.
 func TestNotifyTextNoWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{})
@@ -27,9 +25,6 @@ func TestNotifyTextNoWake(t *testing.T) {
 	}
 }
 
-// KillAllForStop kills every live job and suppresses their completion
-// routing: no ⚠️ floor post, no owner wake — the superstop summary the caller
-// builds from the returned list is the single record.
 func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}
@@ -50,7 +45,7 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 		t.Errorf("killed title = %q, want the command text", killed[0].Title)
 	}
 	rt.jobs.wait()
-	time.Sleep(50 * time.Millisecond) // let any (wrong) delivery land
+	time.Sleep(50 * time.Millisecond)
 	posts, wakes, fresh := host.snapshot()
 	if len(posts)+len(wakes)+len(fresh) != 0 {
 		t.Fatalf("suppressed kill still routed: posts=%v wakes=%v fresh=%v", posts, wakes, fresh)
@@ -58,7 +53,6 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	if parent.HasQueuedInput() {
 		t.Fatal("suppressed completion still queued a notice on the owner")
 	}
-	// Idempotent: nothing left to kill.
 	if again := parent.KillAllForStop(); len(again) != 0 {
 		t.Fatalf("second KillAllForStop = %+v, want empty", again)
 	}
@@ -88,10 +82,6 @@ func TestNormalKillStillRoutes(t *testing.T) {
 	})
 }
 
-// A lingering subagent — main turn finished, child still open for its
-// bash_bg jobs — must be poisoned by superstop even though it is `finished`:
-// otherwise its child keeps running follow-up turns that route normally after
-// "everything stopped".
 func TestKillAllForStopPoisonsLingeringSubagent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	child, err := rt.Session(SessionOpts{Name: "child", Headless: true})
@@ -120,8 +110,6 @@ func TestKillAllForStopPoisonsLingeringSubagent(t *testing.T) {
 	}
 }
 
-// Suppression is keyed by job id at dispatch time, so it covers every kind —
-// including a subagent's own completion event.
 func TestDispatchCompletionDropsSuppressed(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}

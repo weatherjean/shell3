@@ -23,7 +23,6 @@ func TestJobLogPath(t *testing.T) {
 	if !strings.HasSuffix(p, filepath.Join(id, "jobs", "bg1.log")) {
 		t.Fatalf("path = %q", p)
 	}
-	// The parent dir exists so a caller can open the file directly.
 	if err := os.WriteFile(p, []byte("out"), 0o644); err != nil {
 		t.Fatalf("write to job log path: %v", err)
 	}

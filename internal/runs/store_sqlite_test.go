@@ -9,8 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// Search finds conversation text across sessions, best match first, and
-// stays blind to tool output (which would bury results in noise).
 func TestSearchFindsConversationText(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -46,7 +44,6 @@ func TestSearchFindsConversationText(t *testing.T) {
 	}
 }
 
-// Current session: record, overwrite, read back, and surface isolation.
 func TestCurrentSessionRecordLookup(t *testing.T) {
 	st, _ := Open(t.TempDir())
 	if err := st.SetCurrentSession("web", "sess-a"); err != nil {
@@ -55,11 +52,9 @@ func TestCurrentSessionRecordLookup(t *testing.T) {
 	if got, ok := st.CurrentSession("web"); !ok || got != "sess-a" {
 		t.Fatalf("CurrentSession = %q, %v", got, ok)
 	}
-	// Another surface has its own marker.
 	if _, ok := st.CurrentSession("other"); ok {
 		t.Fatal("surface isolation broken")
 	}
-	// Re-record overwrites (a /new moves the marker).
 	if err := st.SetCurrentSession("web", "sess-b"); err != nil {
 		t.Fatal(err)
 	}
@@ -99,15 +94,11 @@ func TestReopenPersists(t *testing.T) {
 	}
 }
 
-// Sweep: expired sessions go (with their FTS entries and current-session markers),
-// recent ones stay, and keep<=0 preserves everything except trash.
 func TestSweep(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
 	oldID, _ := st.NewSession(Meta{Workdir: "/w"})
 	newID_, _ := st.NewSession(Meta{Workdir: "/w"})
-	// One marker per surface: the expired session owns "web", the recent one
-	// owns "other", so the sweep's drop and its keep are both observable.
 	for surface, id := range map[string]string{"web": oldID, "other": newID_} {
 		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "searchable words"}); err != nil {
 			t.Fatal(err)
@@ -116,7 +107,6 @@ func TestSweep(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Age the old session by rewriting its recency.
 	if _, err := st.db.Exec(`UPDATE sessions SET last_at=? WHERE id=?`,
 		encTime(time.Now().Add(-40*24*time.Hour)), oldID); err != nil {
 		t.Fatal(err)
@@ -148,14 +138,12 @@ func TestSweep(t *testing.T) {
 	if _, ok := st2.CurrentSession("other"); !ok {
 		t.Fatal("live current-session marker was dropped")
 	}
-	// The swept session's text must be gone from the index too.
 	hits, _ := st2.Search("searchable", 10)
 	if len(hits) != 1 || hits[0].SessionID != newID_ {
 		t.Fatalf("fts after sweep: %+v", hits)
 	}
 }
 
-// keep<=0 means keep forever: only empty trash goes.
 func TestSweepKeepForever(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
@@ -163,7 +151,7 @@ func TestSweepKeepForever(t *testing.T) {
 	if err := st.AppendMessage(ancient, llm.Message{Role: llm.RoleUser, Content: "old but precious"}); err != nil {
 		t.Fatal(err)
 	}
-	trash, _ := st.NewSession(Meta{Workdir: "/w"}) // no messages, no job log
+	trash, _ := st.NewSession(Meta{Workdir: "/w"})
 	for _, id := range []string{ancient, trash} {
 		if _, err := st.db.Exec(`UPDATE sessions SET last_at=? WHERE id=?`,
 			encTime(time.Now().Add(-400*24*time.Hour)), id); err != nil {
@@ -181,10 +169,6 @@ func TestSweepKeepForever(t *testing.T) {
 	}
 }
 
-// The empty-trash rule spares dispatch parents: a session other sessions
-// name as parent_id (the pinned cron parent runs no turns, so it is always
-// message-less and always "live") must survive the sweep, or its children's
-// lineage dangles. A plain aged empty session still goes.
 func TestSweepSparesDispatchParents(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
@@ -254,11 +238,6 @@ func TestSweepEndsStaleLiveSessions(t *testing.T) {
 	}
 }
 
-// Every appended message carries a timestamp in the same shape sessions use,
-// so a question about a window ("how many task reports arrived overnight, how
-// many were answered NO_REPLY") is answerable by a plain string compare —
-// the gap that made the harness review's wasted-report count session-lifetime
-// rather than windowed.
 func TestAppendMessageStampsTime(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

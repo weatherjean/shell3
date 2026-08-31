@@ -233,7 +233,7 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 	c.mu.Unlock()
 
 	var sess *shell3.Session
-	if id, ok := c.index.Current(); ok {
+	if id, ok := c.currentThread(); ok {
 		if s, err := c.b.rt.Session(shell3.SessionOpts{
 			ResumeID: id, WorkDir: c.b.workDir, PromptSuffix: c.brief,
 		}); err == nil {
@@ -257,7 +257,7 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 	}
 	c.main = sess
 	c.mu.Unlock()
-	if err := c.index.SetCurrent(sess.ID()); err != nil {
+	if err := c.setCurrentThread(sess.ID()); err != nil {
 		// The in-memory marker would still agree with sess, but a restart
 		// re-reads the STORE: a lost write here resumes a stale conversation
 		// on the next boot, so it must at least be visible.
@@ -274,6 +274,21 @@ func (c *conversation) setAnchor(msgID string) {
 	c.mu.Lock()
 	c.mainAnchor = msgID
 	c.mu.Unlock()
+}
+
+// Thread-index access shares c.mu with migration's index swap. Holding it
+// through the store call prevents a writer that captured the old surface from
+// resurrecting its marker after migration cleared it.
+func (c *conversation) currentThread() (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.index.Current()
+}
+
+func (c *conversation) setCurrentThread(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.index.SetCurrent(id)
 }
 
 // requireReport records the post to fall back to if the turn that reads this
@@ -424,7 +439,7 @@ func (c *conversation) markCurrent(sess *shell3.Session) {
 	if id == "" {
 		return
 	}
-	if err := c.index.SetCurrent(id); err != nil {
+	if err := c.setCurrentThread(id); err != nil {
 		c.b.log.Warn("current-session marker not persisted", "session", id, "err", err)
 	}
 }
@@ -567,8 +582,9 @@ func (c *conversation) postWakeReply(ctx context.Context, sess *shell3.Session, 
 // ~5 — until stop is called.
 func (c *conversation) keepTyping(ctx context.Context) (stop func()) {
 	tctx, cancel := context.WithCancel(ctx)
+	chatID := c.chatIDValue()
 	go func() {
-		_ = c.b.client.Typing(tctx, c.chatID)
+		_ = c.b.client.Typing(tctx, chatID)
 		t := time.NewTicker(4 * time.Second)
 		defer t.Stop()
 		for {
@@ -576,7 +592,7 @@ func (c *conversation) keepTyping(ctx context.Context) (stop func()) {
 			case <-tctx.Done():
 				return
 			case <-t.C:
-				_ = c.b.client.Typing(tctx, c.chatID)
+				_ = c.b.client.Typing(tctx, chatID)
 			}
 		}
 	}()
@@ -650,6 +666,12 @@ func (c *conversation) session() *shell3.Session {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.main
+}
+
+func (c *conversation) chatIDValue() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.chatID
 }
 
 // isGroupRoom reports whether this room is a group (where a description and
@@ -753,12 +775,23 @@ func (b *Bot) migrateRoom(from, to int64) {
 	}
 	b.mu.Lock()
 	old, ok := b.convs[from]
+	b.mu.Unlock()
 	if !ok {
-		b.mu.Unlock()
 		return // nothing to carry over
+	}
+	// Conversation state precedes the registry in the global lock order.
+	// Re-check both map entries after acquiring them together: another update
+	// may have enrolled or migrated the destination in between.
+	old.mu.Lock()
+	b.mu.Lock()
+	if b.convs[from] != old {
+		b.mu.Unlock()
+		old.mu.Unlock()
+		return
 	}
 	if _, taken := b.convs[to]; taken {
 		b.mu.Unlock()
+		old.mu.Unlock()
 		b.log.Warn("chat migrated onto a room that already exists; keeping the newer one",
 			"from", from, "to", to)
 		return
@@ -767,14 +800,17 @@ func (b *Bot) migrateRoom(from, to int64) {
 	old.chatID = to
 	old.isGroup = true // a supergroup is a group whatever the old chat type said
 	old.index = b.threads.forSurface(roomSurface(b.threads.hostSurface(), to))
+	newIndex := old.index
 	b.convs[to] = old
 	b.mu.Unlock()
 
 	// Re-persist under the new surface so a restart resumes the conversation,
 	// and clear the old marker so the janitor is not left pointing at a room
-	// that no longer exists.
-	if sess := old.session(); sess != nil {
-		if err := old.index.SetCurrent(sess.ID()); err != nil {
+	// that no longer exists. Keep c.mu through both store writes: /new and the
+	// end-of-turn marker update use the same lock, so neither can be reordered
+	// behind migration and resurrect a stale surface.
+	if sess := old.main; sess != nil {
+		if err := newIndex.SetCurrent(sess.ID()); err != nil {
 			b.log.Warn("migrated room marker not persisted", "chat", to, "err", err)
 		}
 	}
@@ -783,6 +819,7 @@ func (b *Bot) migrateRoom(from, to int64) {
 			b.log.Warn("old room marker not cleared", "chat", from, "err", err)
 		}
 	}
+	old.mu.Unlock()
 	// The new chat has its own title and description; the cached metadata
 	// belongs to the id that no longer exists.
 	b.metaMu.Lock()

@@ -26,15 +26,11 @@ func startTestDash(t *testing.T) *dash.Server {
 	return srv
 }
 
-// dashMintURL prefers the base URL from dash_url.txt (the exposure agent's
-// hand-off), falls back to the listener's own address when the file is
-// missing or junk, and always appends a fresh valid token.
 func TestDashMintURL(t *testing.T) {
 	srv := startTestDash(t)
 	dir := t.TempDir()
 	urlFile := filepath.Join(dir, dashURLFileName)
 
-	// No file: localhost fallback, and the minted URL actually opens.
 	u := dashMintURL(urlFile, srv)
 	if !strings.HasPrefix(u, "http://"+srv.Addr()+"/?t=") {
 		t.Fatalf("fallback URL = %q", u)
@@ -48,7 +44,6 @@ func TestDashMintURL(t *testing.T) {
 		t.Fatalf("minted URL: code %d, want 200", resp.StatusCode)
 	}
 
-	// Exposure agent wrote a public base: it wins, trailing slash trimmed.
 	if err := os.WriteFile(urlFile, []byte("https://snail.example.ts.net/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +52,6 @@ func TestDashMintURL(t *testing.T) {
 		t.Fatalf("file base URL = %q", u)
 	}
 
-	// Junk content: fall back rather than hand out a broken link.
 	if err := os.WriteFile(urlFile, []byte("not a url"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +73,6 @@ func TestIsHTTPURL(t *testing.T) {
 	}
 }
 
-// seedDashURLFile owns loopback content (rewritten when the port changes)
-// but never touches a tunnel URL the exposure agent wrote.
 func TestSeedDashURLFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), dashURLFileName)
 
@@ -91,7 +83,6 @@ func TestSeedDashURLFile(t *testing.T) {
 		t.Fatalf("seed wrote %q", got)
 	}
 
-	// Port changed: stale loopback is rewritten.
 	if err := seedDashURLFile(f, "127.0.0.1:7401"); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +90,6 @@ func TestSeedDashURLFile(t *testing.T) {
 		t.Fatalf("stale loopback not rewritten: %q", got)
 	}
 
-	// Agent-owned tunnel URL: untouched.
 	if err := os.WriteFile(f, []byte("https://snail.example.ts.net\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

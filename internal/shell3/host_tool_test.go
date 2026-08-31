@@ -8,10 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 )
 
-// TestRegisterHostTool_NameRouting pins the closure-chaining in RegisterHostTool:
-// two registered tools each route to their own handler, an unknown name returns
-// an ErrHostToolNotFound-wrapped error (so dispatchHostTool surfaces the unknown-tool error),
-// and both names land in the schema and host-tool set.
 func TestRegisterHostTool_NameRouting(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})

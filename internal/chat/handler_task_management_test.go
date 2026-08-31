@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// TestTaskListHandler_CallsListJobs verifies the handler invokes cfg.ListJobs
-// and returns its output.
 func TestTaskListHandler_CallsListJobs(t *testing.T) {
 	called := false
 	cfg := ToolConfig{
@@ -29,7 +27,6 @@ func TestTaskListHandler_CallsListJobs(t *testing.T) {
 	}
 }
 
-// TestTaskListHandler_NilCallback returns a safe fallback.
 func TestTaskListHandler_NilCallback(t *testing.T) {
 	cfg := ToolConfig{}
 	out, err := TaskListHandler{}.Execute(context.Background(), "t", nil, cfg)
@@ -41,8 +38,6 @@ func TestTaskListHandler_NilCallback(t *testing.T) {
 	}
 }
 
-// TestTaskStatusHandler_CallsJobStatus verifies the handler passes the id to
-// cfg.JobStatus and returns its output.
 func TestTaskStatusHandler_CallsJobStatus(t *testing.T) {
 	var gotID string
 	cfg := ToolConfig{
@@ -64,7 +59,6 @@ func TestTaskStatusHandler_CallsJobStatus(t *testing.T) {
 	}
 }
 
-// TestTaskStatusHandler_MissingID returns an error string.
 func TestTaskStatusHandler_MissingID(t *testing.T) {
 	cfg := ToolConfig{
 		JobStatus: func(id string) string { return "should not be called" },

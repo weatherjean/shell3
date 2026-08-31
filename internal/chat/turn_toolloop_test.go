@@ -30,10 +30,6 @@ func (h stubHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	return h.out, nil
 }
 
-// collectTurn runs RunTurn against a fresh collector-backed session and returns
-// every event it emits (delivery is synchronous, so all events are present once
-// RunTurn returns) along with the session, so callers can inspect the resulting
-// message history.
 func collectTurn(t *testing.T, ctx context.Context, cfg TurnConfig, input string) ([]Event, *Session) {
 	t.Helper()
 	sess, c := newCollectorSession(SessionOpts{})
@@ -41,8 +37,6 @@ func collectTurn(t *testing.T, ctx context.Context, cfg TurnConfig, input string
 	return c.all(), sess
 }
 
-// hasToolMessage reports whether the session has a RoleTool message for the
-// named tool whose content contains substr.
 func hasToolMessage(sess *Session, name, substr string) bool {
 	for _, m := range sess.messages {
 		if m.Role == llm.RoleTool && m.Name == name && strings.Contains(m.Content, substr) {
@@ -52,9 +46,6 @@ func hasToolMessage(sess *Session, name, substr string) bool {
 	return false
 }
 
-// TestRunTurn_ToolRoundTrip characterizes a normal tool round-trip: round 1
-// returns one tool call, round 2 returns plain text, the turn ends with
-// turn_done, and the tool's result is appended to session history.
 func TestRunTurn_ToolRoundTrip(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -101,9 +92,6 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRunTurn_UnknownTool verifies a call to a name nothing owns (e.g. a
-// hallucinated read_file) comes back as a tool error carrying the bash-first
-// redirect, and the turn keeps going.
 func TestRunTurn_UnknownTool(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -135,7 +123,6 @@ func TestRunTurn_UnknownTool(t *testing.T) {
 	}
 }
 
-// hasKind reports whether any event in evs has the given kind.
 func hasKind(evs []Event, k EventKind) bool {
 	for _, ev := range evs {
 		if ev.Kind == k {
@@ -202,7 +189,6 @@ func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 
 	_, sess := collectTurn(t, ctx, cfg, "hi")
 
-	// Collect the tool_call ids the assistant emitted and the tool results.
 	wantIDs := map[string]bool{}
 	gotIDs := map[string]bool{}
 	for _, m := range sess.messages {
@@ -232,7 +218,6 @@ func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 	}
 }
 
-// msgsContain reports whether any message's content contains substr.
 func msgsContain(msgs []llm.Message, substr string) bool {
 	for _, m := range msgs {
 		if strings.Contains(m.Content, substr) {
@@ -242,10 +227,6 @@ func msgsContain(msgs []llm.Message, substr string) bool {
 	return false
 }
 
-// seedHistory fills a session with n filler user/assistant message pairs so it
-// clears compactionFloor, and primes lastPromptTokens. The marker string is
-// embedded in the first user message so a test can assert it was dropped (or
-// kept) by compaction.
 func seedHistory(sess *Session, marker string, lastPromptTokens int) {
 	sess.messages = []llm.Message{{Role: llm.RoleUser, Content: marker}}
 	for i := 0; i < compactionFloor; i++ {
@@ -257,11 +238,6 @@ func seedHistory(sess *Session, marker string, lastPromptTokens int) {
 	sess.lastPromptTokens = lastPromptTokens
 }
 
-// TestRunTurn_AutoCompact_Triggers pins host-enforced auto-compaction: with
-// compact_at primed below lastPromptTokens and enough history, RunTurn issues
-// one quiet compaction call (script 0) whose summary replaces history, then runs
-// the user's turn (script 1) against the compacted history — no pre-compaction
-// marker text, and the summary present. No Store (compactInto skips rolling).
 func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -290,7 +266,6 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 	if fake.CallCount() != 2 {
 		t.Fatalf("expected 2 LLM calls (compaction + turn), got %d", fake.CallCount())
 	}
-	// The compaction call (call 0) must NOT have emitted assistant tokens.
 	for _, ev := range events {
 		if ev.Kind == EventAssistantToken && strings.Contains(ev.Text, "NARRATIVE SUMMARY") {
 			t.Fatalf("compaction summary leaked as an assistant token: %+v", ev)
@@ -308,9 +283,6 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 	}
 }
 
-// TestRunTurn_AutoCompact_Disabled pins that compact_at=0 never compacts even
-// with a large lastPromptTokens and ample history: exactly one LLM call (the
-// turn itself) and the original history survives.
 func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{TextDelta: "answer"},
@@ -335,9 +307,6 @@ func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
 	}
 }
 
-// TestRunTurn_AutoCompact_FirstTurnNeverCompacts pins that a first turn
-// (lastPromptTokens==0) never compacts even with compact_at set, because the
-// gauge has not yet been populated by a provider usage count.
 func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{TextDelta: "answer"},
@@ -351,7 +320,6 @@ func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
-	// Ample history but lastPromptTokens==0 (never set by a prior turn).
 	seedHistory(sess, "PRE_COMPACT_MARKER", 0)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "new question"}, nil)
 
@@ -360,15 +328,9 @@ func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 	}
 }
 
-// TestRunTurn_AutoCompact_FailSafe pins the hard fail-safe: when the quiet
-// compaction call errors, maybeCompact swallows it and the turn proceeds on the
-// UN-compacted history. The second (turn) call still runs and the original
-// history reaches the provider.
 func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 	fake := fakellm.New(
-		// Compaction call fails.
 		fakellm.Script{Err: errors.New("compaction stream blew up")},
-		// The user's turn proceeds normally.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "answer"},
 			{Usage: &llm.Usage{PromptTokens: 12, TotalTokens: 12}},
@@ -395,7 +357,6 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 	if fake.CallCount() != 2 {
 		t.Fatalf("expected the failed compaction call + the turn call, got %d", fake.CallCount())
 	}
-	// The turn ran against the UN-compacted history.
 	if !msgsContain(fake.Calls[1].Msgs, "PRE_COMPACT_MARKER") {
 		t.Fatalf("fail-safe: turn should run on un-compacted history: %+v", fake.Calls[1].Msgs)
 	}

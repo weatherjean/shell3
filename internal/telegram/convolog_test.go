@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// sendFailClient is a transport whose plain sends are rejected — a Telegram
-// outage, from the log's point of view.
 type sendFailClient struct {
 	*fakeClient
 }
@@ -24,7 +22,6 @@ func (sendFailClient) Send(context.Context, int64, string, ...SendOpt) (string, 
 
 var errSendRejected = errors.New("telegram: bad gateway")
 
-// decodeConvo reads the JSONL log back.
 func decodeConvo(t *testing.T, buf *bytes.Buffer) []convoEvent {
 	t.Helper()
 	var out []convoEvent
@@ -41,7 +38,6 @@ func decodeConvo(t *testing.T, buf *bytes.Buffer) []convoEvent {
 	return out
 }
 
-// findConvo returns the first event matching dir+kind, failing if none does.
 func findConvo(t *testing.T, evs []convoEvent, dir, kind string) convoEvent {
 	t.Helper()
 	for _, ev := range evs {
@@ -64,8 +60,6 @@ func TestConvoLog_RecordsHostPostWithNoMessageRow(t *testing.T) {
 
 	b.conv(42).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "/quiet on"})
 
-	// The kind is send/send_html depending on whether the reply rendered as
-	// markdown; what must hold is that the text reached the record at all.
 	evs := decodeConvo(t, &buf)
 	if len(evs) != 1 || evs[0].Dir != "out" {
 		t.Fatalf("want exactly one outbound event, got %+v", evs)
@@ -79,10 +73,6 @@ func TestConvoLog_RecordsHostPostWithNoMessageRow(t *testing.T) {
 	}
 }
 
-// Inbound is logged BELOW the gates, so a message the bot deliberately ignored
-// still appears. That case leaves no other evidence at all — the bot discards
-// it before a room exists — and "why did it ignore me" is unanswerable without
-// it.
 func TestConvoLog_RecordsMessageDroppedByTheSenderGate(t *testing.T) {
 	var buf bytes.Buffer
 	fc := newFakeClient()
@@ -94,7 +84,7 @@ func TestConvoLog_RecordsMessageDroppedByTheSenderGate(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	updates := b.client.Updates(ctx) // the wrapped transport
+	updates := b.client.Updates(ctx)
 	fc.in <- Msg{ChatID: 99, SenderID: 99, ID: "7", Text: "let me in", ChatType: "private"}
 	<-updates
 
@@ -107,9 +97,6 @@ func TestConvoLog_RecordsMessageDroppedByTheSenderGate(t *testing.T) {
 	}
 }
 
-// A send the transport REJECTED is recorded with its error, so a post the user
-// never saw is distinguishable from one they did. This is why sends are logged
-// after the call, not before it.
 func TestConvoLog_RecordsSendError(t *testing.T) {
 	var buf bytes.Buffer
 	c := newConvoLogClient(&sendFailClient{fakeClient: newFakeClient()}, &buf)
@@ -122,8 +109,6 @@ func TestConvoLog_RecordsSendError(t *testing.T) {
 	}
 }
 
-// Attachment bytes are never written: the log stays greppable, and does not
-// become a second copy of the media dir.
 func TestConvoLog_DescribesMediaWithoutEmbeddingIt(t *testing.T) {
 	var buf bytes.Buffer
 	c := newConvoLogClient(newFakeClient(), &buf)
@@ -157,7 +142,6 @@ func TestConvoLog_UpdatesIsIdempotent(t *testing.T) {
 		t.Fatal("Updates returned a second stream; abandoned forwarders eat messages")
 	}
 
-	// And behaviourally: every message survives repeated subscription.
 	const n = 6
 	go func() {
 		for i := 0; i < n; i++ {
@@ -166,7 +150,7 @@ func TestConvoLog_UpdatesIsIdempotent(t *testing.T) {
 	}()
 	for i := 0; i < n; i++ {
 		select {
-		case <-c.Updates(ctx): // re-subscribing each read, exactly as Run did
+		case <-c.Updates(ctx):
 		case <-time.After(3 * time.Second):
 			t.Fatalf("message %d of %d never arrived — a forwarder swallowed it", i+1, n)
 		}

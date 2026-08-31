@@ -96,6 +96,9 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	// as an empty user turn, which real providers reject.
 	inboxSeeded := userMsg.Content == ""
 	if !inboxSeeded {
+		if cfg.TrustedUserContext && userMsg.Role == llm.RoleUser {
+			userMsg.OperatorContent = userMsg.Content
+		}
 		sess.append(userMsg)
 	}
 
@@ -289,6 +292,11 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		// gate, then resolve a handler: custom dispatchers, then built-ins —
 		// custom first, so a declared tool name always wins.
 		if !invalid {
+			// The reviewer needs the transcript through the current tool call.
+			// Copy the slice so a reviewer cannot retain a view that later append
+			// operations mutate underneath it.
+			toolCfg := cfg.ToolConfig
+			toolCfg.ReviewMessages = append([]llm.Message(nil), st.allMsgs...)
 			// The gate is the only policy surface and fires before every tool.
 			// The bash family self-gates in its handlers, where rewrite and
 			// runner-swap resolve; everything else is gated here by name and
@@ -309,7 +317,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					res = errResult(unknownToolMsg(tc.Name))
 				}
 				if handler != nil {
-					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), cfg.ToolConfig)
+					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), toolCfg)
 					res = classifyHandlerOutput(out)
 					if herr != nil {
 						// Handlers normally encode failure in their output, so a

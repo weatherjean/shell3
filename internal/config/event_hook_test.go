@@ -10,8 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// evCfg writes a kit declaring main plus one event subscriber over the given
-// kinds, and installs it the way agentsetup.LoadKit does.
 func evCfg(t *testing.T, on []string, body string) (*LoadedConfig, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -46,7 +44,6 @@ main_event() {
 	return c, out
 }
 
-// A subscribed kind reaches the function with the event JSON on stdin.
 func TestRunEventDeliversSubscribedKind(t *testing.T) {
 	c, out := evCfg(t, []string{"turn_done"}, `cat > "$SEEN"`)
 	c.RunEvent(context.Background(), "main", "turn_done", []byte(`{"event":"turn_done","x":1}`))
@@ -60,8 +57,6 @@ func TestRunEventDeliversSubscribedKind(t *testing.T) {
 	}
 }
 
-// An unsubscribed kind never forks a shell. This is the whole point of the
-// mandatory on: filter — assistant_token fires per streamed token.
 func TestRunEventSkipsUnsubscribedKind(t *testing.T) {
 	c, out := evCfg(t, []string{"turn_done"}, `cat > "$SEEN"`)
 	c.RunEvent(context.Background(), "main", "assistant_token", []byte(`{"event":"assistant_token"}`))
@@ -71,8 +66,6 @@ func TestRunEventSkipsUnsubscribedKind(t *testing.T) {
 	}
 }
 
-// An agent with no subscriber is untouched; there is no fallback between
-// agents, the same rule gate:/note: follow.
 func TestRunEventUngovernedAgentIsNoop(t *testing.T) {
 	c, out := evCfg(t, []string{"turn_done"}, `cat > "$SEEN"`)
 	c.RunEvent(context.Background(), "explorer", "turn_done", []byte(`{}`))
@@ -92,8 +85,6 @@ func TestRunEventFailureIsReportedNotFatal(t *testing.T) {
 	}
 }
 
-// SubscribedKinds is what the runtime asks before serialising an event: if
-// nobody subscribes to a kind, it is never rendered to JSON at all.
 func TestSubscribedKinds(t *testing.T) {
 	c, _ := evCfg(t, []string{"turn_done", "error"}, `cat`)
 	if !c.SubscribesTo("main", "turn_done") {

@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // paramName is the identifier shape a param must have: it becomes an
@@ -113,6 +115,12 @@ type Runner struct {
 // environment would hand every tool every secret in the process.
 var passthroughEnv = []string{"PATH", "HOME", "TMPDIR", "LANG", "TZ"}
 
+// toolWaitDelay bounds how long Run waits for inherited stdout/stderr pipes
+// after cancellation. A tool may start children; cancellation signals the
+// whole process group and must not let a descendant retaining an output pipe
+// wedge the agent turn.
+const toolWaitDelay = 2 * time.Second
+
 // baseEnv builds the inherited environment for a run.
 func (r Runner) baseEnv(lookup func(string) (string, bool)) []string {
 	if r.Env != nil {
@@ -146,6 +154,14 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 	cmd := exec.CommandContext(ctx, sh, "-c", SourceScript(r.Path, t.Func))
 	cmd.Dir = r.Dir
 	cmd.Env = append(r.baseEnv(os.LookupEnv), env...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = toolWaitDelay
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

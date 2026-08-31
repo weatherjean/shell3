@@ -18,7 +18,7 @@ func TestTranslate(t *testing.T) {
 	cases := []struct {
 		name string
 		in   chat.Event
-		want *Event // nil = dropped
+		want *Event
 	}{
 		{"token", chat.Event{Kind: chat.EventAssistantToken, Text: "hi"}, &Event{Kind: Token, Text: "hi"}},
 		{"reasoning", chat.Event{Kind: chat.EventAssistantReasoning, Text: "think"}, &Event{Kind: Reasoning, Text: "think"}},
@@ -60,8 +60,6 @@ func TestTranslate(t *testing.T) {
 	}
 }
 
-// TestTranslateErrorPassesTypedErrThrough verifies translate threads the typed
-// chat.Event.Err verbatim (not a string-rebuilt copy), so errors.Is works.
 func TestTranslateErrorPassesTypedErrThrough(t *testing.T) {
 	sentinel := errors.New("typed boom")
 	got, ok := translate(chat.Event{Kind: chat.EventError, Text: sentinel.Error(), Err: sentinel})
@@ -92,7 +90,6 @@ func TestSession_ID_NoStoreReportsEmpty(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	defer s.Close()
 
-	// newTestSession configures no store, so ID reports the documented "".
 	if got := s.ID(); got != "" {
 		t.Fatalf("ID() = %q, want %q (no store)", got, "")
 	}
@@ -170,7 +167,6 @@ func TestSession_MultiTurn_HistoryCarries(t *testing.T) {
 	if t2 != "second" || !d2 {
 		t.Fatalf("turn 2: text=%q done=%v", t2, d2)
 	}
-	// Two user turns + two assistant replies must be retained.
 	if got := len(s.sess.Messages()); got < 4 {
 		t.Fatalf("history has %d messages, want >= 4 (2 turns)", got)
 	}
@@ -198,10 +194,6 @@ func TestSession_ErrorPath(t *testing.T) {
 	}
 }
 
-// TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
-// EndSession error instead of always returning nil. The store's database is
-// closed before Close runs, forcing EndSession to fail; front-ends'
-// `if err := sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)
@@ -211,7 +203,6 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	s := newTestSession(t, client, chat.Config{Store: st})
 
-	// Close the store's database so EndSession fails when Close runs.
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -220,9 +211,6 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	}
 }
 
-// TestSession_Compact_Delta pins the manual /compact path end to end at the
-// shell3 layer: a compactable history is summarised (one quiet fakellm call)
-// and the reported token estimates shrink.
 func TestSession_Compact_Delta(t *testing.T) {
 	client := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
@@ -230,8 +218,6 @@ func TestSession_Compact_Delta(t *testing.T) {
 	s := newTestSession(t, client, chat.Config{})
 	defer s.Close()
 
-	// Seed a large history directly: many chunky turns so the head dwarfs the
-	// preserved tail.
 	big := strings.Repeat("x", 2000)
 	msgs := make([]llm.Message, 0, 40)
 	for i := 0; i < 20; i++ {
@@ -250,7 +236,6 @@ func TestSession_Compact_Delta(t *testing.T) {
 		t.Fatalf("want before > after > 0, got before=%d after=%d", before, after)
 	}
 
-	// A fresh session has nothing to compact.
 	s.sess.SetMessages([]llm.Message{{Role: llm.RoleUser, Content: "hi"}})
 	if _, _, err := s.Compact(context.Background()); !errors.Is(err, chat.ErrNothingToCompact) {
 		t.Fatalf("Compact on tiny history: want ErrNothingToCompact, got %v", err)
@@ -280,7 +265,7 @@ func TestSession_Compact_CloseCancelsAndJoins(t *testing.T) {
 		_, _, err := s.Compact(context.Background())
 		compactErr <- err
 	}()
-	<-client.entered // the summarisation call is now in flight
+	<-client.entered
 
 	// Close must cancel the compaction's context and join it before returning.
 	if err := s.Close(); err != nil {
@@ -299,9 +284,6 @@ func TestSession_Compact_CloseCancelsAndJoins(t *testing.T) {
 	}
 }
 
-// TestSession_Compact_WakesStrandedNotice pins the unwind contract Compact
-// shares with Send: a notice queued while the busy gate was held must re-emit
-// a Wake when the gate clears, or an unattended host never delivers it.
 func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
 	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client, ModeLabel: "code"} })
@@ -327,13 +309,10 @@ func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
 		close(compactDone)
 	}()
 	<-client.entered
-	// A completion notice lands mid-compaction; its own Wake (if any) would
-	// bounce off the busy gate.
 	s.sess.InterjectNotice("bg1 finished mid-compaction")
-	cancel() // end the compaction
+	cancel()
 	<-compactDone
 
-	// Compact's unwind must have re-emitted a Wake for the queued notice.
 	waitForWake(t, rt, s)
 }
 
@@ -343,8 +322,6 @@ func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
 	}})
 	s := newTestSession(t, client, chat.Config{})
 
-	// Abandon the Send channel: never read it, so drain parks on the unbuffered
-	// forward of the first token.
 	out := s.Send(context.Background(), "hi")
 
 	done := make(chan error, 1)
@@ -361,7 +338,7 @@ func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
 		select {
 		case _, ok := <-out:
 			if !ok {
-				return // channel closed as required
+				return
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("Send channel was not closed on Close; a ranging consumer would hang")
@@ -447,8 +424,6 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 	}
 }
 
-// TestRoute_SetsIsHostTool verifies route resolves IsHostTool against the
-// session's current HostToolNames (translate stays pure, so route does it).
 func TestRoute_SetsIsHostTool(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{
 		AgentKnobs: chat.AgentKnobs{HostToolNames: map[string]bool{"my_tool": true}},
@@ -478,7 +453,6 @@ func TestRoute_SetsIsHostTool(t *testing.T) {
 	}
 }
 
-// TestSnapshot_PopulatesFromConfig verifies Snapshot mirrors cfg.
 func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	client := fakellm.New()
 	cfg := chat.Config{
@@ -508,8 +482,6 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	}
 }
 
-// TestSend_TextPath verifies Send drives a plain-text turn (tokens stream,
-// Done fires, history carries).
 func TestSend_TextPath(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "reply"}}})
 	s := newTestSession(t, client, chat.Config{})
@@ -533,11 +505,6 @@ func TestSend_TextPath(t *testing.T) {
 	}
 }
 
-// TestSession_BusyEnforcement pins the runtime enforcement of the
-// single-turn-at-a-time contract: while a turn is in flight, Send yields an
-// immediate ErrBusy Error event (without starting a turn), and the
-// between-turns mutators return ErrBusy. Draining the in-flight turn clears
-// the gate.
 func TestSession_BusyEnforcement(t *testing.T) {
 	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
 	s := newTestSession(t, client, chat.Config{})
@@ -545,9 +512,8 @@ func TestSession_BusyEnforcement(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	out := s.Send(ctx, "hi")
-	<-client.entered // the turn is now in flight inside Stream
+	<-client.entered
 
-	// Overlapping Send: one ErrBusy Error event, then close. No second turn.
 	var rejected []Event
 	for ev := range s.Send(context.Background(), "overlap") {
 		rejected = append(rejected, ev)
@@ -560,7 +526,6 @@ func TestSession_BusyEnforcement(t *testing.T) {
 		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
 	}
 
-	// Drain the in-flight turn; the gate must clear.
 	cancel()
 	for range out {
 	}
@@ -569,8 +534,6 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	}
 }
 
-// TestSession_InterjectMidTurn: Interject during a running turn surfaces as a
-// SystemReminder event in that same turn, after the tool round.
 func TestSession_InterjectMidTurn(t *testing.T) {
 	client := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -601,8 +564,6 @@ func TestSession_InterjectMidTurn(t *testing.T) {
 	}
 }
 
-// TestSession_InterjectWhileIdle: Interject between turns is delivered at the
-// start of the next Send.
 func TestSession_InterjectWhileIdle(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	s := newTestSession(t, client, chat.Config{})
@@ -620,8 +581,6 @@ func TestSession_InterjectWhileIdle(t *testing.T) {
 	}
 }
 
-// TestSessionJobsFromManager verifies that Session.Jobs() reads from the
-// in-process job runtime.
 func TestSessionJobsFromManager(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{})
@@ -635,9 +594,6 @@ func TestSessionJobsFromManager(t *testing.T) {
 	}
 }
 
-// TestTurnConfigHeadless: the hook payload's headless flag mirrors
-// SessionOpts.Headless — true for subagents/cron dispatches, false for a
-// front-end session with a human behind it.
 func TestTurnConfigHeadless(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	defer s.Close()

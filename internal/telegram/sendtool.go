@@ -155,16 +155,16 @@ func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJS
 	}
 	switch kind {
 	case "photo":
-		err = b.client.SendPhoto(ctx, c.chatID, base, data, args.Caption)
+		err = b.client.SendPhoto(ctx, c.chatIDValue(), base, data, args.Caption)
 	case "voice":
-		err = b.client.SendVoice(ctx, c.chatID, data, args.Caption)
+		err = b.client.SendVoice(ctx, c.chatIDValue(), data, args.Caption)
 	case "audio":
-		err = b.client.SendAudio(ctx, c.chatID, base, data, args.Caption)
+		err = b.client.SendAudio(ctx, c.chatIDValue(), base, data, args.Caption)
 	case "video":
-		err = b.client.SendVideo(ctx, c.chatID, base, data, args.Caption)
+		err = b.client.SendVideo(ctx, c.chatIDValue(), base, data, args.Caption)
 	default:
 		base, data = renderMarkdownDoc(base, data)
-		_, err = b.client.SendDocument(ctx, c.chatID, base, data, args.Caption)
+		_, err = b.client.SendDocument(ctx, c.chatIDValue(), base, data, args.Caption)
 	}
 	if err != nil {
 		return "error: failed to send: " + err.Error(), nil

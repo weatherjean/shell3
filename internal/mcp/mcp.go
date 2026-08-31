@@ -239,7 +239,9 @@ func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 		if !all && !slices.Contains(serverNames, sc.cfg.Name) {
 			continue
 		}
+		sc.mu.Lock()
 		if !sc.up {
+			sc.mu.Unlock()
 			continue
 		}
 		for _, t := range sc.tools {
@@ -253,6 +255,7 @@ func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 				Parameters:  schemaMap(t.InputSchema),
 			})
 		}
+		sc.mu.Unlock()
 	}
 	return defs
 }
@@ -296,10 +299,13 @@ func (m *Manager) Call(ctx context.Context, name, argsJSON string) (string, erro
 	if !ok {
 		return "", fmt.Errorf("unknown MCP tool %q", name)
 	}
-	var args map[string]any
+	args := map[string]any{}
 	if strings.TrimSpace(argsJSON) != "" {
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return fmt.Sprintf("MCP tool error: invalid arguments JSON: %v", err), nil
+		}
+		if args == nil {
+			return "MCP tool error: arguments must be a JSON object", nil
 		}
 	}
 	sc := r.sc

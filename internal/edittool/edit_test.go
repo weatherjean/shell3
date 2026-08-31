@@ -65,7 +65,6 @@ func TestEditFilePreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("line1\r\nline2\r\n"), 0o644)
-	// model emits LF — our code should coerce to file's CRLF.
 	if _, err := EditFile(context.Background(), dir, "f.txt", "line2", "LINE2", false); err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +115,9 @@ func TestEditFilePreservesFileMode(t *testing.T) {
 func TestEditFileLFFallbackOnCRLFFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	// File on disk uses CRLF.
 	original := "line1\r\nline2\r\nline3\r\n"
 	_ = os.WriteFile(path, []byte(original), 0o644)
 
-	// Multi-line search written by model with LF only — primary Replace
-	// against the unmodified content would fail because the source is CRLF.
-	// The LF-normalized fallback path is the one that should succeed and
-	// the result must be re-coerced back to CRLF on disk.
 	find := "line1\nline2"
 	repl := "LINE1\nLINE2"
 	if _, err := EditFile(context.Background(), dir, "f.txt", find, repl, false); err != nil {
@@ -137,7 +131,6 @@ func TestEditFileLFFallbackOnCRLFFile(t *testing.T) {
 }
 
 func TestLineStatsApproxFallback(t *testing.T) {
-	// Construct two line lists big enough to exceed lcsBudget.
 	a := make([]string, 2000)
 	b := make([]string, 2000)
 	for i := range a {
@@ -182,7 +175,6 @@ func TestEditFile_OverwritePreservesMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Overwrite via empty oldString must keep the existing (executable) mode.
 	if _, err := EditFile(context.Background(), dir, "script.sh", "", "new", false); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +224,7 @@ func TestUnifiedDiffShowsAllDistantHunks(t *testing.T) {
 	if !strings.Contains(diff, "-line-25") || !strings.Contains(diff, "+LINE-25") {
 		t.Fatalf("diff missing second hunk:\n%s", diff)
 	}
-	if count := strings.Count(diff, "@@"); count != 4 { // two hunk headers, each with opening and closing @@
+	if count := strings.Count(diff, "@@"); count != 4 {
 		t.Fatalf("got %d @@ markers, want 4 for two hunks:\n%s", count, diff)
 	}
 	for _, hidden := range []string{" line-12", " line-21"} {
@@ -250,15 +242,6 @@ func numberedLines(n int) string {
 	return sb.String()
 }
 
-// TestEditFileOverwriteReadErrorReturned guards the create/overwrite branch
-// (oldString==""): if the existing file is stat-able and writable but NOT
-// readable, EditFile must return the read error rather than silently treating
-// oldContent as "" and reporting a spurious full-file-creation diff.
-//
-// A write-only file (mode 0200) isolates exactly this: os.ReadFile fails while
-// the subsequent os.WriteFile succeeds — so the unfixed code would swallow the
-// read error and return a successful Result whose stats wrongly count every new
-// line as an addition. The fix makes the read error surface instead.
 func TestEditFileOverwriteReadErrorReturned(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: mode 0200 is still readable, cannot inject read failure")
@@ -268,11 +251,9 @@ func TestEditFileOverwriteReadErrorReturned(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old-a\nold-b\nold-c\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Write-only: read fails, but stat and the overwrite write still succeed.
 	if err := os.Chmod(path, 0o200); err != nil {
 		t.Fatal(err)
 	}
-	// Restore perms so t.TempDir cleanup can remove the file.
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
 	res, err := EditFile(context.Background(), dir, "writeonly.txt", "", "new-1\nnew-2\n", false)

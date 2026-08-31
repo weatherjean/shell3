@@ -11,9 +11,7 @@ func msg(role llm.Role, content string) llm.Message {
 }
 
 func TestCompactionCut_KeepsTailByTokens(t *testing.T) {
-	// Each message is 40 bytes ≈ 10 tokens. keepRecent=25 tokens should keep
-	// the last 3 messages (10+10+10 >= 25) -> cut at index len-3.
-	body := "0123456789012345678901234567890123456789" // 40 bytes
+	body := "0123456789012345678901234567890123456789"
 	msgs := []llm.Message{
 		msg(llm.RoleUser, body), msg(llm.RoleAssistant, body),
 		msg(llm.RoleUser, body), msg(llm.RoleAssistant, body),
@@ -33,8 +31,6 @@ func TestCompactionCut_ZeroKeepRecentReturnsLen(t *testing.T) {
 }
 
 func TestCompactionCut_SnapsForwardOffOrphanToolResult(t *testing.T) {
-	// Tail boundary lands on a tool message; it must snap forward so the tail
-	// never begins with an orphan tool result.
 	msgs := []llm.Message{
 		msg(llm.RoleUser, "u"),
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "1", Name: "bash", RawArgs: "{}"}}},

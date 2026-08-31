@@ -17,10 +17,6 @@ import (
 	"testing"
 )
 
-// scriptPath returns the shipped skill-search script's path in the repo
-// source tree (not a rendered copy — RenderBaseConfig doesn't change its
-// contents, only its file mode, which TestRenderedConfigLoads already
-// covers).
 func scriptPath(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join("defaults", "base", "lib", "bin", "skill-search")
@@ -37,9 +33,6 @@ func TestSkillSearchSyntax(t *testing.T) {
 	}
 }
 
-// stubbedPATH prepends a directory holding a curl that always fails to PATH,
-// so any refresh attempt reports "unavailable" instead of reaching the
-// network.
 func stubbedPATH(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
@@ -63,10 +56,6 @@ func TestSkillSearchOfflineNoCache(t *testing.T) {
 	}
 }
 
-// fakeCatalog writes a minimal CATALOG.md with n rows that all match "widget",
-// plus a sidecar SHA, directly into the cache location skill-search reads —
-// mirroring a fresh (not stale) cache so ensure_catalog skips the network
-// entirely.
 func fakeCatalog(t *testing.T, home string, n int) {
 	t.Helper()
 	cacheDir := filepath.Join(home, ".shell3", "lib", "cache")
@@ -112,8 +101,6 @@ func TestSkillSearchCapsResults(t *testing.T) {
 	if !strings.Contains(body, "showing first 40 of 60") {
 		t.Errorf("expected a cap notice naming 40 of 60, got:\n%s", body)
 	}
-	// Every field the header promises must survive — a naive character cut
-	// would drop Source on long descriptions.
 	if !strings.Contains(body, "Skill | Risk | Source | Description") {
 		t.Errorf("expected a header row, got:\n%s", body)
 	}
@@ -122,14 +109,6 @@ func TestSkillSearchCapsResults(t *testing.T) {
 	}
 }
 
-// TestSkillSearchHandlesPipeInDescription covers the real catalog's own
-// `\|` escape (markdown's way of putting a literal "|" inside a table
-// cell): -F'|' still splits on it since it doesn't know about the
-// backslash, so a fixed-offset field extraction hands Risk a Description
-// fragment and blanks Source. Two real catalog rows do this (loki-mode,
-// makepad-widgets); this fixture also throws in a bare (unescaped) "|" for
-// good measure, to prove the extraction is robust to extra "|" occurrences
-// in general, not just the specific escape the catalog happens to use.
 func TestSkillSearchHandlesPipeInDescription(t *testing.T) {
 	home := t.TempDir()
 	cacheDir := filepath.Join(home, ".shell3", "lib", "cache")

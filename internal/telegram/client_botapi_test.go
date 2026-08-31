@@ -14,9 +14,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
-// A media message carries its words in Caption, not Text: a photo sent with
-// "translate this" has Text=="" and Caption=="translate this". Dropping the
-// caption loses the whole instruction.
 func TestNormalizeMessage_CaptionIsTheText(t *testing.T) {
 	m := &models.Message{
 		ID:      7,
@@ -33,8 +30,6 @@ func TestNormalizeMessage_CaptionIsTheText(t *testing.T) {
 	}
 }
 
-// Text wins when both are set (Telegram never sets both, but the fallback must
-// not reorder them).
 func TestNormalizeMessage_TextWinsOverCaption(t *testing.T) {
 	m := &models.Message{Chat: models.Chat{ID: 42}, Text: "plain", Caption: "cap"}
 	if got := normalizeMessage(m).Text; got != "plain" {
@@ -42,8 +37,6 @@ func TestNormalizeMessage_TextWinsOverCaption(t *testing.T) {
 	}
 }
 
-// End to end: a captioned photo's words must reach the model's prompt, not just
-// the attachment note preflight injects.
 func TestCaptionedPhoto_ReachesTurnPrompt(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})

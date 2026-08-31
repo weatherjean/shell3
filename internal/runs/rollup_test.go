@@ -7,9 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestCronRollup_SumsByJob pins the grouping this task exists for: "what did
-// this cron job cost this week" needs per-job sums across every session that
-// job started, not a single session's ledger.
 func TestCronRollup_SumsByJob(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -48,9 +45,6 @@ func TestCronRollup_SumsByJob(t *testing.T) {
 	}
 }
 
-// TestCronRollup_SinceFiltersOldSessions: a window narrower than "all time"
-// must exclude sessions started before it — otherwise "cost this week" would
-// silently report "cost ever".
 func TestCronRollup_SinceFiltersOldSessions(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -64,7 +58,7 @@ func TestCronRollup_SinceFiltersOldSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := st.CronRollup(time.Now().Add(24 * time.Hour)) // future cutoff: nothing qualifies
+	got, err := st.CronRollup(time.Now().Add(24 * time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,21 +67,11 @@ func TestCronRollup_SinceFiltersOldSessions(t *testing.T) {
 	}
 }
 
-// TestCronRollup_ReportTurnExcluded pins the deliberate, documented
-// undercount described on cronCost (internal/render/cron.go): the
-// main-agent session that later reads a cron job's task report and answers
-// it runs with cron_job="" (it is the main conversation, not the dispatched
-// child), so its usage must NOT be attributed to the job that triggered it —
-// a wake turn can drain reports from several jobs plus user backlog in one
-// turn, so there is no honest per-job split of that turn's cost. This is the
-// negative half of TestCronRollup_SumsByJob: the dispatched child's spend
-// counts, the report-reading turn's spend must not.
 func TestCronRollup_ReportTurnExcluded(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The dispatched child session: this IS the job's run, cron_job set.
 	childID, err := st.NewSession(runs.Meta{Agent: "syncer", CronJob: "sync"})
 	if err != nil {
 		t.Fatal(err)
@@ -95,13 +79,11 @@ func TestCronRollup_ReportTurnExcluded(t *testing.T) {
 	if err := st.AddUsage(childID, 10000, 500); err != nil {
 		t.Fatal(err)
 	}
-	// The main conversation session that later reads the task report and
-	// replies — cron_job is '' because this is not a dispatched run.
 	mainID, err := st.NewSession(runs.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.AddUsage(mainID, 90000, 4500); err != nil { // the "62% cost" report turn
+	if err := st.AddUsage(mainID, 90000, 4500); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,10 +99,6 @@ func TestCronRollup_ReportTurnExcluded(t *testing.T) {
 	}
 }
 
-// TestAddUsage_AccumulatesAndSurvivesRoundTrip proves AddUsage sums across
-// multiple calls (not last-write-wins) and that the total is read back
-// correctly through SessionMeta — the store-level half of the accumulation
-// guarantee chat.saveHistory depends on.
 func TestAddUsage_AccumulatesAndSurvivesRoundTrip(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -144,8 +122,6 @@ func TestAddUsage_AccumulatesAndSurvivesRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAddUsage_UnknownSessionErrors: a cost that silently lands nowhere is
-// worse than a loud failure naming the id — see AddUsage's doc comment.
 func TestAddUsage_UnknownSessionErrors(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {

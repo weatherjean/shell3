@@ -19,8 +19,6 @@ func TestEmitRetry(t *testing.T) {
 	}
 }
 
-// retryOnlyClient is a fake LLMClient that emits a single Retry event then
-// completes the stream, exercising the streamOnce relay path.
 type retryOnlyClient struct{ notice llm.RetryNotice }
 
 func (c retryOnlyClient) Stream(_ context.Context, _ []llm.Message, _ []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {

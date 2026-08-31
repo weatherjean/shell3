@@ -21,6 +21,17 @@ import (
 	"github.com/weatherjean/shell3/internal/telegram"
 )
 
+type allowFromSetter interface {
+	SetAllowFrom([]string) error
+}
+
+func configureAllowFrom(b allowFromSetter, console bool, ids []string) error {
+	if console {
+		return nil // stdin is already the console transport's trust boundary
+	}
+	return b.SetAllowFrom(ids)
+}
+
 // newTelegramCommand builds `shell3 telegram`, the bot front-end: one
 // long-lived conversation per chat that every message continues (a reply is a
 // context hint, /new the only reset), cron firing from a hidden dispatch
@@ -86,7 +97,7 @@ func newTelegramCommand() *cobra.Command {
 			// Authorization is per sender, not per chat, so a bad allow_from
 			// entry fails startup rather than silently widening or narrowing
 			// who can drive an unrestricted shell.
-			if err := b.SetAllowFrom(tg.AllowFrom); err != nil {
+			if err := configureAllowFrom(b, console, tg.AllowFrom); err != nil {
 				return err
 			}
 			b.SetMaxConcurrentTurns(tg.MaxConcurrentTurns)

@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
-// hostReminderText concatenates a session's standing+logged reminder texts so a
-// test can assert over the whole set the turn loop would inject.
 func hostReminderText(s *Session) string {
 	var b strings.Builder
 	for _, r := range s.sess.Reminders() {
@@ -19,7 +17,6 @@ func hostReminderText(s *Session) string {
 	return b.String()
 }
 
-// findReminder returns the first standing reminder containing sub, or "".
 func findReminder(s *Session, sub string) string {
 	for _, r := range s.sess.Reminders() {
 		if strings.Contains(r.Text, sub) {
@@ -29,9 +26,6 @@ func findReminder(s *Session, sub string) string {
 	return ""
 }
 
-// hostRemindersCfg builds a fake chat.Config for an agent with the given
-// Environment toggle plus the session-level facts the Environment reminder
-// reads (config path, runs dir, status line).
 func hostRemindersCfg(env bool) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
@@ -45,8 +39,6 @@ func hostRemindersCfg(env bool) func() chat.Config {
 	}
 }
 
-// newHostRemindersRuntime wires the runtime field applyHostReminders depends on
-// that newTestRuntime leaves zero: a resolvable config path.
 func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
 	rt := newTestRuntime(t, mk)
@@ -54,17 +46,12 @@ func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	return rt
 }
 
-// TestHostReminders_Environment: with Environment=true, a fresh session carries
-// an Environment standing reminder (mentions the session id) while the system
-// prompt carries no host section.
 func TestHostReminders_Environment(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(true))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Give the runs session an id (the store does this in real runs) and
-	// re-assemble so the Environment reminder can advertise the session id.
 	s.sess.SetID("sess-42")
 	s.applyHostReminders()
 
@@ -81,9 +68,6 @@ func TestHostReminders_Environment(t *testing.T) {
 		t.Errorf("system prompt must not contain the host Environment section:\n%s", prompt)
 	}
 
-	// The prompt-inspection view (the Status view's prompt panel) reads
-	// Snapshot().SystemPrompt, which folds in the standing reminders so the user
-	// sees the full effective context even though the authored prompt stays clean.
 	shown := s.Snapshot().SystemPrompt
 	if !strings.Contains(shown, "Host reminders") {
 		t.Errorf("Snapshot prompt missing the Host reminders section:\n%s", shown)
@@ -93,7 +77,6 @@ func TestHostReminders_Environment(t *testing.T) {
 	}
 }
 
-// TestHostReminders_Off: toggle off → no standing reminders at all.
 func TestHostReminders_Off(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(false))
 	s, err := rt.Session(SessionOpts{})

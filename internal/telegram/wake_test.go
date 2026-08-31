@@ -14,15 +14,13 @@ func TestConsumeWakes_PostsReplyAsMail(t *testing.T) {
 	b := newBot(t, fc, rt)
 	c := tconv(b)
 	c.mu.Lock()
-	c.main = sess // a wake is honored only for the main conversation
+	c.main = sess
 	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go b.consumeWakes(ctx)
 
-	// NotifyText on an idle session queues input and emits a Wake; the mail
-	// turn's reply posts as ✉️ agent mail once the queued input drains.
 	sess.NotifyText("scheduled job result")
 
 	waitFor(t, func() bool {

@@ -15,14 +15,11 @@ import (
 	"testing"
 )
 
-// runHook feeds one tool call to a scaffolded hook and returns its verdict.
 func runHook(t *testing.T, dir, script, tool, command string) (verdict, reason string) {
 	t.Helper()
 	return runHookArgs(t, dir, script, tool, command, "{}")
 }
 
-// runHookArgs is runHook with an explicit args JSON, for tools (edit_file)
-// whose relevant field lives in args rather than command.
 func runHookArgs(t *testing.T, dir, script, tool, command, argsJSON string) (verdict, reason string) {
 	t.Helper()
 
@@ -33,14 +30,9 @@ func runHookArgs(t *testing.T, dir, script, tool, command, argsJSON string) (ver
 		t.Fatal(err)
 	}
 
-	// The gate is a function declared in the kit, so it is exercised the way
-	// shell3 runs it: source the kit, call the one function. Driving the file
-	// any other way would test a fiction.
 	cmd := exec.Command("bash", "-c",
 		"set -uo pipefail; source "+filepath.Join(dir, "shell3.sh")+"; "+script)
 	cmd.Stdin = strings.NewReader(string(payload))
-	// The gate anchors itself on its working directory, which shell3 sets to
-	// the config dir.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -71,7 +63,6 @@ func runHookArgs(t *testing.T, dir, script, tool, command, argsJSON string) (ver
 	return "allow", ""
 }
 
-// scaffoldForHooks renders a base config and returns its directory.
 func scaffoldForHooks(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -87,9 +78,6 @@ func scaffoldForHooks(t *testing.T) string {
 func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
-	// An autonomous harness is asked to do real work in whatever directory the
-	// task names. Every one of these must pass untouched, or the gate is a
-	// nuisance rather than a boundary.
 	for _, command := range []string{
 		"ls -la",
 		"go test ./...",
@@ -102,37 +90,20 @@ func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 		"find . -name '*.tmp' -delete",
 		"curl -s https://api.example.com/thing | jq .",
 
-		// Cleanup is most of what an agent does between tasks, and every one of
-		// these was refused by the previous gate. Deleting a cache while
-		// repairing the tool that owns it, and reading the rules that constrain
-		// you, are not the failures this file exists to prevent.
 		"rm -rf ~/Library/Caches/some-browser",
 		"rm -rf ~/Library/Logs/some-app",
 		"cd ~/.shell3 && cat shell3.sh",
 		"python3 -c 'print(1)' && cat ./shell3.sh",
 		"less ./shell3.sh",
-		// The gate does not protect itself: shell3.sh is also every agent
-		// prompt and tool, and editing it is the self-evolve loop.
 		"echo x >> ./shell3.sh",
 		"rm -rf ~/.cache/pip",
 		"docker system prune -f",
 
-		// Observed live 2026-08-25: the OS-path rule ANDed "a write verb
-		// appears somewhere" with "an OS path appears somewhere" — two
-		// unrelated halves of one command line. So RUNNING the system
-		// interpreter was refused as MODIFYING it, and the trigger was
-		// whatever else the line happened to contain: `2>&1` counted as a
-		// write, and an earlier `mkdir` in an && chain counted as a write on
-		// the later /usr/bin path. It cost two whole task attempts in a day —
-		// once creating a venv, once verifying a script — each ending in a
-		// refusal that also says "do not work around this", so the agent
-		// correctly stopped.
 		`/usr/bin/python3 -c "import py_compile" 2>&1`,
 		"mkdir -p ~/w/venvs && /usr/bin/python3 -m venv ~/w/venvs/x",
 		"/usr/bin/python3 script.py > /tmp/out.txt",
 		"/bin/ls -la ./work 2>/dev/null",
 		"cat ./notes.md 2>&1 | /usr/bin/grep -c TODO",
-		// A system path MENTIONED is not a system path WRITTEN.
 		`git commit -m "fix /etc handling"`,
 		"rg /etc/hosts ./notes",
 	} {
@@ -146,27 +117,21 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
 	cases := map[string]string{
-		"cat ~/.ssh/id_rsa":   "credentials",
-		"cat ./.env":          "the secrets file",
-		"rm -rf /":            "the whole filesystem",
-		"echo x > /etc/hosts": "system paths",
-		// The narrowing above must not cost the rule its teeth: an OS path in
-		// a genuine WRITE position is still refused, whether that position is
-		// a redirect target or a write verb's argument.
+		"cat ~/.ssh/id_rsa":                    "credentials",
+		"cat ./.env":                           "the secrets file",
+		"rm -rf /":                             "the whole filesystem",
+		"echo x > /etc/hosts":                  "system paths",
 		"rm -rf /usr/bin":                      "deleting a system path",
 		"cp ./evil /System/Library/thing":      "writing into /System",
 		"echo boot > /boot/loader.conf":        "writing a system path",
 		"mkdir -p /usr/lib/mine":               "creating under /usr/lib",
 		"touch ~/Library/LaunchAgents/x.plist": "macOS persistence",
-		// Quoting is not a bypass. Both of these were ALLOWED before the
-		// per-segment rewrite, because the boundary class the path had to
-		// follow did not include a quote character.
-		`echo x > "/etc/hosts"`:        "a quoted redirect target",
-		"rm -rf '/usr/bin'":            "a quoted write target",
-		"dd of=/etc/hosts if=/dev/z":   "an = write target",
-		"cd /tmp && rm -rf /usr/bin":   "a write in a later segment",
-		"git push --force origin main": "force push",
-		"pkill -f shell3":              "killing the harness",
+		`echo x > "/etc/hosts"`:                "a quoted redirect target",
+		"rm -rf '/usr/bin'":                    "a quoted write target",
+		"dd of=/etc/hosts if=/dev/z":           "an = write target",
+		"cd /tmp && rm -rf /usr/bin":           "a write in a later segment",
+		"git push --force origin main":         "force push",
+		"pkill -f shell3":                      "killing the harness",
 	}
 	for command, what := range cases {
 		verdict, reason := runHook(t, dir, "main_gate", "bash", command)
@@ -174,12 +139,6 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 			t.Errorf("%q = %s, want block (%s)", command, verdict, what)
 			continue
 		}
-		// Every refusal has to close the loophole, in one of two shapes:
-		// the hard suffix where there is no way forward, or a route() that
-		// names the sanctioned path. A refusal with neither invites the agent
-		// to go looking, and unattended it has all night to find something.
-		// Which rule gets which shape is pinned by
-		// TestScaffoldedGateRoutesInsteadOfDeadEnding.
 		low := strings.ToLower(reason)
 		if !strings.Contains(low, "do not work around") && !strings.Contains(low, "the way to do this") {
 			t.Errorf("%q refused with neither a no-workaround instruction nor a route: %s", command, reason)
@@ -330,12 +289,9 @@ func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
 	}
 }
 
-// A machine without jq must refuse everything, not allow everything: the
-// rules parse the payload with jq, and an unparsed payload matches no rule —
-// without the guard, the default case would wave every call through.
 func TestScaffoldedGateFailsClosedWithoutJq(t *testing.T) {
 	dir := scaffoldForHooks(t)
-	noJq := t.TempDir() // a PATH containing nothing at all
+	noJq := t.TempDir()
 
 	cmd := exec.Command("bash", "-c",
 		"set -uo pipefail; source "+filepath.Join(dir, "shell3.sh")+"; main_gate")
@@ -358,12 +314,6 @@ func TestScaffoldedGateFailsClosedWithoutJq(t *testing.T) {
 	}
 }
 
-// A vision call IS a /v1/chat/completions call — no wire-level signal
-// separates "describe this image" from "draft this email", so the gate draws
-// no line here at all and the daily auditor judges convert-vs-decide instead.
-// This pins the PERMISSION, the way the shell3.sh write rule is pinned: the
-// 2026-08-20 incident reads like an argument for a regex, and without this
-// test the rule grows back.
 func TestScaffoldedGateAllowsPerceptionTools(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
@@ -418,15 +368,11 @@ func TestScaffoldedGateRoutesInsteadOfDeadEnding(t *testing.T) {
 		if !strings.Contains(low, "script") {
 			t.Errorf("%q should route the agent to a script:\n%s", command, reason)
 		}
-		// The dead-end phrasing must be gone from THIS rule: it is what made
-		// the agent escalate instead of taking the path the same sentence
-		// had just described.
 		if strings.Contains(low, "no alternative command, path, or tool") {
 			t.Errorf("%q still carries the blanket policy, which forbids the route it just gave:\n%s", command, reason)
 		}
 	}
 
-	// Rules with genuinely no way forward keep the hard suffix.
 	for _, command := range []string{"rm -rf /usr/bin", "pkill -f shell3"} {
 		_, reason := runHook(t, dir, "main_gate", "bash", command)
 		if !strings.Contains(strings.ToLower(reason), "do not work around") {
@@ -434,7 +380,6 @@ func TestScaffoldedGateRoutesInsteadOfDeadEnding(t *testing.T) {
 		}
 	}
 
-	// And the routed path is actually open.
 	if v, r := runHook(t, dir, "main_gate", "bash",
 		"cd ~/work && python3 scripts/sync_notion.py"); v != "allow" {
 		t.Errorf("running a script that reads its own key = %s (%s), want allow", v, r)

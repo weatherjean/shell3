@@ -89,8 +89,6 @@ func TestKitCommandIsReachableThroughParts(t *testing.T) {
 	}
 }
 
-// The session config wires OnEvent when the kit declares a subscriber, and a
-// subscribed event actually reaches the shell function.
 func TestKitEventSubscriberFiresThroughSessionConfig(t *testing.T) {
 	parts, cleanup := hookWiringParts(t)
 	defer cleanup()
@@ -106,9 +104,7 @@ func TestKitEventSubscriberFiresThroughSessionConfig(t *testing.T) {
 		t.Fatal("a kit declaring event: wired no OnEvent observer")
 	}
 
-	// Unsubscribed kinds never reach the hook.
 	cfg.OnEvent(chat.Event{Kind: chat.EventAssistantToken, Text: "x"})
-	// A subscribed one does.
 	cfg.OnEvent(chat.Event{Kind: chat.EventTurnDone, SessionID: "sess-1"})
 
 	deadline := time.Now().Add(5 * time.Second)

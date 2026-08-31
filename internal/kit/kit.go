@@ -75,10 +75,8 @@ var ReservedCommands = []string{
 	"quiet",
 }
 
-// CronJob is one declared scheduled job. Exactly one of Agent (dispatch that
-// agent with Prompt) or Tool (run that kit tool directly, with no model turn)
-// is set; the tool form binds no function at all, so Func and Prompt are
-// empty. Jobs are declaration-ordered; nothing depends on the order.
+// CronJob is one declared scheduled agent job. Jobs are declaration-ordered;
+// nothing depends on the order.
 type CronJob struct {
 	Name, Schedule, Agent string
 	// Prompt is the agent job's prompt, read statically from the heredoc in
@@ -360,6 +358,17 @@ func Parse(src []byte) (*Kit, error) {
 	if err := checkCronTargets(k, known); err != nil {
 		return nil, err
 	}
+	if len(k.Agents) == 0 {
+		return nil, fmt.Errorf("kit declares no agents")
+	}
+	for i, a := range k.Agents {
+		if i > 0 && strings.TrimSpace(a.Desc) == "" {
+			return nil, fmt.Errorf("line %d: employee agent %q needs a description for delegation", a.Line, a.Name)
+		}
+		if _, err := k.Resolve(a, i == 0); err != nil {
+			return nil, err
+		}
+	}
 	return k, nil
 }
 
@@ -398,10 +407,7 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 	return job, nil
 }
 
-// checkCronTargets resolves every job's target against the whole kit. A tool
-// job names no agent, so there is no Resolved set to search: the operator
-// scheduling their own tool is the trust boundary, and use: scoping still
-// bounds what a MODEL may call.
+// checkCronTargets resolves every job's agent against the whole kit.
 func checkCronTargets(k *Kit, known map[string]bool) error {
 	for _, j := range k.Crons {
 		if !known[j.Agent] {
@@ -421,6 +427,12 @@ func attach(a *Agent, g *Group, d decl, f fnDef) error {
 		for pname, p := range d.params {
 			if _, ok := jsonType[p.Type]; !ok {
 				return fmt.Errorf("line %d: tool %q param %q has type %q — want string, int, or bool", d.line, d.name, pname, p.Type)
+			}
+			if p.Required && p.Default != nil {
+				return fmt.Errorf("line %d: tool %q param %q cannot be both required and have a default", d.line, d.name, pname)
+			}
+			if p.Default != nil && !defaultMatchesType(p.Type, p.Default) {
+				return fmt.Errorf("line %d: tool %q param %q default has type %T — want %s", d.line, d.name, pname, p.Default, p.Type)
 			}
 			// A param becomes an environment variable in the tool's shell, so it
 			// must be a valid identifier and must not shadow the environment the
@@ -454,6 +466,25 @@ func attach(a *Agent, g *Group, d decl, f fnDef) error {
 		a.Tests = append(a.Tests, Test{Name: d.name, Func: f.name, Line: d.line})
 	}
 	return nil
+}
+
+// defaultMatchesType keeps the JSON Schema default and the runtime binder in
+// agreement. YAML numbers decode as int here; accepting a quoted number for an
+// int param would publish a string default under an integer schema.
+func defaultMatchesType(typ string, v any) bool {
+	switch typ {
+	case "string":
+		_, ok := v.(string)
+		return ok
+	case "int":
+		_, ok := v.(int)
+		return ok
+	case "bool":
+		_, ok := v.(bool)
+		return ok
+	default:
+		return false
+	}
 }
 
 // tools returns whichever open scope's tool list applies (a may be nil).

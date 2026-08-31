@@ -262,7 +262,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.mu.Unlock()
 	// Clear the marker BEFORE detaching, or a StartFreshTurn racing this sees
 	// main==nil with the old marker set and resurrects what is being detached.
-	if err := c.index.SetCurrent(""); err != nil {
+	if err := c.setCurrentThread(""); err != nil {
 		c.b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
 	}
 	c.mu.Lock()

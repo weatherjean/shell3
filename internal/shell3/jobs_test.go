@@ -14,12 +14,10 @@ import (
 
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
-	// echo writes to the in-memory buffer and exits; no parent notice in this unit test.
 	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	// Job is listed while/after running.
 	if got := m.list(); len(got) != 1 || got[0].ID != id || got[0].Kind != JobCommand {
 		t.Fatalf("list = %+v, want one JobCommand id=%s", got, id)
 	}
@@ -30,8 +28,6 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	}
 }
 
-// waitForWake drains rt.Events() until a Wake for the given session arrives
-// (or fails the test after 3s), tolerating spurious Wakes for other sessions.
 func waitForWake(t *testing.T, rt *Runtime, s *Session) {
 	t.Helper()
 	id := s.ID()
@@ -64,9 +60,15 @@ func TestJobManagerConcurrencyCap(t *testing.T) {
 	m.wg.Wait()
 }
 
-// TestSubagentCompletionWakesParent verifies that startSubagent runs a child
-// session in-process, and that when it finishes the parent session receives a
-// Wake event on the runtime bus and transcript returns non-empty content.
+func TestJobManagerRejectsNewWorkAfterShutdownStarts(t *testing.T) {
+	m := newJobManager(nil, 8)
+	m.cancelAll()
+	if _, err := m.startCommand(nil, "echo late", t.TempDir(), []string{"echo", "late"}, nil, notify.ReportAuto, ""); err == nil {
+		t.Fatal("startCommand admitted work after cancelAll")
+	}
+	m.wait()
+}
+
 func TestSubagentCompletionWakesParent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent done"))
 	parent, err := rt.Session(SessionOpts{})
@@ -85,9 +87,6 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 	}
 }
 
-// TestSubagentLiveOutputBuffer verifies startSubagent mirrors the child's
-// streamed events into j.out, so the jobs view (via output()) can show
-// live progress before the run's stored transcript exists.
 func TestSubagentLiveOutputBuffer(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("streamed answer"))
 	parent, err := rt.Session(SessionOpts{})
@@ -104,10 +103,6 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 	}
 }
 
-// TestSubagentTranscriptAfterClose verifies transcript() returns a non-empty
-// result even after the child session is closed. The finished job is retained
-// in m.jobs with its childID intact, so transcript() resolves without any
-// separate map.
 func TestSubagentTranscriptAfterClose(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("result text"))
 	parent, err := rt.Session(SessionOpts{})
@@ -118,16 +113,12 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	// Wait for the Wake (child is done; job is retained with Done=true).
 	waitForWake(t, rt, parent)
-	// Job is retained in m.jobs with Done=true; transcript must still work.
 	if len(rt.jobs.transcript(id)) == 0 {
 		t.Fatalf("transcript empty after job done for %s", id)
 	}
 }
 
-// TestJobManagerRetainsDoneCommandJob verifies that a finished command job stays
-// in list() with Done=true, and that output() returns the captured output.
 func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil, notify.ReportAuto, "")
@@ -141,7 +132,6 @@ func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 		t.Fatalf("output never contained 'retained': %q", m.output(id))
 	}
 
-	// Job must still be in list() with Done=true.
 	jobs := m.list()
 	if len(jobs) != 1 {
 		t.Fatalf("list() should retain 1 done job, got %d", len(jobs))
@@ -154,8 +144,6 @@ func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	}
 }
 
-// TestJobManagerRetainsDoneSubagentJob verifies that a finished subagent job
-// stays in list() with Done=true, and that transcript() still resolves.
 func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent output"))
 	parent, err := rt.Session(SessionOpts{})
@@ -193,18 +181,14 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 	if !found.Done {
 		t.Fatalf("finished subagent job should have Done=true, got %+v", found)
 	}
-	// transcript() must resolve via the retained job's childID.
 	if len(rt.jobs.transcript(id)) == 0 {
 		t.Fatalf("transcript empty after subagent done for job %s", id)
 	}
 }
 
-// TestJobManagerDoneCap verifies that done jobs are capped at maxDoneJobs
-// and that the oldest done job is evicted (never a running job).
 func TestJobManagerDoneCap(t *testing.T) {
 	m := newJobManager(nil, maxDoneJobs+10)
 
-	// Start and let maxDoneJobs+1 command jobs finish.
 	for i := 0; i < maxDoneJobs+1; i++ {
 		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, notify.ReportAuto, "")
 		if err != nil {
@@ -219,7 +203,6 @@ func TestJobManagerDoneCap(t *testing.T) {
 	if len(jobs) > maxDoneJobs {
 		t.Fatalf("done-job cap: got %d jobs, want at most %d", len(jobs), maxDoneJobs)
 	}
-	// Every retained job must be Done; none should be running.
 	for _, j := range jobs {
 		if !j.Done {
 			t.Fatalf("non-done job found after wg.Wait(): %+v", j)
@@ -241,7 +224,6 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	}
 }
 
-// TestFormatJobList_Empty returns the no-tasks message when there are no jobs.
 func TestFormatJobList_Empty(t *testing.T) {
 	m := newJobManager(nil, 8)
 	got := m.formatJobList()
@@ -250,7 +232,6 @@ func TestFormatJobList_Empty(t *testing.T) {
 	}
 }
 
-// TestFormatJobList_ShowsRunning verifies a running command job appears with status "running".
 func TestFormatJobList_ShowsRunning(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, notify.ReportAuto, "")
@@ -270,7 +251,6 @@ func TestFormatJobList_ShowsRunning(t *testing.T) {
 	}
 }
 
-// TestFormatJobStatus_UnknownID returns the "no such task" message.
 func TestFormatJobStatus_UnknownID(t *testing.T) {
 	m := newJobManager(nil, 8)
 	got := m.formatJobStatus("ghost")
@@ -302,14 +282,12 @@ func TestFormatJobStatus_RepeatPollsGetToldToStop(t *testing.T) {
 	}
 }
 
-// TestFormatJobStatus_Truncates verifies that a large output is capped.
 func TestFormatJobStatus_Truncates(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	// Manually stuff a large output into the ring buffer (bypass the process).
 	m.mu.Lock()
 	j := m.jobs[id]
 	m.mu.Unlock()
@@ -317,7 +295,7 @@ func TestFormatJobStatus_Truncates(t *testing.T) {
 	_, _ = j.out.Write([]byte(big))
 
 	got := m.formatJobStatus(id)
-	if len(got) > jobStatusCap+200 { // allow some slack for the header lines
+	if len(got) > jobStatusCap+200 {
 		t.Errorf("formatJobStatus result too large: %d bytes (cap ~%d)", len(got), jobStatusCap)
 	}
 	if !strings.Contains(got, "truncated") {
@@ -326,22 +304,17 @@ func TestFormatJobStatus_Truncates(t *testing.T) {
 	_ = m.cancel(id, false)
 }
 
-// TestAppendCappedTail_NearCapNoPanic is a regression test for the tail-budget
-// panic: with the header already within 20 bytes of jobStatusCap, the old code
-// called tail(body, negative) and panicked on the slice bounds.
 func TestAppendCappedTail_NearCapNoPanic(t *testing.T) {
 	for _, pre := range []int{jobStatusCap - 1, jobStatusCap - 10, jobStatusCap - 19, jobStatusCap - 21, jobStatusCap, jobStatusCap + 5} {
 		var b strings.Builder
 		b.WriteString(strings.Repeat("h", pre))
-		appendCappedTail(&b, "output", strings.Repeat("x", 100)) // must not panic
+		appendCappedTail(&b, "output", strings.Repeat("x", 100))
 		if b.Len() > jobStatusCap+20 {
 			t.Errorf("pre=%d: appendCappedTail blew the cap: %d bytes", pre, b.Len())
 		}
 	}
 }
 
-// TestAppendCappedTail_Truncates keeps a tail and adds the marker when the
-// body exceeds the remaining budget.
 func TestAppendCappedTail_Truncates(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("header\n")
@@ -355,8 +328,6 @@ func TestAppendCappedTail_Truncates(t *testing.T) {
 	}
 }
 
-// TestCommandRealExitCode verifies a command's actual exit code is surfaced
-// (not collapsed to 1) in list() and the task_list rendering.
 func TestCommandRealExitCode(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil, notify.ReportAuto, "")
@@ -403,9 +374,6 @@ func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	}
 }
 
-// TestSubagentErrorSurfaced verifies a subagent whose turn fails is reported as
-// an error — in the parent's completion notice, task_list, and task_status —
-// instead of a clean "done".
 func TestSubagentErrorSurfaced(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{
@@ -447,17 +415,13 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	if found.Error == "" || !strings.Contains(found.Error, "provider exploded") {
 		t.Errorf("JobInfo.Error = %q, want the turn error", found.Error)
 	}
-	// task_list shows "error", not "done".
 	if got := rt.jobs.formatJobList(); !strings.Contains(got, "error") {
 		t.Errorf("formatJobList = %q, want 'error'", got)
 	}
-	// task_status names the error.
 	got := rt.jobs.formatJobStatus(id)
 	if !strings.Contains(got, "error") || !strings.Contains(got, "provider exploded") {
 		t.Errorf("formatJobStatus = %q, want error status + message", got)
 	}
-	// The parent notice reports the failure (finishSubagent builds it via
-	// notifyAgentDone; assert the same rendering path).
 	notice := renderNotification(notifyAgentDone(id, "", "provider exploded"))
 	if !strings.Contains(notice, "error") {
 		t.Errorf("completion notice = %q, want error status", notice)

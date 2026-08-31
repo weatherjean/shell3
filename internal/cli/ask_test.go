@@ -8,9 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// renderAskEvents must surface every event kind verbosely: the tool call with
-// its args, the full tool result, reasoning, the reply, and token usage. A
-// stripped (ANSI-free) render is asserted so the check is style-independent.
 func TestRenderAskEvents(t *testing.T) {
 	ch := make(chan shell3.Event, 8)
 	ch <- shell3.Event{Kind: shell3.Reasoning, Text: "let me check"}
@@ -32,7 +29,6 @@ func TestRenderAskEvents(t *testing.T) {
 	}
 }
 
-// An Error event makes renderAskEvents report the turn as failed.
 func TestRenderDevEvents_Error(t *testing.T) {
 	ch := make(chan shell3.Event, 2)
 	ch <- shell3.Event{Kind: shell3.Error, Err: errors.New("boom")}
@@ -47,7 +43,6 @@ func TestRenderDevEvents_Error(t *testing.T) {
 	}
 }
 
-// strip removes ANSI SGR sequences so assertions are style-independent.
 func strip(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {

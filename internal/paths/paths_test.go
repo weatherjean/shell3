@@ -14,8 +14,6 @@ func TestGlobal(t *testing.T) {
 	if g.LogFile != "/home/user/.shell3/shell3.log" {
 		t.Fatalf("LogFile: got %q", g.LogFile)
 	}
-	// Compile-time check: Global must NOT have Data or DB fields.
-	// (If this file compiles, the fields are absent.)
 	_ = g
 }
 

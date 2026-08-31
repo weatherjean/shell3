@@ -49,6 +49,5 @@ func TestSession_InterjectCloseRace(t *testing.T) {
 	close(start) // release all goroutines as simultaneously as possible
 	wg.Wait()
 
-	// Interject after Close must remain a safe no-op (snapshotted nil runtime).
 	s.Interject("after close")
 }

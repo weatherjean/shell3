@@ -22,7 +22,7 @@ type gatedLLM struct {
 
 	mu    sync.Mutex
 	calls int
-	texts []string // per-call reply; last repeats
+	texts []string
 	Msgs  [][]llm.Message
 }
 
@@ -52,7 +52,6 @@ func (g *gatedLLM) Stream(ctx context.Context, msgs []llm.Message, _ []llm.ToolD
 	return nil
 }
 
-// callMsgs returns a snapshot of the recorded per-call messages.
 func (g *gatedLLM) callMsgs() [][]llm.Message {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -70,7 +69,6 @@ func jobSnapshot(m *jobManager, id string) (lingering, childClosed, driver bool,
 	return j.lingering, j.childClosed, j.driver, j.followUps, true
 }
 
-// waitFor polls cond until true or the timeout elapses.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -83,11 +81,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timeout waiting for %s", what)
 }
 
-// TestSubagentLingersAndRunsFollowUp is the keep-open e2e: a subagent ends its
-// main turn while a bash_bg job it started is still running. The parent gets
-// agent_done immediately; the child session lingers; when the job finishes,
-// the child runs a follow-up turn and the parent receives an agent_update
-// notice (with a Wake). Afterwards the child closes.
 func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	g := newGatedLLM("main answer", "follow-up answer")
 	rt := newTestRuntime(t, func() chat.Config {
@@ -101,9 +94,8 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	<-g.Started // child main turn verifiably in flight
+	<-g.Started
 
-	// A bash_bg job owned by the child, still running when the turn ends.
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
 	rt.jobs.mu.Unlock()
@@ -114,17 +106,14 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	close(g.Release) // main turn completes now
+	close(g.Release)
 	waitForWake(t, rt, parent)
 
-	// Parent heard done; the job enters the lingering lifecycle (the wake is
-	// emitted by finishSubagent BEFORE endSubagentTurn sets the flag, so poll).
 	waitFor(t, "job lingering", func() bool {
 		lingering, _, _, _, ok := jobSnapshot(rt.jobs, id)
 		return ok && lingering
 	})
 
-	// Job completion → follow-up turn → agent_update Wake to the parent.
 	waitForWake(t, rt, parent)
 	waitFor(t, "one follow-up turn", func() bool {
 		_, _, _, fu, _ := jobSnapshot(rt.jobs, id)
@@ -135,7 +124,6 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 		return closed && !driver
 	})
 
-	// The agent_update notice reaches the parent's next turn context.
 	for range parent.Send(context.Background(), "and?") {
 	}
 	calls := g.callMsgs()
@@ -191,9 +179,6 @@ func TestCancelSubagentCascades(t *testing.T) {
 	}
 }
 
-// TestOrphanJobDegradesToRoot verifies the degrade path: when follow-ups are
-// unavailable (poisoned), a child-owned job completion is delivered to the
-// ROOT session as a raw bg_done notice instead of vanishing.
 func TestOrphanJobDegradesToRoot(t *testing.T) {
 	g := newGatedLLM("main answer")
 	rt := newTestRuntime(t, func() chat.Config {
@@ -210,15 +195,14 @@ func TestOrphanJobDegradesToRoot(t *testing.T) {
 	<-g.Started
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
-	rt.jobs.jobs[id].noFollowUps = true // poison: no follow-up turns
+	rt.jobs.jobs[id].noFollowUps = true
 	rt.jobs.mu.Unlock()
 	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	close(g.Release)
-	waitForWake(t, rt, parent) // agent_done
+	waitForWake(t, rt, parent)
 
-	// Job completes → degrade path → child closes without any follow-up turn.
 	waitFor(t, "child closed", func() bool {
 		_, closed, _, _, _ := jobSnapshot(rt.jobs, id)
 		return closed
@@ -228,8 +212,6 @@ func TestOrphanJobDegradesToRoot(t *testing.T) {
 		t.Fatalf("poisoned subagent ran %d follow-up turns, want 0", followUps)
 	}
 
-	// The orphan notice was delivered to the ROOT session, labeled with its
-	// origin: run a root turn and assert the notice is in its context.
 	for range parent.Send(context.Background(), "and?") {
 	}
 	calls := g.callMsgs()

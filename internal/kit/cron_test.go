@@ -7,9 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-// cronKit wraps declaration text in a minimal kit that declares the agents
-// and tools a cron block may name, so the end-of-parse resolution checks have
-// something real to resolve against.
 func cronKit(decls string) []byte {
 	return []byte(`#---
 # agent: main
@@ -124,8 +121,6 @@ body
 EOF
 }
 `, "cron jobs run agent turns only"},
-		// direct: was the pre-report spelling. It must fail with a message
-		// naming the replacement, not with yaml's "field not found".
 		"the removed direct: key": {`#---
 # cron: x
 # schedule: "@daily"
@@ -236,8 +231,8 @@ after_impl() { echo ok; }
 	}
 }
 
-// A cron block that also names another declaration kind is ambiguous: agent:
-// and tool: are cron PAYLOAD, but skill:/command:/gate: are not.
+// A cron block treats agent: as payload and recognizes the removed tool:
+// payload for a directed error, but command:/gate: remain declaration kinds.
 func TestParseCron_SecondKindIsAnError(t *testing.T) {
 	_, err := Parse(cronKit(`#---
 # cron: x

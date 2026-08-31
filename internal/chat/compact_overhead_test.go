@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// capturingLog records Warn lines so a test can assert on the diagnostic the
-// operator would actually see.
 type capturingLog struct {
 	mu    sync.Mutex
 	warns []string
@@ -45,7 +43,6 @@ const overheadWarnSub = "compaction budget"
 func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
-		// ~4 chars/token: 40k chars of prompt against a 1000-token threshold.
 		Personality: persona.Persona{SystemPrompt: strings.Repeat("brain ", 8000)},
 		AgentKnobs:  AgentKnobs{CompactAt: 1000},
 		ToolConfig:  ToolConfig{Log: log},
@@ -57,8 +54,6 @@ func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 		t.Fatalf("warned %d times, want 1", got)
 	}
 
-	// The condition stays true on every subsequent turn, so an unthrottled
-	// warning would bury the log it exists to make readable.
 	for i := 0; i < 5; i++ {
 		warnFixedOverhead(cfg, sess)
 	}
@@ -67,8 +62,6 @@ func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 	}
 }
 
-// The common case must stay silent: a small system prompt means compaction is
-// working on the part of the window that actually holds the tokens.
 func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
@@ -82,9 +75,6 @@ func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 	}
 }
 
-// RefreshPrompt is the whole reason this warning is needed — the prompt is
-// re-read from disk per turn, so the size that matters is the refreshed one,
-// not the snapshot taken at session build.
 func TestWarnFixedOverhead_MeasuresRefreshedPrompt(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{

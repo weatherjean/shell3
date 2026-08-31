@@ -34,7 +34,7 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 	// messages once the KeepRecent tail is carved off).
 	seed := make([]llm.Message, 0, 24)
 	for range 24 {
-		seed = append(seed, llm.Message{Role: llm.RoleAssistant, Content: "12345678"}) // ~2 est. tokens each
+		seed = append(seed, llm.Message{Role: llm.RoleAssistant, Content: "12345678"})
 	}
 	for _, m := range seed {
 		if err := st.AppendMessage(id, m); err != nil {
@@ -69,9 +69,7 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 	}
 
 	fake := fakellm.New(
-		// call 0: the quiet compaction summary of the head.
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY"}}},
-		// call 1: the resumed turn, answered against the compacted history.
 		fakellm.Script{Events: []llm.StreamEvent{
 			{TextDelta: "ok"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
@@ -84,7 +82,6 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
-	// Swap the collector sink in so we can assert the compacted event.
 	c := &collector{}
 	sess.sink = c.sink
 

@@ -29,7 +29,7 @@ func TestReloadRacesCommandHandling(t *testing.T) {
 			b.SetJobRunner(func(string) error { return nil })
 		}
 	}()
-	go func() { // the update loop handling commands
+	go func() {
 		defer wg.Done()
 		for range 200 {
 			tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/status"})

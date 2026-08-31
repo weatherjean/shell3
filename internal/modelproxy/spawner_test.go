@@ -11,7 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 )
 
-// waitForFile polls until path exists and is non-empty, or fails after timeout.
 func waitForFile(t *testing.T, path string) string {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -32,10 +31,9 @@ func TestEnsureRunsCommandOncePerName(t *testing.T) {
 	s := New(dir, applog.Noop{})
 	cmd := fmt.Sprintf("echo run >> %q", marker)
 	s.Ensure("m", cmd)
-	s.Ensure("m", cmd) // guarded: must not spawn a second time
+	s.Ensure("m", cmd)
 
 	waitForFile(t, marker)
-	// Give any erroneous second spawn a chance to also write before asserting.
 	time.Sleep(150 * time.Millisecond)
 	out := mustRead(t, marker)
 	if got := strings.Count(out, "run"); got != 1 {
@@ -66,9 +64,7 @@ func TestEnsureRedirectsOutputToLog(t *testing.T) {
 func TestEnsureFailingCommandDoesNotPanic(t *testing.T) {
 	dir := t.TempDir()
 	s := New(dir, applog.Noop{})
-	// Command exits non-zero; spawn is fire-and-forget so this must be harmless.
 	s.Ensure("m", "exit 7")
-	// Still guarded after a soft failure.
 	s.Ensure("m", "exit 7")
 }
 

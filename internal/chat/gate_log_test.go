@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// capLogger records Warn lines so a test can assert what the gate reported to
-// the operator. Only Warn is captured — the gate's verdicts are the only thing
-// these tests care about.
 type capLogger struct{ warns []string }
 
 func (c *capLogger) Debug(string, ...any) {}
@@ -85,7 +82,7 @@ func TestGateBashReviewVerdictsAreLogged(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lg := &capLogger{}
 			cfg := gateCfg(lg, ToolCallVerdict{Action: ActionReview, Reason: "unread remote code"})
-			cfg.ReviewToolCall = func(context.Context, string, string, string) (bool, string) {
+			cfg.ReviewToolCall = func(context.Context, ToolReviewRequest) (bool, string) {
 				return tc.approved, "reviewer said no"
 			}
 

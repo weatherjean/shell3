@@ -12,12 +12,12 @@ func TestTruncate(t *testing.T) {
 		max  int
 		want string
 	}{
-		{"hello", 10, "hello"},    // under cap: unchanged
-		{"hello", 5, "hello"},     // exactly at cap: unchanged
-		{"hello world", 5, "he…"}, // cut with ellipsis; result stays within max bytes
-		{"héllo", 4, "h…"},        // é spans bytes 1-2: cut backs up to the rune boundary
-		{"hello", 2, "he"},        // max below the 3-byte ellipsis: cut, no marker
-		{"hello world", 0, ""},    // max <= 0: empty
+		{"hello", 10, "hello"},
+		{"hello", 5, "hello"},
+		{"hello world", 5, "he…"},
+		{"héllo", 4, "h…"},
+		{"hello", 2, "he"},
+		{"hello world", 0, ""},
 		{"", 5, ""},
 	} {
 		if got := Truncate(tc.in, tc.max); got != tc.want {
@@ -34,7 +34,7 @@ func TestTail(t *testing.T) {
 	}{
 		{"hello", 10, "hello"},
 		{"hello world", 5, "…world"},
-		{"héllo", 4, "…llo"}, // cut lands mid-é: advances past it
+		{"héllo", 4, "…llo"},
 		{"hello", 0, ""},
 		{"hello", -1, ""},
 	} {
@@ -44,10 +44,8 @@ func TestTail(t *testing.T) {
 	}
 }
 
-// TestTail_RuneSafety pins that a byte-budget cut never lands mid-UTF-8
-// sequence for any small budget.
 func TestTail_RuneSafety(t *testing.T) {
-	s := strings.Repeat("é", 100) // 2 bytes per rune
+	s := strings.Repeat("é", 100)
 	for n := 1; n < 10; n++ {
 		got := Tail(s, n)
 		if !strings.HasPrefix(got, "…") || !utf8.ValidString(got) {
@@ -59,10 +57,9 @@ func TestTail_RuneSafety(t *testing.T) {
 	}
 }
 
-// TestTruncate_RuneSafety pins the mid-rune back-off.
 func TestTruncate_RuneSafety(t *testing.T) {
 	s := strings.Repeat("é", 100)
-	got := Truncate(s, 6) // ellipsis leaves 3 bytes, which lands mid-rune; must back off to 2
+	got := Truncate(s, 6)
 	if got != "é…" {
 		t.Errorf("Truncate = %q, want one é + ellipsis", got)
 	}

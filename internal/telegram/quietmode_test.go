@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// A missing file, a nil store, and a corrupt file all mean "not quiet" — the
-// toggle is a preference, never a reason to fail.
 func TestQuietStore_DefaultsOff(t *testing.T) {
 	s := &QuietStore{Path: filepath.Join(t.TempDir(), "nonexistent.json")}
 	if s.Get() {

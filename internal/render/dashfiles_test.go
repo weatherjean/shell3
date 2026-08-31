@@ -40,13 +40,11 @@ func TestFilesListHTML(t *testing.T) {
 	if !strings.Contains(frag, "t=TOK") {
 		t.Errorf("token not threaded into links:\n%s", frag)
 	}
-	// dirs first: skills/ appears before shell3.sh in the rendered order.
 	if strings.Index(frag, "skills/") > strings.Index(frag, "shell3.sh") {
 		t.Errorf("dirs should sort before files:\n%s", frag)
 	}
 }
 
-// A normal file renders its content escaped.
 func TestFileViewHTML(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "notes.md"), "hello <script>alert(1)</script>")
@@ -78,7 +76,6 @@ func TestFileViewRedactsCredentials(t *testing.T) {
 	if !strings.Contains(strings.ToLower(frag), "redacted") {
 		t.Errorf("expected a redaction notice:\n%s", frag)
 	}
-	// Same for dotenv siblings.
 	writeFile(t, filepath.Join(dir, ".env.local"), secret)
 	frag2, _ := FileViewHTML(dir, ".env.local", "TOK")
 	if strings.Contains(frag2, "super-secret-value-42") {
@@ -116,7 +113,6 @@ func TestFilesSymlinkEscapeBlocked(t *testing.T) {
 	}
 }
 
-// A binary file is flagged, not dumped.
 func TestFileViewBinaryFlagged(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "blob.bin"), "abc\x00def")

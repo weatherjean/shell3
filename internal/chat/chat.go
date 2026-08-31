@@ -121,7 +121,7 @@ type Config struct {
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 	// ReviewToolCall resolves a {review} soft deny via the LLM reviewer
 	// (config-global, nil = review verdicts fail closed).
-	ReviewToolCall func(ctx context.Context, name, command, reason string) (approved bool, denyMsg string)
+	ReviewToolCall func(ctx context.Context, request ToolReviewRequest) (approved bool, denyMsg string)
 	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 }
@@ -182,12 +182,14 @@ func NewHandlers() map[string]ToolHandler {
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	return TurnConfig{
 		ToolConfig: ToolConfig{
-			Store:          cfg.Store,
-			WorkDir:        cfg.WorkDir,
-			Headless:       cfg.Headless,
-			RunToolCall:    cfg.RunToolCall,
-			ReviewToolCall: cfg.ReviewToolCall,
-			Log:            LogOrNoop(cfg.Log),
+			Store:              cfg.Store,
+			WorkDir:            cfg.WorkDir,
+			Headless:           cfg.Headless,
+			HasParentAgent:     cfg.ParentID != "",
+			RunToolCall:        cfg.RunToolCall,
+			ReviewToolCall:     cfg.ReviewToolCall,
+			TrustedUserContext: !cfg.Headless && cfg.ParentID == "" && cfg.CronJob == "",
+			Log:                LogOrNoop(cfg.Log),
 		},
 		LLM:           cfg.LLM,
 		Personality:   cfg.Personality,

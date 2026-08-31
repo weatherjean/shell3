@@ -34,18 +34,15 @@ func TestSaveHistory_AfterCompaction(t *testing.T) {
 		t.Fatalf("open runs store: %v", err)
 	}
 
-	// Simulate the NEW session created by compactInto.
 	newID, err := st.NewSession(runs.Meta{})
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
 
-	// The two compacted messages that compactInto already wrote to disk.
 	compactedMsgs := []llm.Message{
 		{Role: llm.RoleUser, Content: "<system-reminder>Continuation of session old-id...</system-reminder>"},
 		{Role: llm.RoleAssistant, Content: "trigger assistant message"},
 	}
-	// compactInto flushed these directly; simulate that.
 	for _, m := range compactedMsgs {
 		if err := st.AppendMessage(newID, m); err != nil {
 			t.Fatalf("AppendMessage (compacted): %v", err)
@@ -58,10 +55,8 @@ func TestSaveHistory_AfterCompaction(t *testing.T) {
 	// - persistedLen = 2 (both already on disk)
 	sess := NewSession(SessionOpts{StoreID: newID})
 	sess.messages = append(sess.messages, compactedMsgs...)
-	sess.persistedLen = len(compactedMsgs) // 2
+	sess.persistedLen = len(compactedMsgs)
 
-	// Now the turn appends this turn's user message and assistant reply
-	// (RunTurn does this after maybeCompact returns).
 	thisTurnUser := llm.Message{Role: llm.RoleUser, Content: "this turn's user message"}
 	thisTurnAssistant := llm.Message{Role: llm.RoleAssistant, Content: "this turn's assistant reply"}
 	sess.messages = append(sess.messages, thisTurnUser, thisTurnAssistant)
@@ -72,7 +67,6 @@ func TestSaveHistory_AfterCompaction(t *testing.T) {
 	// With the fix, saveHistory uses sess.persistedLen=2, so it flushes [2:] = the two new messages.
 	saveHistory(st, applog.Noop{}, sess, newID)
 
-	// Assert that LoadMessages contains all 4 messages: 2 compacted + 2 new.
 	got, err := st.LoadMessages(newID)
 	if err != nil {
 		t.Fatalf("LoadMessages: %v", err)

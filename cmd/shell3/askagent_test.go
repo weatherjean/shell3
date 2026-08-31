@@ -12,8 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// findJob picks the requested job out of a snapshot and reports a miss rather
-// than a zero value, so a caller can tell "not started yet" from "finished".
 func TestFindJob(t *testing.T) {
 	jobs := []shell3.JobInfo{
 		{ID: "bg1", Cmd: "sleep 1"},
@@ -31,18 +29,14 @@ func TestFindJob(t *testing.T) {
 	}
 }
 
-// waitForDispatch returns only once the job is Done AND its child session has
-// closed: a subagent whose bash_bg outlives the main turn flips Done early
-// while still producing output, and returning there would truncate the reply.
 func TestWaitForDispatchWaitsForChildClose(t *testing.T) {
 	var calls int
 	jobs := func() []shell3.JobInfo {
 		calls++
 		switch {
 		case calls < 3:
-			return []shell3.JobInfo{{ID: "sub1"}} // still running
+			return []shell3.JobInfo{{ID: "sub1"}}
 		case calls < 5:
-			// Done, but the child session lingers on a bash_bg follow-up.
 			return []shell3.JobInfo{{ID: "sub1", Done: true, ChildOpen: true, Summary: "partial"}}
 		default:
 			return []shell3.JobInfo{{ID: "sub1", Done: true, Summary: "final"}}
@@ -58,8 +52,6 @@ func TestWaitForDispatchWaitsForChildClose(t *testing.T) {
 	}
 }
 
-// A job event only shortens the wait — it is a hint to re-check, never the
-// authority, because the shared event bus drops on a full buffer.
 func TestWaitForDispatchWakesOnEvent(t *testing.T) {
 	done := make(chan struct{})
 	jobs := func() []shell3.JobInfo {
@@ -110,9 +102,6 @@ func TestAskAgentRequiresMessage(t *testing.T) {
 	}
 }
 
-// Each --agent run dispatches a fresh child session, so there is no
-// conversation for --resume to continue; the combination must be refused
-// rather than silently ignoring the flag.
 func TestAskAgentRejectsResume(t *testing.T) {
 	cmd := newAskCommand()
 	cmd.SetArgs([]string{"--agent", "drafter", "-p", "draft it", "--resume"})

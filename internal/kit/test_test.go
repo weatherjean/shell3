@@ -100,8 +100,6 @@ func TestRunTestsReportsFailure(t *testing.T) {
 	}
 }
 
-// A required argument the test forgets must be caught by the dispatcher, not
-// silently passed through as an empty string.
 func TestToolDispatchEnforcesRequired(t *testing.T) {
 	src := `#---
 # agent: a
@@ -134,7 +132,6 @@ a_test_need() { assert_contains "$(tool need 2>&1)" "missing required"; }
 	}
 }
 
-// Defaults declared in the manifest must apply when the caller omits them.
 func TestToolDispatchAppliesDefaults(t *testing.T) {
 	src := `#---
 # agent: a
@@ -167,7 +164,6 @@ a_test_d() { assert_eq "$(tool d)" "n=7"; }
 	}
 }
 
-// Shared-group tools an agent imports must be callable from its tests.
 func TestToolDispatchIncludesSharedTools(t *testing.T) {
 	src := `#---
 # agent: a

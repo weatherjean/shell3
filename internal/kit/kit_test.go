@@ -1,6 +1,9 @@
 package kit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sample = `#---
 # shell3:
@@ -93,7 +96,7 @@ func TestParseToolBeforeScopeFails(t *testing.T) {
 func TestParseDuplicateFuncNameFails(t *testing.T) {
 	src := []byte(
 		"#---\n# agent: a\n#---\ndup() { cat <<'EOF'\nhi\nEOF\n}\n" +
-			"#---\n# agent: b\n#---\ndup() { cat <<'EOF'\nhi\nEOF\n}\n")
+			"#---\n# agent: b\n# description: second\n#---\ndup() { cat <<'EOF'\nhi\nEOF\n}\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a duplicate function name")
 	}
@@ -105,6 +108,21 @@ func TestParseDuplicateAgentNameFails(t *testing.T) {
 			"#---\n# agent: a\n#---\nf2() { cat <<'EOF'\nhi\nEOF\n}\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a duplicate agent name")
+	}
+}
+
+func TestParseEmployeeNeedsDescription(t *testing.T) {
+	src := []byte("#---\n# agent: main\n#---\nmain() { cat <<'EOF'\nhi\nEOF\n}\n" +
+		"#---\n# agent: worker\n#---\nworker() { cat <<'EOF'\nwork\nEOF\n}\n")
+	if _, err := Parse(src); err == nil || !strings.Contains(err.Error(), "needs a description") {
+		t.Fatalf("want an employee description error, got %v", err)
+	}
+}
+
+func TestParseNeedsAnAgent(t *testing.T) {
+	src := []byte("#---\n# shell3: {models: {}}\n#---\n")
+	if _, err := Parse(src); err == nil || !strings.Contains(err.Error(), "no agents") {
+		t.Fatalf("want a no-agents error, got %v", err)
 	}
 }
 
@@ -155,6 +173,28 @@ func TestParseBadParamTypeFails(t *testing.T) {
 	}
 }
 
+func TestParseParamRequiredWithDefaultFails(t *testing.T) {
+	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
+		"#---\n# tool: t\n# description: x\n# params:\n#   n: {type: int, required: true, default: 2}\n#---\ng() { :; }\n")
+	if _, err := Parse(src); err == nil || !strings.Contains(err.Error(), "both required and have a default") {
+		t.Fatalf("want a required/default conflict error, got %v", err)
+	}
+}
+
+func TestParseParamDefaultTypeFails(t *testing.T) {
+	for _, param := range []string{
+		`{type: string, default: 2}`,
+		`{type: int, default: "2"}`,
+		`{type: bool, default: "true"}`,
+	} {
+		src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
+			"#---\n# tool: t\n# description: x\n# params:\n#   value: " + param + "\n#---\ng() { :; }\n")
+		if _, err := Parse(src); err == nil || !strings.Contains(err.Error(), "default has type") {
+			t.Fatalf("%s: want a default type error, got %v", param, err)
+		}
+	}
+}
+
 func TestParseBadParamNameFails(t *testing.T) {
 	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 		"#---\n# tool: t\n# description: x\n# params:\n#   my-arg: {type: string}\n#---\nf() { :; }\n")
@@ -184,8 +224,6 @@ func TestParsePromptBodies(t *testing.T) {
 	}
 }
 
-// A prompt that is not a heredoc cannot be read without running the kit, which
-// the parser must never do.
 func TestParsePromptWithoutHeredocFails(t *testing.T) {
 	src := []byte("#---\n# agent: a\n#---\np() { echo hi; }\n")
 	if _, err := Parse(src); err == nil {

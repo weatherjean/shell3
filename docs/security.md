@@ -212,14 +212,27 @@ forbidden, and the operator eventually switches it off entirely.
   the main agent's script never applies to it. Give every subagent its own
   script (even a strict three-line allowlist) if it must be constrained.
 - **`review` is a false-positive reducer, not a second boundary.** The
-  `{"review": true}` soft deny sends flagged commands to a one-word LLM
-  guardian (deny on anything but a clean APPROVE, comments stripped, fail
-  closed on error or timeout, a three-strike breaker on consecutive
-  denials). It lets the gate keep broad, lazy patterns without refusing
-  ordinary work — but a reviewer that sees only the command string can be
-  fooled by one crafted to look benign. Keep the irreversible rules
-  (credentials, gate edits, machine destruction) on `block`, where no model
-  gets a vote.
+  `{"review": true}` soft deny sends the exact action and a bounded transcript
+  to a dedicated LLM guardian. It returns structured risk, operator
+  authorization, outcome, and rationale; malformed output, error, and timeout
+  fail closed, with a three-strike breaker on consecutive denials. Only human
+  messages in an interactive root session can authorize — subagent and cron
+  input is untrusted even though it uses a `user` wire role. This supports an
+  explain-risk, explicitly-approve, retry flow without adding an `ask` verdict.
+  The reviewer is still a model and can be fooled. Keep irreversible rules
+  (credentials, gate edits, machine destruction) on `block`, where no model or
+  later approval gets a vote.
+- **Subagent gate blocks triage before escalating.** Every gate-blocked subagent tool
+  result tells the agent to decide whether the action is necessary, prefer a
+  policy-permitted safer route, and finish useful partial work. Only a blocker
+  that prevents meaningful completion is handed to the parent, with the exact
+  action, necessity, reason, alternatives, and required operator decision. This
+  guidance does not weaken the verdict: variants, indirect evasion, and treating
+  a blanket refusal as permission remain forbidden.
+- **The reviewer is another data recipient.** It receives the exact command and
+  up to 16 KB of recent operator, assistant, and tool text. The default uses the
+  main model; an explicit `review_model` may point elsewhere, so trust that
+  endpoint for conversation data before enabling it.
 - **It's a guardrail, not a boundary.** A determined model can phrase a
   destructive command your regexes don't catch. Pair with real isolation for
   anything that must not escape.

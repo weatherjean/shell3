@@ -10,10 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestSession_AccumulatesUsageAcrossTurns proves usage survives a real round
-// trip through SQLite across MULTIPLE turns, not just that a Go field got
-// set — a single turn can't reveal an accumulation bug (last-write-wins would
-// pass a single-turn check too).
 func TestSession_AccumulatesUsageAcrossTurns(t *testing.T) {
 	mk := func() chat.Config {
 		return chat.Config{
@@ -43,11 +39,6 @@ func TestSession_AccumulatesUsageAcrossTurns(t *testing.T) {
 	}
 }
 
-// TestSession_AccumulatesUsageWithinMultiRoundTurn: a SINGLE turn that spans
-// two LLM rounds (a tool call, then the final text) must sum both rounds'
-// usage, not just record the last round's — this is the shape of the real
-// incident that motivated this task (a tool-heavy job burning many rounds per
-// turn), which the multi-turn, single-round-each test above cannot catch.
 func TestSession_AccumulatesUsageWithinMultiRoundTurn(t *testing.T) {
 	mk := func() chat.Config {
 		return chat.Config{

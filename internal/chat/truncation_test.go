@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// truncatingClient emits some text and then a terminal event flagged
-// Truncated, the way a provider that hit the output cap does.
 type truncatingClient struct {
 	text      string
 	truncated bool
@@ -48,10 +46,6 @@ func TestStreamOnceCleanStopNotTruncated(t *testing.T) {
 	}
 }
 
-// The user must SEE that the reply was cut. Front-ends build the reply from
-// token events, so the notice has to arrive as one — and it must also be in
-// the recorded message, so the model knows on the next round that its own
-// previous output was cut off.
 func TestTruncatedTurnAppendsVisibleNotice(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{LLM: truncatingClient{text: "1\n2\n3", truncated: true}}

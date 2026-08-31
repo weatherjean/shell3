@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -209,12 +210,36 @@ type ToolCallVerdict struct {
 // verdict (shell3 runs unattended, where an ask is a denial with a delay),
 // and parsing it as {} would silently degrade to an allow.
 type hookVerdict struct {
-	Block   bool     `json:"block"`
-	Review  bool     `json:"review"`
-	Reason  string   `json:"reason"`
-	Argv    []string `json:"argv"`
-	Ask     string   `json:"ask"`
-	Command *string  `json:"command"`
+	Block      bool            `json:"block"`
+	Review     bool            `json:"review"`
+	Reason     string          `json:"reason"`
+	Argv       []string        `json:"argv"`
+	Ask        string          `json:"ask"`
+	AskTimeout json.RawMessage `json:"ask_timeout"`
+	Command    *string         `json:"command"`
+}
+
+// decodeHookObject accepts exactly one JSON object and rejects unknown fields.
+// A misspelled block/output key must fail closed instead of decoding as {} and
+// silently allowing the call or passing through an unredacted result.
+func decodeHookObject(data []byte, dst any) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("verdict must be a JSON object")
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("verdict contains trailing JSON")
+		}
+		return err
+	}
+	return nil
 }
 
 // runHook runs one hook with payload on stdin and returns its stdout. cwd is
@@ -282,7 +307,7 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command
 		return ToolCallVerdict{Action: ActionRun, Argv: passArgv, Passthrough: true}
 	}
 	var v hookVerdict
-	if err := json.Unmarshal(trimmed, &v); err != nil {
+	if err := decodeHookObject(trimmed, &v); err != nil {
 		return ToolCallVerdict{Action: ActionBlock, Reason: fmt.Sprintf("tool-call hook error: invalid verdict JSON: %v", err)}
 	}
 	switch {
@@ -300,7 +325,7 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command
 			return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: argv contains an empty element"}
 		}
 		return ToolCallVerdict{Action: ActionRun, Argv: v.Argv}
-	case v.Ask != "":
+	case v.Ask != "" || len(v.AskTimeout) > 0:
 		return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: the ask verdict " +
 			"no longer exists (hooks allow, block, or rewrite); update the hook to use block"}
 	case v.Command != nil:
@@ -337,7 +362,7 @@ func (c *LoadedConfig) RunToolResult(ctx context.Context, agentName, name, argsJ
 	var v struct {
 		Output *string `json:"output"`
 	}
-	if err := json.Unmarshal(trimmed, &v); err != nil {
+	if err := decodeHookObject(trimmed, &v); err != nil {
 		return "[tool-result hook failed: invalid verdict JSON: " + err.Error() + "]"
 	}
 	if v.Output == nil {

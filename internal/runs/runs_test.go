@@ -76,7 +76,6 @@ func TestNewSession_RecordsCronJob(t *testing.T) {
 	}
 }
 
-// findMeta returns the session's meta, or false when it no longer exists.
 func findMeta(t *testing.T, st *Store, id string) (Meta, bool) {
 	t.Helper()
 	metas, err := st.ListSessions(0)
@@ -134,7 +133,6 @@ func TestEndSessionRemovesEmptySession(t *testing.T) {
 	}
 }
 
-// A session with messages ends normally — row kept, status flipped.
 func TestEndSessionKeepsStoredConversation(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -159,8 +157,6 @@ func TestEndSessionKeepsStoredConversation(t *testing.T) {
 	}
 }
 
-// A message-less session that still holds a job log is NOT empty — a lingering
-// bash_bg's teed output is worth keeping.
 func TestEndSessionKeepsJobLogs(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -188,7 +184,6 @@ func TestEndSessionKeepsJobLogs(t *testing.T) {
 	}
 }
 
-// HasMessages is the cheap "worth listing" probe the /runs renderer uses.
 func TestHasMessages(t *testing.T) {
 	root := t.TempDir()
 	st, err := Open(root)

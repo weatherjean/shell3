@@ -93,9 +93,6 @@ func TestSweepSkipsSymlinks(t *testing.T) {
 	}
 }
 
-// TestSweepSkipsSubdirectories pins that a subdirectory (and anything inside
-// it) is left alone — the media dir is documented as flat, but Sweep must
-// not assume that and recurse or delete a directory entry outright.
 func TestSweepSkipsSubdirectories(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "a-subdir")
@@ -130,11 +127,6 @@ func TestSweepSkipsSubdirectories(t *testing.T) {
 	}
 }
 
-// TestSweepCutoffIsStrictlyBefore pins the boundary: a file whose mtime is
-// exactly at the cutoff (now - keep) is kept, not removed. The implementation
-// uses ModTime().Before(cutoff), which is strict — Before is false when the
-// two instants are equal — so this test exercises that exact edge rather
-// than an approximate one that could pass by luck of timer resolution.
 func TestSweepCutoffIsStrictlyBefore(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -172,10 +164,6 @@ func TestSweepCutoffIsStrictlyBefore(t *testing.T) {
 	}
 }
 
-// TestSweepHandlesHostileFilenames pins that filenames with spaces, unicode,
-// a leading dash, and a trailing dot are swept correctly (they're regular
-// files past the cutoff, filepath.Join(dir, e.Name()) handles all of them
-// safely) and that the parent directory itself is never touched.
 func TestSweepHandlesHostileFilenames(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -183,7 +171,7 @@ func TestSweepHandlesHostileFilenames(t *testing.T) {
 
 	hostile := []string{
 		"sent-with spaces.txt",
-		"img-é漢字.png", // é + CJK
+		"img-é漢字.png",
 		"-leading-dash.txt",
 		"trailing-dot.txt.",
 	}
@@ -214,9 +202,6 @@ func TestSweepHandlesHostileFilenames(t *testing.T) {
 	}
 }
 
-// TestSweepMissingDirReturnsZeroNil pins the documented behavior for a media
-// dir that doesn't exist at all (e.g. never created because media was never
-// used): Sweep must not error, just report nothing removed.
 func TestSweepMissingDirReturnsZeroNil(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
 	removed, err := Sweep(dir, 24*time.Hour, time.Now())

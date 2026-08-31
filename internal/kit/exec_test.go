@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func mustParse(t *testing.T, src string) *Kit {
@@ -78,8 +79,6 @@ func TestBindArgsDefaultsAndRequired(t *testing.T) {
 	}
 }
 
-// JSON numbers arrive as float64; an int param must not gain a decimal tail nor
-// silently swallow a fractional value.
 func TestBindArgsIntCoercion(t *testing.T) {
 	k := mustParse(t, execKit)
 	tool := k.Agents[0].Tools[0]
@@ -126,7 +125,6 @@ func TestRunnerRunBoolAndOverride(t *testing.T) {
 	}
 }
 
-// A failing tool must report why, not return silence.
 func TestRunnerRunSurfacesStderr(t *testing.T) {
 	k := mustParse(t, execKit)
 	r := Runner{Path: writeKit(t, execKit)}
@@ -140,7 +138,41 @@ func TestRunnerRunSurfacesStderr(t *testing.T) {
 	}
 }
 
-// Sourcing a kit must not execute anything: the file is definitions-only.
+func TestRunnerCancellationKillsChildProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "child-survived")
+	src := `#---
+# agent: a
+#---
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
+
+#---
+# tool: wait
+# description: starts a child
+#---
+a_wait() {
+  (sleep 1; touch ` + ShellQuote(marker) + `) &
+  wait
+}
+`
+	k := mustParse(t, src)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := (Runner{Path: writeKit(t, src), Dir: dir}).Run(ctx, k.Agents[0].Tools[0], nil)
+	if err == nil {
+		t.Fatal("cancelled tool returned no error")
+	}
+	// If cancellation killed only the wrapper shell, its child would live long
+	// enough to create the marker.
+	time.Sleep(1200 * time.Millisecond)
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("tool child survived cancellation: %v", statErr)
+	}
+}
+
 func TestRunnerSourcingHasNoSideEffects(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "touched")

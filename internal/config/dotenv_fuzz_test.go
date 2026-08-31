@@ -19,7 +19,7 @@ func FuzzParseDotEnvValue(f *testing.F) {
 	f.Add(`#`)
 
 	f.Fuzz(func(t *testing.T, v string) {
-		_ = parseDotEnvValue(v) // must never panic
+		_ = parseDotEnvValue(v)
 
 		if !strings.Contains(v, "#") {
 			if got := stripInlineComment(v); got != v {
@@ -27,7 +27,6 @@ func FuzzParseDotEnvValue(f *testing.F) {
 			}
 		}
 
-		// An already-trimmed, unquoted value with no '#' must pass through.
 		trimmed := strings.TrimSpace(v)
 		wrapped := len(trimmed) >= 2 &&
 			(trimmed[0] == '"' || trimmed[0] == '\'') && trimmed[len(trimmed)-1] == trimmed[0]
