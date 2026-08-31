@@ -143,6 +143,8 @@ takes the kit file itself as its argument.
 - **[Security & data](docs/security.md)**: threat model, secrets, wiping data.
 - **[Cookbook](docs/cookbook/README.md)**: drop-in recipes — subagents,
   skills, sandboxes, MCP.
+- **[Internals](docs/internals.md)**: implementation contracts, concurrency,
+  durability, and the rationale behind non-obvious design choices.
 
 ## Security
 
