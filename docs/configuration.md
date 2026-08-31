@@ -254,6 +254,10 @@ of only the current thread:
   match exactly, `OR`/`NOT`/`prefix*` work; a malformed query is retried as
   one quoted phrase rather than erroring. Tool output is not indexed — search
   for what was said *about* a thing, not for raw command output.
+- `{"runs": true}` — list recent sessions with agent/cron/parent metadata and
+  the first user prompt. `agent`, `cron`, `parent`, `since`, and `before` narrow
+  this listing; the same filters combine with `query`. Dates accept
+  `YYYY-MM-DD` or RFC3339; `since` is inclusive and `before` is exclusive.
 - `{"session": "<id>", "around": 41}` — read the transcript around a hit.
 
 The tool is read-only, and it is the whole interface: the agent never writes
@@ -623,7 +627,7 @@ Two more hooks the kit declares, both documented in full in
 `command:` is a `/verb` the front-end answers by running a shell function —
 no model turn, no tokens. stdout is the reply, the text after the verb arrives
 as `$ARG`, empty output posts nothing, and the command joins the client's `/`
-menu. It may not be named after a built-in (`/dash`, `/stop`, `/superstop`,
+menu. It may not be named after a built-in (`/status`, `/stop`, `/superstop`,
 `/new`, `/run`, `/btw`, `/reload`, `/quiet`); that is a load error, because a
 built-in is matched first and the declaration would never fire.
 
@@ -730,8 +734,7 @@ An `id` may appear only once. `max_concurrent_turns` must be non-negative;
 and `shell3 health` don't need it.
 
 The chat needs no listener, no login, no tunnel: shell3 long-polls Telegram
-outbound. (The read-only web dash is its own localhost listener — see
-[`dash_port`](#the-web-dash--dash_port).) Everyone on `allow_from` — and
+outbound. Everyone on `allow_from` — and
 whoever holds the token — controls a shell on this machine. The threat model
 is in [security.md](security.md#the-telegram-boundary).
 
@@ -743,9 +746,7 @@ and MCP servers. It does **not** re-apply the front-end's own wiring — a
 changed `telegram.chat_id`, `telegram.allow_from` or `telegram.workdir` takes
 effect at the next `shell3 telegram` start. `telegram.chats:` IS re-applied by
 a reload (room briefs re-read their description and context files on the next
-turn). The same goes for `dash_port`: the dash binds once
-at startup, so a port change needs a restart — the *data* on its pages is
-always live (resolved per request), only the listener itself is fixed.
+turn).
 
 ### What a stored run contains
 
@@ -860,9 +861,8 @@ overrides even a manager's. The pre-`report:`
 spelling `direct: true` is a load error naming its replacement. A reload
 arms changed jobs.
 
-The dash's Cron table lists every job with its schedule, agent, `report` mode,
-last run and outcome, and its rolling 7-day dispatched-run token cost where
-known — the dash is the one dashboard; there is no cron command. The outcome
+The `/status` snapshot lists every job with its schedule, agent, last run and
+outcome, and its rolling 7-day dispatched-run token cost where known. The outcome
 describes the **run**, not its dispatch: a job whose agent is accepted and
 then fails its work counts as a failure, reported back to the scheduler when
 the run actually ends. It arrives late by construction, so between a firing
@@ -939,34 +939,14 @@ external SQLite. A background job's raw output stays a plain file under
 `.shell3_project/runs/<session>/jobs/<id>.log`.
 
 The database carries a schema version. If it doesn't match the binary you are
-running, the file is **deleted and recreated empty**, with one line on stderr
-saying so. shell3 data is disposable by design: there are no migrations, and
-a version skew never leaves you on a half-understood schema. Keep anything
-you actually care about outside the store. A corrupted version stamp that
-happens to land within the valid range (e.g. a genuine `2` misread as `1`) is
-indistinguishable from an actual older schema, so that database is recreated
-empty too — the data is not recoverable.
-
-## The web dash — `dash_port`
-
-```yaml
-dash_port: 7333   # default 7333; 0 = no dash listener at all
-```
-
-`shell3 telegram` binds the read-only dashboard on
-`127.0.0.1:<dash_port>` at startup (never `shell3 ask`). `/dash` replies
-with its URL plus a fresh ~1h token; the base URL lives in `dash_url.txt`
-beside the config (seeded with localhost, overwritten by the dash-exposing
-skill when a tunnel is set up). The dashboard shows the live conversation
-(linked to its folding transcript), background jobs with their captured
-output logs, cron schedules and per-job detail, stored run replays, and a
-read-only browser of the config directory — the kit, skills, and cron
-prompts. Credential files (`.env`, `.env.*`) appear in the
-listing but their contents are always redacted, never read from disk. A port outside 0–65535 is a load error; a
-bind failure at startup is a warning, and `/dash` reports the dash as down.
-In a kit, `dash_port` goes in the `shell3:` wiring block like every other
-top-level key. Details and the token model: [cli.md](cli.md#the-web-dash)
-and [security.md](security.md#the-web-dash).
+running, shell3 moves the database and any WAL/SHM sidecars to a timestamped
+`.old-vN-*` bundle, prints the preserved path on stderr, and creates a fresh
+store. There are deliberately no migrations or compatibility readers, so a
+version skew never leaves the process interpreting a half-understood schema;
+the archive remains available for manual recovery or inspection and is never
+silently deleted. A corrupted version stamp that happens to land within the
+valid range is indistinguishable from an actual older schema and is archived
+the same way.
 
 ## The runs janitor — `runs_keep_days`
 

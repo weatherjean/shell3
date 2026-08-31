@@ -65,7 +65,7 @@ var EventNames = []string{
 var ReservedCommands = []string{
 	"ask",
 	"help",
-	"dash",
+	"status",
 	"stop",
 	"superstop",
 	"new",

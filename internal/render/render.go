@@ -1,7 +1,5 @@
-// Package render turns runtime state into self-contained HTML views for the
-// web dash (the index and runs fragments, and the run-replay page), plus the
-// small formatting helpers they share. It is front-end-neutral: a caller
-// serves the string over HTTP, sends it as a file, or writes it to disk.
+// Package render turns runtime state and stored records into self-contained
+// HTML documents suitable for sending as files or writing to disk.
 package render
 
 import (
@@ -24,4 +22,15 @@ func stamp(t time.Time) string {
 func oneLine(s string, max int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
 	return strutil.Ellipsize(s, max)
+}
+
+// stripToolIDPrefix drops the persistence-only tool-call id line before a
+// stored result is shown to a person.
+func stripToolIDPrefix(content string) string {
+	if strings.HasPrefix(content, "[tool_call_id=") {
+		if nl := strings.IndexByte(content, '\n'); nl >= 0 {
+			return content[nl+1:]
+		}
+	}
+	return content
 }

@@ -381,7 +381,7 @@ Everything typed after the verb arrives as `$ARG` (`/standup week` →
 to say stays silent; a nonzero exit posts the failure. Declared commands join
 the client's `/` autocomplete menu.
 
-A command may not be named after a built-in (`/dash`, `/stop`, `/superstop`,
+A command may not be named after a built-in (`/status`, `/stop`, `/superstop`,
 `/new`, `/run`, `/btw`, `/reload`, `/quiet`) — built-ins are matched first, so
 the declaration would never fire. That is a load error rather than a silent
 shadow.

@@ -49,8 +49,8 @@ func (s *Store) Close() error {
 
 // schemaVersion is stamped via PRAGMA user_version once schema.go has been
 // applied. Bump it on ANY table-shape change, rather than judging
-// compatibility case by case. Past versions are not recorded: a mismatched
-// database is deleted and recreated, so no code ever reads an older shape.
+// compatibility case by case. A mismatched database is archived and recreated,
+// so no code ever reads an older shape and no stored history is destroyed.
 //
 // v10 is: sessions/messages/reminders/messages_fts; threads(surface, session_id)
 // for each front-end's current conversation; cron_status(name, json);
@@ -67,9 +67,9 @@ func (s *Store) Close() error {
 const schemaVersion = 10
 
 // openDB opens path, applying the schema fresh or recreating the file when
-// its stamp does not match schemaVersion. shell3 data is disposable, so a
-// mismatched database is never patched in place — it is deleted and rebuilt
-// empty, loudly. The failure mode this guards: CREATE TABLE IF NOT EXISTS is
+// its stamp does not match schemaVersion. A mismatched database is never
+// patched in place — its database/WAL/SHM bundle is archived under one suffix
+// and a fresh store is built loudly. The failure mode this guards: CREATE TABLE IF NOT EXISTS is
 // a no-op against an existing table, so an older database would keep missing
 // every column added since and fail writes row by row.
 func openDB(path string) (*sql.DB, error) {
@@ -124,15 +124,9 @@ func openDB(path string) (*sql.DB, error) {
 	// unlinking — a rename is atomic, so a failure partway through building
 	// the new schema never leaves the operator with no store at all.
 	//
-	// The stderr notice prints before any renaming, so it must not promise a
-	// recovery path that may not survive: the success path removes the aside
-	// copies, which would make "old data moved aside to X" a lie in the
-	// common case. It states only what is unconditionally true — the store
-	// is being reset — and the aside path appears only in the error from the
-	// failure branch, where that copy genuinely survives.
 	oldSuffix := fmt.Sprintf(".old-v%d-%d", version, time.Now().UnixNano())
 	fmt.Fprintf(os.Stderr,
-		"runs store: schema v%d != v%d — resetting %s (shell3 data is disposable by design)\n",
+		"runs store: schema v%d != v%d — archiving and resetting %s\n",
 		version, schemaVersion, path)
 	if err := db.Close(); err != nil {
 		return nil, err
@@ -156,12 +150,10 @@ func openDB(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, recreateErr(asided, err)
 	}
-	// The new store built cleanly: the aside copies have served their
-	// purpose. Clean them up best-effort — leaving one behind on error costs
-	// nothing but disk.
-	for _, f := range asided {
-		_ = os.Remove(f)
-	}
+	// An old store is user history, not a temporary rollback file. Keep the
+	// complete bundle after a successful rebuild and name every path so the
+	// operator can archive, inspect with the matching old binary, or delete it.
+	fmt.Fprintf(os.Stderr, "runs store: previous schema preserved at: %s\n", strings.Join(asided, ", "))
 	return db, nil
 }
 

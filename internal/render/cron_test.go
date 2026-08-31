@@ -5,6 +5,7 @@ package render_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/render"
@@ -12,7 +13,7 @@ import (
 )
 
 func cronRow(statuses []cron.JobStatus, costs map[string]runs.JobCost) string {
-	return render.DashIndexHTML(nil, nil, "", nil, statuses, costs, "")
+	return render.StatusPageHTML(nil, nil, "", nil, statuses, costs, nil, "", time.Time{})
 }
 
 func TestCronAgentJobOutcomeIsLabeledNotClaimedAsSuccess(t *testing.T) {

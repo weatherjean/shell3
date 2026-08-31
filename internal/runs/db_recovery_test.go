@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestOpen_ResetNoticeDoesNotPromiseAsidePath(t *testing.T) {
+func TestOpen_ResetNoticeNamesPreservedAsidePath(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
 	buildV1DB(t, path)
@@ -31,14 +31,24 @@ func TestOpen_ResetNoticeDoesNotPromiseAsidePath(t *testing.T) {
 	}
 	defer st.Close()
 
-	if !strings.Contains(line, "resetting") {
-		t.Fatalf("reset notice missing the word %q: %q", "resetting", line)
+	if !strings.Contains(line, "archiving and resetting") {
+		t.Fatalf("reset notice missing archive wording: %q", line)
 	}
-	if !strings.Contains(line, "disposable by design") {
-		t.Fatalf("reset notice dropped the house-rule wording: %q", line)
+	if !strings.Contains(line, "previous schema preserved at:") || !strings.Contains(line, ".old-v0-") {
+		t.Fatalf("reset notice does not name the preserved store: %q", line)
 	}
-	if strings.Contains(line, ".old-") {
-		t.Fatalf("reset notice names an aside path the success path then deletes: %q", line)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), DBFile+".old-v0-") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the reset notice named an archive, but no archived database survived")
 	}
 }
 
@@ -147,7 +157,7 @@ func TestMoveOldFilesAside_NoWalShmIsFine(t *testing.T) {
 	}
 }
 
-func TestOpen_RecreateWithWalShmPresentSurvivesAndCleansUp(t *testing.T) {
+func TestOpen_RecreateWithStaleWalShmStillPreservesOldDatabase(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
 	buildV1DB(t, path)
@@ -173,10 +183,14 @@ func TestOpen_RecreateWithWalShmPresentSurvivesAndCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var archivedMain bool
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".old-") {
-			t.Errorf("leftover aside file after successful recreate: %q", e.Name())
+		if strings.HasPrefix(e.Name(), DBFile+".old-v0-") {
+			archivedMain = true
 		}
+	}
+	if !archivedMain {
+		t.Fatal("mismatched database was not preserved")
 	}
 }
 

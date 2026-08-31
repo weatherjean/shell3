@@ -49,8 +49,8 @@ func LastErrorPath(workdir string) string {
 
 // IsCredentialFile reports whether a base file name is one shell3 treats as
 // secret: the `.env` beside the kit and its dotenv siblings (.env.local, …).
-// One definition, so the dash's file explorer (lists without reading) and
-// send_media_telegram (refuses to send) can never drift apart.
+// One definition, so config guards and send_media_telegram (which refuses to
+// send credentials) can never drift apart.
 func IsCredentialFile(name string) bool {
 	lower := strings.ToLower(name)
 	return lower == ".env" || strings.HasPrefix(lower, ".env.")

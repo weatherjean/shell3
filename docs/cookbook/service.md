@@ -32,6 +32,5 @@ laptop the bot is gone while the lid is closed, so disable suspend or host
 shell3 on an always-on box.
 
 The chat side exposes nothing: the bot only makes outbound connections, and
-Telegram already reaches your devices. The one listener is the read-only web
-dash on `127.0.0.1` (token-gated, `dash_port: 0` disables it) — reachable
-from other devices only if you tunnel it (`/dash help exposing`).
+Telegram already reaches your devices. `/status` and requested stored records
+arrive as self-contained HTML documents in the chat.

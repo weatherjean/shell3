@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -54,19 +55,61 @@ type SearchHit struct {
 	Seq       int
 	Role      string
 	Snippet   string
+	Agent     string
+	CronJob   string
+	ParentID  string
+	StartedAt time.Time
+}
+
+// SearchFilter narrows full-text matches by the session that owns them.
+// Empty fields do not filter. Since is inclusive; Before is exclusive.
+type SearchFilter struct {
+	Agent    string
+	CronJob  string
+	ParentID string
+	Since    time.Time
+	Before   time.Time
 }
 
 // Search runs an FTS5 query over the indexed conversation text (user and
 // assistant messages), best matches first. query uses FTS5 syntax: bare words
 // AND together, quotes make phrases.
 func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
+	return s.SearchFiltered(query, SearchFilter{}, limit)
+}
+
+// SearchFiltered runs Search with optional session metadata and time bounds.
+// Filtering happens in SQLite before LIMIT, so selective queries do not lose
+// matches to newer sessions outside the requested scope.
+func (s *Store) SearchFiltered(query string, filter SearchFilter, limit int) ([]SearchHit, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`SELECT session_id, seq, role,
-		snippet(messages_fts, 0, '[', ']', '…', 16)
-		FROM messages_fts WHERE messages_fts MATCH ?
-		ORDER BY rank LIMIT ?`, query, limit)
+	since, before := "", ""
+	if !filter.Since.IsZero() {
+		since = encTime(filter.Since)
+	}
+	if !filter.Before.IsZero() {
+		before = encTime(filter.Before)
+	}
+	rows, err := s.db.Query(`SELECT f.session_id, f.seq, f.role,
+		snippet(messages_fts, 0, '[', ']', '…', 16),
+		s.agent, s.cron_job, s.parent_id, s.started_at
+		FROM messages_fts AS f JOIN sessions AS s ON s.id=f.session_id
+		WHERE messages_fts MATCH ?
+		AND (?='' OR lower(s.agent)=lower(?))
+		AND (?='' OR s.cron_job=?)
+		AND (?='' OR s.parent_id=?)
+		AND (?='' OR s.started_at>=?)
+		AND (?='' OR s.started_at<?)
+		ORDER BY rank LIMIT ?`,
+		query,
+		filter.Agent, filter.Agent,
+		filter.CronJob, filter.CronJob,
+		filter.ParentID, filter.ParentID,
+		since, since,
+		before, before,
+		limit)
 	if err != nil {
 		return nil, fmt.Errorf("runs: search: %w", err)
 	}
@@ -74,9 +117,12 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	var out []SearchHit
 	for rows.Next() {
 		var h SearchHit
-		if err := rows.Scan(&h.SessionID, &h.Seq, &h.Role, &h.Snippet); err != nil {
+		var started string
+		if err := rows.Scan(&h.SessionID, &h.Seq, &h.Role, &h.Snippet,
+			&h.Agent, &h.CronJob, &h.ParentID, &started); err != nil {
 			return nil, fmt.Errorf("runs: search: %w", err)
 		}
+		h.StartedAt = decTime(started)
 		out = append(out, h)
 	}
 	return out, rows.Err()

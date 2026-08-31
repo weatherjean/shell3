@@ -193,9 +193,13 @@ func TestOpen_RecreateMovesOldFilesAsideNotDeletes(t *testing.T) {
 	if !names["not-the-database.txt"] {
 		t.Fatalf("root dir after recreate = %v, want sibling file present", names)
 	}
+	archived := false
 	for name := range names {
-		if strings.Contains(name, ".old-") {
-			t.Errorf("unexpected leftover aside file after successful recreate: %q", name)
+		if strings.Contains(name, ".old-v0-") {
+			archived = true
 		}
+	}
+	if !archived {
+		t.Errorf("root dir after recreate = %v, want preserved old database", names)
 	}
 }

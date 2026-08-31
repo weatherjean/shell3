@@ -10,7 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// A run replay is the one dash view that is genuinely large — a real session
+// A run replay can be genuinely large — a real session
 // runs 44 to 455 messages and renders to 100–500 KB of markdown, where every
 // tool result sits open at full length. Reading it means scrolling past
 // hundreds of results to find one call.

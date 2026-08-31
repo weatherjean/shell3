@@ -76,6 +76,7 @@ func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
 func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func(), err error) {
 	b.SetWorkDir(workDir) // resolves send_media_telegram relative paths
 	b.SetConfigDir(rt.Parts().ConfigDir())
+	b.SetRunsRoot(rt.Parts().RunsRoot())
 	b.SetLogger(rt.Parts().Log()) // host-side faults (e.g. a lost current-session marker write) land in the app log
 
 	// The decorator registers the bot's host tools on main chat sessions, not
@@ -169,7 +170,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	if n := rt.RecoverCompletions(); n > 0 {
 		rt.Parts().Log().Info("recovered undelivered completions from the previous run", "count", n)
 	}
-	// The dash's Cron section reads the live scheduler's history.
+	// The status document reads the live scheduler's history.
 	cronStatusFn := func() []cron.JobStatus {
 		if s := currentSched(); s != nil {
 			return s.Jobs()
@@ -196,9 +197,17 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		return out
 	}
 
-	// The web dash: a 127.0.0.1 listener over the same live state. Port 0
-	// disables it, and a bind failure warns and runs dashless.
-	closeDash := wireDash(b, rt, cronSess, cronStatusFn, cronCostFn)
+	// /status is a point-in-time HTML document sent through Telegram. It reads
+	// the same live state on every invocation and spends no model turn.
+	b.SetStatusDocument(func(sess *shell3.Session) (string, []byte, error) {
+		if sess == nil {
+			sess = b.LiveSession()
+		}
+		now := time.Now()
+		page := render.StatusPageHTML(sess, rt, version, cronSess.Jobs(),
+			cronStatusFn(), cronCostFn(), statusRooms(b), b.Inbox(), now)
+		return "shell3-status-" + now.UTC().Format("20060102-150405") + ".html", []byte(page), nil
+	})
 
 	// /reload and the reload tool rebuild config and swap the scheduler. The
 	// host tools need no re-registration: Runtime.Reload re-applies the
@@ -216,11 +225,22 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 
 	return func() {
 		close(redeliverDone)
-		closeDash()
 		if s := currentSched(); s != nil {
 			s.Stop()
 		}
 	}, nil
+}
+
+func statusRooms(b *telegram.Bot) []render.RoomInfo {
+	rooms := b.Rooms()
+	out := make([]render.RoomInfo, 0, len(rooms))
+	for _, r := range rooms {
+		out = append(out, render.RoomInfo{
+			ChatID: r.ChatID, Title: r.Title, Busy: r.Busy,
+			Jobs: r.Jobs, Queued: r.Queued, SessionID: r.SessionID,
+		})
+	}
+	return out
 }
 
 // redeliverEvery: long enough that a hard outage costs a handful of retries

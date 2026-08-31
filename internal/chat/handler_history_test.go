@@ -17,7 +17,7 @@ func historyStore(t *testing.T) (*runs.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	id, err := st.NewSession(runs.Meta{Workdir: "/w"})
+	id, err := st.NewSession(runs.Meta{Workdir: "/w", Agent: "certs", CronJob: "renew", ParentID: "root-session"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,5 +72,25 @@ func TestHistoryToolDegradesGracefully(t *testing.T) {
 	out, err := HistoryHandler{}.Execute(context.Background(), "", json.RawMessage(`{"query":"x"}`), ToolConfig{})
 	if err != nil || !strings.Contains(out, "unavailable") {
 		t.Fatalf("nil-store path: %q %v", out, err)
+	}
+}
+
+func TestHistoryToolCombinesSearchFiltersAndEnrichesRuns(t *testing.T) {
+	st, id := historyStore(t)
+
+	out := execHistory(t, st, `{"query":"certificate","agent":"CERTS","cron":"renew","parent":"root-session"}`)
+	if !strings.Contains(out, id) || !strings.Contains(out, "agent=certs cron=renew parent=root-session") {
+		t.Fatalf("filtered search lacks metadata: %q", out)
+	}
+	if out := execHistory(t, st, `{"query":"certificate","agent":"other"}`); out != "no matches" {
+		t.Fatalf("agent filter was not applied to search: %q", out)
+	}
+
+	out = execHistory(t, st, `{"runs":true,"agent":"certs"}`)
+	if !strings.Contains(out, "how do we renew the wildcard certificate") || !strings.Contains(out, "cron=renew") {
+		t.Fatalf("run listing lacks prompt or metadata: %q", out)
+	}
+	if out := execHistory(t, st, `{"runs":true,"since":"not-a-date"}`); !strings.Contains(out, "YYYY-MM-DD or RFC3339") {
+		t.Fatalf("invalid time guidance missing: %q", out)
 	}
 }

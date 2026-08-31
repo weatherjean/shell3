@@ -10,7 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// CronRollupWindow is how far back the dash Cron table's cost column looks —
+// CronRollupWindow is how far back the status document's cron cost column looks —
 // the window Store.CronRollup is called with at the render call site, and the
 // "7d" label cronCost prints. Kept as one named constant, not two
 // numbers in two packages, so the call site and the label can never drift apart.

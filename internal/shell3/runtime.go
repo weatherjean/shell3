@@ -29,7 +29,7 @@ type SessionOpts struct {
 	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
-	// ParentID marks this a subagent child of that runs session: the dash
+	// ParentID marks this a subagent child of that runs session: stored-run views
 	// groups the transcript under the conversation that spawned it, and the
 	// janitor never deletes a message-less session other rows name as parent.
 	ParentID string

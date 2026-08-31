@@ -229,7 +229,7 @@ func (b *Bot) roomContext(paths []string) string {
 	return strings.TrimSpace(read(paths))
 }
 
-// RoomSnapshot is one live room as the dash shows it.
+// RoomSnapshot is one live room in a status snapshot.
 type RoomSnapshot struct {
 	ChatID    int64
 	Title     string

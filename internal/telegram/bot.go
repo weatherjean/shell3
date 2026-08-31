@@ -46,6 +46,9 @@ type Bot struct {
 	// excepted — by path AND inode, so no symlink or hardlink launders a
 	// credential out. "" disables only those two checks.
 	configDir string
+	// runsRoot contains the durable store and job logs used by the explicit
+	// record-export tool. It is set by the host and stable across reloads.
+	runsRoot string
 
 	// threads is the thread index every room derives its own surface from.
 	// Kept across /reload, so a generation swap never strands a marker.
@@ -66,7 +69,7 @@ type Bot struct {
 	// cronID is the adopted cron dispatch parent: a jobs/runs source that runs
 	// no turns and is never a room's conversation.
 	cronID string
-	// cron is the adopted parent handle (the jobs/runs source the dash reads).
+	// cron is the adopted parent handle (the jobs source /status reads).
 	cron *shell3.Session
 
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
@@ -93,8 +96,8 @@ type Bot struct {
 	// metaInflight keeps at most one getChat per room in flight.
 	metaInflight map[int64]bool
 
-	// dashURL mints a freshly tokened /dash URL. nil = the dash is off.
-	dashURL func() (string, error)
+	// statusDocument renders a fresh HTML snapshot for /status.
+	statusDocument func(sess *shell3.Session) (filename string, data []byte, err error)
 
 	// botUser is the bot's own @username, for @mention matching.
 	// botUserKnown separates "not looked up" from "looked up, no answer".
@@ -205,12 +208,11 @@ func (b *Bot) jobRunner() func(name string) error {
 // SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
 
-// SetDash wires /dash to the host's URL minter, which appends a fresh ~1h
-// token. nil means the dash is disabled and /dash says so.
-func (b *Bot) SetDash(mint func() (string, error)) {
+// SetStatusDocument wires the zero-token /status snapshot renderer.
+func (b *Bot) SetStatusDocument(render func(*shell3.Session) (string, []byte, error)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.dashURL = mint
+	b.statusDocument = render
 }
 
 // SetQuiet installs the /quiet store. Nil means quiet never turns on.
@@ -237,11 +239,15 @@ func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
 // Unset skips the path and inode checks, so every front-end must supply it.
 func (b *Bot) SetConfigDir(dir string) { b.configDir = dir }
 
+// SetRunsRoot sets the root used to render stored conversations and job logs.
+func (b *Bot) SetRunsRoot(dir string) { b.runsRoot = dir }
+
 // DecorateChatSession registers the bot's host tools on a main chat session.
 // The host wires it into Runtime.SetSessionDecorator, so every session and
 // every one a reload rebuilds gets them; headless children are skipped there.
 func (b *Bot) DecorateChatSession(s *shell3.Session) {
 	b.registerSendTool(s)
+	b.registerRecordTool(s)
 	b.registerReloadTool(s)
 	b.registerStatusTool(s)
 }
@@ -496,7 +502,7 @@ func containsToolMarkup(text string) bool {
 }
 
 // malformedReplyNotice is what a user turn posts in place of a corrupt reply.
-const malformedReplyNotice = "⚠️ the model produced malformed output (raw tool-call markup) — reply suppressed; the dash has the transcript"
+const malformedReplyNotice = "⚠️ the model produced malformed output (raw tool-call markup) — reply suppressed; ask me to send the transcript if needed"
 
 // withReplyContext prepends the replied-to message as a capped blockquote so
 // the model sees what the user is responding to, unchanged when there is no
@@ -662,7 +668,7 @@ func (b *Bot) StartFreshTurn(m shell3.Mail) {
 }
 
 // Inbox is every room's pending user mail and undrained agent mail:
-// zero-token, deterministic, the dash index's Inbox section.
+// zero-token, deterministic, and included in /status.
 func (b *Bot) Inbox() string { return b.renderInbox() }
 
 func (b *Bot) renderInbox() string {

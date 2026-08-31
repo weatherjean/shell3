@@ -133,7 +133,7 @@ func newTelegramCommand() *cobra.Command {
 					"Here, just type — every message continues this chat's conversation, and a restart " +
 					"picks it up where we left off. In a group, @mention me or reply to one of my " +
 					"messages; each chat keeps its own conversation. /new starts a fresh one here, " +
-					"/dash opens the dashboard, /stop halts the current turn (/superstop also kills " +
+					"/status sends a current snapshot, /stop halts the current turn (/superstop also kills " +
 					"background jobs), /reload applies config changes."
 				if _, err := apiClient.Send(ctx, chatID, banner); err != nil {
 					fmt.Printf("warning: could not send the greeting: %v\n", err)

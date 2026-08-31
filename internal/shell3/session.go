@@ -429,54 +429,6 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	return tc
 }
 
-// Compact forces one compaction now, exactly like the automatic compact_at
-// path, returning estimated prompt tokens before and after. ErrBusy mid-turn;
-// chat.ErrNothingToCompact when there is no summarisable head, with history
-// untouched on any error. It does NOT run under withIdle — the round-trip can
-// take minutes and must not hold s.mu — but takes the FULL turn lifecycle
-// like Send, so /stop can abort the call and doClose joins before EndSession:
-// the compaction rolls the runs session, and teardown must not race it.
-//
-// TODO: no front-end binds this — no /compact command exists, and the bot
-// compacts automatically. It (and chat.CompactStandalone, and compactApply's
-// whole `forced` branch) is exercised only by tests. Either bind a command or
-// delete the forced path.
-func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
-	cctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	s.mu.Lock()
-	if s.busy || s.closed {
-		err := ErrBusy
-		if s.closed {
-			err = ErrClosed
-		}
-		s.mu.Unlock()
-		cancel()
-		return 0, 0, err
-	}
-	s.busy = true
-	s.turnCancel = cancel
-	s.turnDone = done
-	// Capture the runtime and snapshot the config in one critical section, as
-	// Send does, so the cfg mutators serialize wholly before or after.
-	rt := s.runtime
-	tc := s.turnConfigLocked()
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.busy = false
-		s.mu.Unlock()
-		close(done) // doClose may be blocked on this join; store state is final
-		// A notice queued behind the busy gate had its Wake bounced off
-		// RunQueued's ErrBusy; re-emit as Send's unwind does.
-		if rt != nil && s.sess.HasInbox() {
-			rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
-		}
-		cancel() // release the child ctx
-	}()
-	return chat.CompactStandalone(cctx, tc, s.sess)
-}
-
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 

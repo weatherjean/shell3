@@ -51,7 +51,7 @@ func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
 	// The displayed prompt is the authored prompt PLUS the host standing
 	// reminders (Environment) — they're injected into every turn but
-	// kept out of cfg.Personality.SystemPrompt, so the dash's status view
+	// kept out of cfg.Personality.SystemPrompt, so the status document
 	// surfaces the full effective context here.
 	systemPrompt := s.cfg.Personality.SystemPrompt
 	if rems := s.sess.StandingReminders(); len(rems) > 0 {

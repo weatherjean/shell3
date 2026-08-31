@@ -5,8 +5,6 @@ package telegram
 import (
 	"context"
 	"fmt"
-	"net"
-	neturl "net/url"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -40,15 +38,15 @@ func (b *Bot) BotCommands() []Command {
 }
 
 // BotCommands is the canonical BUILT-IN list, next to handleCommand so the
-// two stay in sync. The views live in the web dash; these are actions.
+// two stay in sync.
 func BotCommands() []Command {
 	return []Command{
 		{"ask", "Talk to the agent in a group: /ask <message>"},
 		{"help", "How this bot works — chats, groups, commands"},
-		{"dash", "Open the web dashboard (link valid ~1h)"},
+		{"status", "Send a current status snapshot"},
 		{"stop", "Stop the current turn"},
 		{"superstop", "Stop the turn AND every background job"},
-		{"new", "Start a fresh conversation (the old one stays in the dash)"},
+		{"new", "Start a fresh conversation (the old one stays searchable)"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"btw", "Ask something outside this conversation: /btw <question>"},
 		{"reload", "Reload the config without restarting"},
@@ -95,8 +93,8 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		}
 	case "/superstop":
 		c.handleSuperstop(ctx)
-	case "/dash":
-		c.handleDashCommand(ctx, m, arg)
+	case "/status":
+		c.handleStatusCommand(ctx)
 	case "/run":
 		run := c.b.jobRunner()
 		if run == nil {
@@ -192,60 +190,26 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 	}
 }
 
-// handleDashCommand answers a bare /dash with a freshly tokened URL, host-side
-// and free. /dash with an argument is a request for help — usually exposing
-// the dash — and becomes an agent turn pointed at the exposing skill.
-func (c *conversation) handleDashCommand(ctx context.Context, m Msg, arg string) {
-	if arg != "" {
-		prompt := fmt.Sprintf("The user wants help with the web dash: %q. "+
-			"If this is about exposing/reaching the dash, read the dash-exposing skill "+
-			"(listed under ## Skills) and follow it.", arg)
-		c.dispatchMail(ctx, []inMail{{m: m, text: prompt}})
+func (c *conversation) handleStatusCommand(ctx context.Context) {
+	c.b.mu.Lock()
+	render := c.b.statusDocument
+	c.b.mu.Unlock()
+	if render == nil {
+		c.sendReply(ctx, "⚠️ status snapshot is unavailable")
 		return
 	}
-	c.mu.Lock()
-	dash := c.b.dashURL
-	c.mu.Unlock()
-	if dash == nil {
-		c.sendReply(ctx, "the dash is not running (dash_port: 0 disables it, or the listener failed at startup — check the app log)")
-		return
-	}
-	link, err := dash()
+	name, data, err := render(c.session())
 	if err != nil {
-		c.sendReply(ctx, "⚠️ "+err.Error())
+		c.sendReply(ctx, "⚠️ status snapshot failed: "+err.Error())
 		return
 	}
-	reply := "🖥 " + link + "\n\nlink valid ~1h — /dash mints a fresh one"
-	// The base URL comes from dash_url.txt, which the exposure agent — and so
-	// anything that can prompt-inject it — can rewrite, and a fresh token is
-	// appended to whatever host it names. So a non-loopback destination is
-	// named and warned about, never handed over silently.
-	if host := urlHost(link); host != "" && !isLoopbackHost(host) {
-		reply += "\n\n⚠️ this link points at `" + host + "` (not this machine) — " +
-			"the token grants read access to your transcripts and config. " +
-			"Only open it if you set up that address yourself."
+	if len(data) > maxSendBytes {
+		c.sendReply(ctx, "⚠️ status snapshot is too large to send")
+		return
 	}
-	c.sendReply(ctx, reply)
-}
-
-// urlHost returns the hostname of rawURL, or "" if it doesn't parse.
-func urlHost(rawURL string) string {
-	u, err := neturl.Parse(rawURL)
-	if err != nil {
-		return ""
+	if _, err := c.b.client.SendDocument(ctx, c.chatIDValue(), name, data, "shell3 status — point-in-time snapshot"); err != nil {
+		c.sendReply(ctx, "⚠️ status snapshot failed to send: "+err.Error())
 	}
-	return u.Hostname()
-}
-
-// isLoopbackHost: the only destination a /dash link reaches without a tunnel.
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }
 
 // handleNewCommand starts a fresh conversation: detach the current session,
@@ -274,7 +238,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.wakePending = false
 	c.mu.Unlock()
 	// Close only a fully-idle session: running jobs keep it open, and undrained
-	// mail stays inspectable in the dash rather than torn down undelivered.
+	// mail stays durable and searchable rather than torn down undelivered.
 	if old != nil && !c.b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
@@ -282,7 +246,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	// just been detached with the session, so post their results now: a
 	// completion the spawner marked as awaited must not be what /new discards.
 	c.flushRequired()
-	c.sendReply(ctx, "🧵 fresh conversation — the old one stays in the dash and history")
+	c.sendReply(ctx, "🧵 fresh conversation — the old one stays searchable in history")
 }
 
 // handleQuietCommand reports or sets /quiet: on, agent-initiated posts arrive

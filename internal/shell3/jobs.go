@@ -832,7 +832,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		WorkDir:  resolveChildWorkDir(parent.opts.WorkDir, o.workDir, m.rt.workDir),
 		Headless: true,
 		// Record the parent so the child's row reads as a subagent transcript
-		// rather than a conversation: the dash groups by it, and the janitor
+		// rather than a conversation: stored status groups by it, and the janitor
 		// spares a message-less session other rows name as parent.
 		ParentID: parent.sess.ID(),
 		CronJob:  o.cronJob,

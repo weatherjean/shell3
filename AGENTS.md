@@ -151,7 +151,6 @@ internal/chat/           Conversation loop, tools, events, and gate handling
 internal/cli/            One-shot CLI rendering helpers
 internal/config/         Config-directory loading and hook execution
 internal/cron/           Cron scheduler
-internal/dash/           Loopback read-only web dashboard
 internal/edittool/       Direct-disk edit_file implementation
 internal/kit/            Kit parser, executor, harness, and declarations
 internal/llm/            Provider and streamer interfaces
@@ -162,7 +161,7 @@ internal/modelproxy/     Model proxy process management
 internal/notify/         Shared completion notification types
 internal/paths/          Global and local path resolution
 internal/persona/        Agent prompt/tool/parameter carrier
-internal/render/         Dashboard HTML renderers
+internal/render/         Self-contained status and stored-record HTML renderers
 internal/review/         Guardian LLM for soft gate-review verdicts
 internal/runs/           SQLite history, outbox, markers, and janitors
 internal/scaffold/       Embedded starter kit, skills, and scripts

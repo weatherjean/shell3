@@ -14,11 +14,22 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // headlessReminder is injected once at the start of a headless turn so the
 // model understands the environment.
 const headlessReminder = "<system-reminder>\nheadless mode: no interactive shell, no human available to answer questions. Decide and proceed. Destructive commands may be blocked by host policy — if a block occurs, adapt rather than retry.\n</system-reminder>"
+
+const (
+	errorDumpMaxBytes      = 2 << 20
+	errorDumpMessages      = 12
+	errorDumpMessageBytes  = 32 << 10
+	errorDumpTrafficBytes  = 128 << 10
+	errorDumpToolCalls     = 8
+	errorDumpToolArgsBytes = 16 << 10
+	errorDumpErrorBytes    = 16 << 10
+)
 
 // logStreamError dumps the failing turn's messages and last raw HTTP traffic
 // to .shell3_project/last_error.json, then logs at Debug — the front-end
@@ -31,18 +42,9 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	dumpPath := ""
 	var dumpErr error
 	if cfg.WorkDir != "" {
-		rec := map[string]any{
-			"timestamp":     time.Now().Format(time.RFC3339),
-			"error":         streamErr.Error(),
-			"messages":      msgs,
-			"request_body":  string(reqBody),
-			"response_body": string(resBody),
-		}
-		if data, err := json.MarshalIndent(rec, "", "  "); err == nil {
+		if data, err := buildErrorDump(msgs, streamErr, reqBody, resBody, time.Now()); err == nil {
 			p := paths.LastErrorPath(cfg.WorkDir)
-			if werr := os.MkdirAll(filepath.Dir(p), 0o755); werr != nil {
-				dumpErr = werr
-			} else if werr := os.WriteFile(p, data, 0644); werr != nil {
+			if werr := writePrivateAtomic(p, data); werr != nil {
 				// Don't advertise a dump that wasn't written.
 				dumpErr = werr
 			} else {
@@ -54,6 +56,72 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	}
 	cfg.Log.Debug("stream error", "error", streamErr, "dump", dumpPath, "dump_error", dumpErr,
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
+}
+
+func buildErrorDump(msgs []llm.Message, streamErr error, reqBody, resBody []byte, now time.Time) ([]byte, error) {
+	start := max(0, len(msgs)-errorDumpMessages)
+	bounded := make([]llm.Message, 0, len(msgs)-start)
+	for _, msg := range msgs[start:] {
+		copyMsg := msg
+		copyMsg.Content = strutil.Truncate(msg.Content, errorDumpMessageBytes)
+		copyMsg.ReasoningContent = strutil.Truncate(msg.ReasoningContent, errorDumpMessageBytes)
+		copyMsg.OperatorContent = ""
+		if len(msg.ToolCalls) > errorDumpToolCalls {
+			copyMsg.ToolCalls = append([]llm.ToolCall(nil), msg.ToolCalls[:errorDumpToolCalls]...)
+		} else {
+			copyMsg.ToolCalls = append([]llm.ToolCall(nil), msg.ToolCalls...)
+		}
+		for i := range copyMsg.ToolCalls {
+			copyMsg.ToolCalls[i].RawArgs = strutil.Truncate(copyMsg.ToolCalls[i].RawArgs, errorDumpToolArgsBytes)
+		}
+		bounded = append(bounded, copyMsg)
+	}
+	rec := map[string]any{
+		"timestamp":        now.UTC().Format(time.RFC3339),
+		"error":            strutil.Truncate(streamErr.Error(), errorDumpErrorBytes),
+		"messages":         bounded,
+		"messages_omitted": start,
+		"request_body":     strutil.Truncate(string(reqBody), errorDumpTrafficBytes),
+		"response_body":    strutil.Truncate(string(resBody), errorDumpTrafficBytes),
+	}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if len(data) <= errorDumpMaxBytes {
+		return data, nil
+	}
+	return json.MarshalIndent(map[string]any{
+		"timestamp": now.UTC().Format(time.RFC3339),
+		"error":     strutil.Truncate(streamErr.Error(), errorDumpErrorBytes),
+		"note":      "diagnostic details exceeded the size limit and were omitted",
+	}, "", "  ")
+}
+
+func writePrivateAtomic(path string, data []byte) (err error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".last_error-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // RunTurn executes one user→assistant turn, delivering events to the sink

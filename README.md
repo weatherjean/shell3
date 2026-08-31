@@ -75,12 +75,10 @@ pick it up. `shell3 --version` shows what you're on. Pin a release with
    `~/.shell3/`.
 3. Run `shell3 telegram`. The bot greets the chat and listens.
 
-Almost nothing is exposed: shell3 connects outbound to Telegram (no tunnel,
-no login) and obeys only the Telegram user ids you list in `allow_from` —
+Nothing listens: shell3 connects outbound to Telegram (no tunnel, server, or
+login) and obeys only the Telegram user ids you list in `allow_from` —
 in a group it answers only when @mentioned or replied to, and each chat keeps
-its own conversation. The only listener is the
-read-only web dashboard, bound to `127.0.0.1` and reached via `/dash`
-(token-gated, ~1h links). Keeping it running is yours to set up —
+its own conversation. Keeping it running is yours to set up —
 [docs/deploying.md](docs/deploying.md) has the few lines it takes (a service
 is one paste, [cookbook/service.md](docs/cookbook/service.md)); the full
 walkthrough is in [docs/cli.md](docs/cli.md).
@@ -109,12 +107,11 @@ takes the kit file itself as its argument.
   `bash_bg` background jobs, and `cron:` schedules; completions arrive as
   mail — the agent hears about finished background work and messages you only
   when it matters, and failures always surface.
-- **A read-only dashboard.** `/dash` links a localhost web page — status, the
-  live conversation, jobs with their output logs, cron with per-job cost and
-  detail, full run replays, and a browser for your config files (`.env`
-  redacted) — behind a ~1h token; a built-in skill sets up a tunnel
-  (tailscale/cloudflared/ngrok) when you want it on your phone. `/superstop`
-  is the everything-off switch.
+- **Telegram-first inspection.** `/status` sends a self-contained HTML snapshot
+  of the live agent, rooms, jobs, cron, and inbox without a model turn. Ask for
+  an old conversation, subagent run, cron run, or background log and the agent
+  finds it in the durable store and sends the exact HTML record. `/superstop`
+  is the everything-off switch; no HTTP server or tunnel exists.
 - **One file.** `shell3.sh` holds the wiring, every agent, and their tools and
   skills. Prose is prose, code is code, structured data is YAML in a comment
   block. Versionable, diffable, reloadable live.

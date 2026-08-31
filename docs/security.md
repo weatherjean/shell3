@@ -76,8 +76,7 @@ generation; see the `using-llms` skill in
 ## The Telegram boundary
 
 shell3's chat side has **no listening socket**: it long-polls Telegram
-outbound, so there is no login to defend and no tunnel to run. The one
-listener is the read-only web dash on `127.0.0.1` (below). The chat access
+outbound, so there is no login to defend and no tunnel to run. The chat access
 model is two secrets:
 
 - **The bot token** *is* the bot. Anyone holding it can read the chat's
@@ -139,8 +138,8 @@ conversation. Two consequences worth knowing:
 The remaining line of defence is the [command gate](#unsafe-by-default),
 which the scaffold ships armed but is yours to tune.
 
-**What travels through Telegram.** Every message, reply, transcript,
-dash-view document, generated image and voice note goes through Telegram's
+**What travels through Telegram.** Every message, reply, explicitly requested
+status or stored-record document, generated image and voice note goes through Telegram's
 servers; a bot chat is not end-to-end encrypted, and cannot be. That includes
 anything the agent quotes from your machine: file contents, command output,
 a stored run's transcript. Treat the chat as a third-party log of everything
@@ -149,28 +148,12 @@ the agent says.
 There is no approval flow to fall back on: whoever is on `allow_from` **is**
 an operator.
 
-## The web dash
-
-The dash (`dash_port`, default 7333) binds `127.0.0.1` only and is strictly
-read-only: status, the live conversation, jobs and their output logs, cron
-schedules and detail, stored run replays, and a browser for the config
-directory. Every request needs a `?t=` token minted by `/dash` — 32 random
-bytes, ~1h lifetime, memory-only (a restart invalidates all of them),
-compared in constant time; anything else is a bare 403. Everything model- or
-tool-derived is HTML-escaped before it reaches a page. Exposing the dash
-beyond loopback is a tunnel's job (`/dash help exposing` sets one up —
-tailscale, cloudflared, or ngrok); the listener itself never binds wider, and
-the token check stays in front either way.
-
-A token in a URL is a bearer secret, and it now grants more than transcripts:
-a live link lets its holder read your whole configuration tree through the
-files browser — the kit (`shell3.sh`), skills, and any wrapper
-scripts under `lib/`, plus the tail of every background job's output. The one
-thing it can never surface is a credential: `.env` and its dotenv siblings
-(`.env.*`) are listed but reported redacted,
-and their bytes are never read off disk to build the page. Binary and
-oversized files are flagged rather than dumped. Treat a `/dash` link the way
-you would treat read access to `~/.shell3` itself, and let it expire.
+**Status and stored-record documents.** `/status` is generated in memory and
+sent only to the requesting authorized chat. Conversation and job-log HTML is
+sent only after an explicit request and every stored byte is escaped. Unlike an
+expiring local URL, a Telegram attachment persists in chat history; treat an
+export as a deliberate disclosure and delete it from the chat when no longer
+needed.
 
 ## The gate is a speed bump, not a boundary
 
@@ -279,7 +262,11 @@ from the wiring as `env:KEY`:
   install: `~/.shell3/.shell3_project/`) — one SQLite database
   (`shell3.db`: every conversation, the full-text index, each front-end's
   current-conversation marker) plus background-job logs as plain files under
-  `runs/<id>/jobs/`. Sessions older than 30 days are swept at startup
+  `runs/<id>/jobs/`. Incompatible database versions are retained beside it as
+  timestamped `.old-vN-*` archives. A failed model stream may also write
+  `last_error.json`: an atomic, mode-`0600`, size-bounded diagnostic containing
+  the tail of the prompt and truncated HTTP request/response bodies. Sessions
+  older than 30 days are swept at startup
   ([`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days)
   changes or disables that). The directory ignores itself (a self-contained `.gitignore`
   of `*`). Wipe every transcript with `rm -rf ~/.shell3/.shell3_project`;

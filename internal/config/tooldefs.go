@@ -39,12 +39,17 @@ var historyTool = llm.ToolDefinition{
 	Name: "history",
 	Description: "Search past conversations, or read a stored session's transcript. Full-text search " +
 		"covers what you and the user said in every stored session (tool output is not indexed). " +
+		"Search and run listings can be narrowed by agent, cron, parent, or time. " +
 		"Typical flow: search with query, then read around a hit with session (+ around). Read-only.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"runs":    map[string]any{"type": "boolean", "description": "List recent runs instead of searching. Combine with agent to audit one employee."},
-			"agent":   map[string]any{"type": "string", "description": "List only this agent's runs (implies runs)."},
+			"runs":    map[string]any{"type": "boolean", "description": "List recent runs instead of searching. Each row includes the first user prompt."},
+			"agent":   map[string]any{"type": "string", "description": "Only this agent (case-insensitive). Combines with query or implies a run listing."},
+			"cron":    map[string]any{"type": "string", "description": "Only runs started by this cron job. Combines with query or implies a run listing."},
+			"parent":  map[string]any{"type": "string", "description": "Only child runs of this parent session. Combines with query or implies a run listing."},
+			"since":   map[string]any{"type": "string", "description": "Only runs started at or after this YYYY-MM-DD or RFC3339 time."},
+			"before":  map[string]any{"type": "string", "description": "Only runs started before this YYYY-MM-DD or RFC3339 time."},
 			"query":   map[string]any{"type": "string", "description": "FTS5 search: bare words AND together, \"quoted phrases\" match exactly, OR/NOT/prefix* work. Omit when reading a session."},
 			"session": map[string]any{"type": "string", "description": "Session id to read instead of searching"},
 			"around":  map[string]any{"type": "integer", "description": "With session: center the excerpt on this message seq (default: the start)"},

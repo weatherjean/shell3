@@ -7,7 +7,7 @@ package telegram
 //
 // It exists because no other record is complete. The runs store holds what the
 // MODEL saw — user text, assistant replies, tool calls — and nothing else. The
-// host answers /reload, /new, /stop and /dash itself, with no model turn, so
+// host answers /reload, /new, /stop and /status itself, with no model turn, so
 // its replies (`❌ reload failed: …`, `✅ reloaded`) write no message row; the
 // completion router's ⚠️/⏰/🔔 posts write none either; and neither is in the
 // app log. A failed reload therefore left NO trace anywhere on disk, and the

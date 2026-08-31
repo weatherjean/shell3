@@ -96,7 +96,7 @@ func TestCommand_UnknownDropped(t *testing.T) {
 }
 
 func TestViewCommandsRemoved(t *testing.T) {
-	for _, cmd := range []string{"/status", "/jobs", "/job x", "/runs", "/cancel bg1", "/run_1", "/job_1", "/cancel_1"} {
+	for _, cmd := range []string{"/dash", "/jobs", "/job x", "/runs", "/cancel bg1", "/run_1", "/job_1", "/cancel_1"} {
 		fc := newFakeClient()
 		rt, _ := newFakeRuntime(t, "ok")
 		b := newBot(t, fc, rt)
@@ -113,12 +113,12 @@ func TestBotCommandsSurvivingSet(t *testing.T) {
 		names = append(names, c.Command)
 	}
 	got := strings.Join(names, " ")
-	for _, want := range []string{"dash", "stop", "superstop", "new", "run", "btw", "reload", "quiet"} {
+	for _, want := range []string{"status", "stop", "superstop", "new", "run", "btw", "reload", "quiet"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("BotCommands missing %q: %v", want, names)
 		}
 	}
-	for _, gone := range []string{"status", "jobs", "job", "cancel", "runs"} {
+	for _, gone := range []string{"dash", "jobs", "job", "cancel", "runs"} {
 		for _, n := range names {
 			if n == gone {
 				t.Errorf("BotCommands still lists removed %q", gone)
@@ -127,36 +127,29 @@ func TestBotCommandsSurvivingSet(t *testing.T) {
 	}
 }
 
-func TestDashCommand_Disabled(t *testing.T) {
+func TestStatusCommand_Unavailable(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
-	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "not running") {
-		t.Fatalf("expected the disabled explanation, got %v", fc.sentTexts())
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "unavailable") {
+		t.Fatalf("expected the unavailable explanation, got %v", fc.sentTexts())
 	}
 }
 
-func TestDashCommand_MintsURL(t *testing.T) {
+func TestStatusCommand_SendsDocument(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetDash(func() (string, error) { return "http://127.0.0.1:7333/?t=abc123", nil })
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
-	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "http://127.0.0.1:7333/?t=abc123") || !strings.Contains(all, "~1h") {
-		t.Fatalf("expected the tokened URL + TTL hint, got %v", fc.sentTexts())
-	}
-}
-
-func TestDashCommand_ArgBecomesAgentTurn(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "tunnel is up")
-	b := newBot(t, fc, rt)
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash help exposing"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "tunnel is up")
+	b.SetStatusDocument(func(*shell3.Session) (string, []byte, error) {
+		return "shell3-status.html", []byte("<!doctype html><p>ok</p>"), nil
 	})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if len(fc.docs) != 1 || fc.docs[0].filename != "shell3-status.html" || !strings.Contains(string(fc.docs[0].data), "<p>ok</p>") {
+		t.Fatalf("status document = %+v", fc.docs)
+	}
 }
 
 func TestSuperstop_NothingRunning(t *testing.T) {
@@ -257,28 +250,5 @@ func TestQuietCommand(t *testing.T) {
 	})
 	if qs.Get() {
 		t.Error("junk arg flipped the store")
-	}
-}
-
-func TestDashCommand_WarnsOnNonLoopbackHost(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "ok")
-	b := newBot(t, fc, rt)
-	b.SetDash(func() (string, error) { return "http://evil.example.com/?t=abc", nil })
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
-	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "evil.example.com") || !strings.Contains(all, "not this machine") {
-		t.Fatalf("expected an off-machine warning, got %v", fc.sentTexts())
-	}
-}
-
-func TestDashCommand_LoopbackNoWarning(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "ok")
-	b := newBot(t, fc, rt)
-	b.SetDash(func() (string, error) { return "http://127.0.0.1:7333/?t=abc", nil })
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
-	if strings.Contains(strings.Join(fc.sentTexts(), "\n"), "not this machine") {
-		t.Fatalf("loopback link should not warn, got %v", fc.sentTexts())
 	}
 }

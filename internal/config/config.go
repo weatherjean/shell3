@@ -98,10 +98,6 @@ type LoadedConfig struct {
 	// attachments are user data, so deletion is opt-in.
 	MediaKeepDays int
 
-	// DashPort is where the dash listens on 127.0.0.1. Default 7333; an
-	// explicit 0 disables the listener, and /dash says so.
-	DashPort int
-
 	// ReviewModel is the model the gate's {review} reviewer runs on, "" = the
 	// main agent's. Validated at load against the models map.
 	ReviewModel string

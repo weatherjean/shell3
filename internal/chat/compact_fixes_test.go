@@ -77,7 +77,7 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	}
 }
 
-func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
+func TestCompactNow_FewLargeMessages(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of the head"}}},
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -99,14 +99,12 @@ func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	sess.messages = append(sess.messages, llm.Message{Role: llm.RoleAssistant, Content: "LATEST_TAIL_MARKER"})
 	sess.lastPromptTokens = 50000
 
-	if _, _, err := CompactStandalone(context.Background(), cfg, sess); err != nil {
-		t.Fatalf("CompactStandalone: %v", err)
-	}
+	compactNow(context.Background(), cfg, sess)
 	if !hasKind(c.all(), EventCompacted) {
-		t.Fatal("a forced /compact must compact a few-but-huge-message history")
+		t.Fatal("automatic compaction must compact a few-but-huge-message history")
 	}
 	if !msgsContain(sess.messages, "SUMMARY of the head") {
-		t.Fatalf("forced compact should inject the head summary: %+v", sess.messages)
+		t.Fatalf("automatic compaction should inject the head summary: %+v", sess.messages)
 	}
 	if !msgsContain(sess.messages, "LATEST_TAIL_MARKER") {
 		t.Fatalf("the latest turn must be preserved as tail: %+v", sess.messages)

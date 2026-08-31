@@ -130,9 +130,6 @@ func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 // MediaKeepDays feeds the media janitor at startup. Default 0 = forever.
 func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 
-// DashPort is where the dash listens. Default 7333, 0 = disabled.
-func (p *Parts) DashPort() int { return p.lc.DashPort }
-
 // RunsRoot is the .shell3_project directory the Store was opened against, the
 // root Sweep expects. Derived from runsDir rather than stored separately,
 // since Store already keys off that relationship.

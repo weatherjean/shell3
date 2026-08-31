@@ -32,8 +32,8 @@ Then read what actually happened:
 - **What did it not do?** A step silently skipped is the failure mode a green
   tool test hides best.
 
-The dash's run replay (`/dash`) shows the same transcript with the system
-prompt each turn was rendered with.
+When you need the exact evidence later, the history skill can send the stored
+run replay with the system prompt each turn was rendered with.
 
 ## Which test to write
 

@@ -147,8 +147,10 @@ misleading failure posts.
 
 `internal/runs` owns the SQLite store for sessions, messages, usage, search,
 thread markers, cron status, and the outbox. Schema mismatch is explicit; never
-silently discard history or completions. The store and filesystem artifacts
-form one durability contract:
+silently discard history or completions. An incompatible database bundle is
+moved aside and retained before a fresh schema is created; shell3 does not
+migrate it or read through it. The store and filesystem artifacts form one
+durability contract:
 
 - session rows and messages preserve conversation history;
 - thread markers map a front-end surface to its current session;
@@ -189,21 +191,20 @@ durable media files; perception remains a declared tool decision.
 local room. It needs no Telegram credentials or `allow_from` authorization and
 is the end-to-end development transport. EOF shuts it down cleanly.
 
-## Dashboard, media, and rendering
+## Status, media, and rendering
 
-The dashboard binds loopback only and serves authenticated GET/HEAD routes.
-Tokens are random, short-lived, and memory-only. The file viewer clamps paths
-to the config root, resolves symlinks, refuses credential contents before
-reading, and caps displayed bytes. Run and job-log paths accept only validated
-opaque IDs.
+`/status` reads concurrency-safe runtime snapshots and sends one self-contained
+HTML document without a model turn. Stored conversations and job logs are
+rendered only after the agent selects an opaque, validated id and explicitly
+sends the resulting document through the attached Telegram room.
 
 `mediadir` provides durable attachment/generated-file paths and an age-based
 janitor. Telegram media sending opens only regular files, refuses credential
 and config-tree aliases (including hardlinks), and bounds reads. Media
 perception and generation are bring-your-own declared tools.
 
-Markdown renderers must escape raw input before emitting Telegram HTML or dash
-HTML. Telegram supports only its documented tag subset; a rejected formatted
+Renderers must escape raw input before emitting Telegram or document HTML.
+Telegram supports only its documented tag subset; a rejected formatted
 send falls back to plain text.
 
 ## Package map
@@ -219,7 +220,6 @@ internal/chat/           turns, tools, gates, events, compaction
 internal/cli/            one-shot output helpers
 internal/config/         wiring and hook execution
 internal/cron/           scheduler and run status
-internal/dash/           loopback read-only dashboard
 internal/edittool/       direct-disk edit_file implementation
 internal/kit/            parser, declarations, runner, test harness
 internal/llm/            provider interfaces and message types
@@ -230,7 +230,7 @@ internal/modelproxy/     local provider proxy lifecycle
 internal/notify/         completion notification types
 internal/paths/          global and local path resolution
 internal/persona/        prompt/tool/parameter carrier
-internal/render/         dashboard renderers
+internal/render/         status and stored-record HTML renderers
 internal/review/         contextual gate reviewer
 internal/runs/           SQLite history, outbox, markers, janitors
 internal/scaffold/       embedded starter kit, skills, scripts

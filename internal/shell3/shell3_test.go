@@ -211,111 +211,6 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	}
 }
 
-func TestSession_Compact_Delta(t *testing.T) {
-	client := fakellm.New(
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
-	)
-	s := newTestSession(t, client, chat.Config{})
-	defer s.Close()
-
-	big := strings.Repeat("x", 2000)
-	msgs := make([]llm.Message, 0, 40)
-	for i := 0; i < 20; i++ {
-		msgs = append(msgs,
-			llm.Message{Role: llm.RoleUser, Content: big},
-			llm.Message{Role: llm.RoleAssistant, Content: big},
-		)
-	}
-	s.sess.SetMessages(msgs)
-
-	before, after, err := s.Compact(context.Background())
-	if err != nil {
-		t.Fatalf("Compact: %v", err)
-	}
-	if after <= 0 || before <= after {
-		t.Fatalf("want before > after > 0, got before=%d after=%d", before, after)
-	}
-
-	s.sess.SetMessages([]llm.Message{{Role: llm.RoleUser, Content: "hi"}})
-	if _, _, err := s.Compact(context.Background()); !errors.Is(err, chat.ErrNothingToCompact) {
-		t.Fatalf("Compact on tiny history: want ErrNothingToCompact, got %v", err)
-	}
-}
-
-// TestSession_Compact_CloseCancelsAndJoins pins the teardown contract: an
-// in-flight compaction registers turnCancel/turnDone like a turn, so Close
-// cancels the LLM call and joins before ending the store session — never
-// racing compactInto's store roll.
-func TestSession_Compact_CloseCancelsAndJoins(t *testing.T) {
-	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
-	s := newTestSession(t, client, chat.Config{})
-
-	big := strings.Repeat("x", 2000)
-	msgs := make([]llm.Message, 0, 40)
-	for i := 0; i < 20; i++ {
-		msgs = append(msgs,
-			llm.Message{Role: llm.RoleUser, Content: big},
-			llm.Message{Role: llm.RoleAssistant, Content: big},
-		)
-	}
-	s.sess.SetMessages(msgs)
-
-	compactErr := make(chan error, 1)
-	go func() {
-		_, _, err := s.Compact(context.Background())
-		compactErr <- err
-	}()
-	<-client.entered
-
-	// Close must cancel the compaction's context and join it before returning.
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	select {
-	case <-client.returned:
-	default:
-		t.Fatal("Close returned while the compaction LLM call was still in flight")
-	}
-	if err := <-compactErr; err == nil {
-		t.Fatal("cancelled compaction should report an error, got nil")
-	}
-	if len(s.sess.Messages()) != len(msgs) {
-		t.Fatal("a cancelled compaction must leave history untouched")
-	}
-}
-
-func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
-	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
-	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client, ModeLabel: "code"} })
-	s, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-
-	big := strings.Repeat("x", 2000)
-	msgs := make([]llm.Message, 0, 40)
-	for i := 0; i < 20; i++ {
-		msgs = append(msgs,
-			llm.Message{Role: llm.RoleUser, Content: big},
-			llm.Message{Role: llm.RoleAssistant, Content: big},
-		)
-	}
-	s.sess.SetMessages(msgs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	compactDone := make(chan struct{})
-	go func() {
-		_, _, _ = s.Compact(ctx)
-		close(compactDone)
-	}()
-	<-client.entered
-	s.sess.InterjectNotice("bg1 finished mid-compaction")
-	cancel()
-	<-compactDone
-
-	waitForWake(t, rt, s)
-}
-
 func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{TextDelta: "a"}, {TextDelta: "b"}, {TextDelta: "c"},
@@ -522,14 +417,10 @@ func TestSession_BusyEnforcement(t *testing.T) {
 		t.Fatalf("overlapping Send: want exactly one ErrBusy Error event, got %+v", rejected)
 	}
 
-	if _, _, err := s.Compact(context.Background()); !errors.Is(err, ErrBusy) {
-		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
-	}
-
 	cancel()
 	for range out {
 	}
-	if _, _, err := s.Compact(context.Background()); errors.Is(err, ErrBusy) {
+	if s.isBusy() {
 		t.Fatal("the busy gate did not clear after the turn drained")
 	}
 }

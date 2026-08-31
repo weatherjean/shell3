@@ -44,6 +44,36 @@ func TestSearchFindsConversationText(t *testing.T) {
 	}
 }
 
+func TestSearchFilteredUsesSessionMetadata(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	started := time.Now().UTC()
+	wanted, _ := st.NewSession(Meta{Agent: "research", CronJob: "daily", ParentID: "root-1"})
+	other, _ := st.NewSession(Meta{Agent: "writer", CronJob: "weekly", ParentID: "root-2"})
+	for _, id := range []string{wanted, other} {
+		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "shared needle"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hits, err := st.SearchFiltered("needle", SearchFilter{
+		Agent: "RESEARCH", CronJob: "daily", ParentID: "root-1",
+		Since: started.Add(-time.Minute), Before: started.Add(time.Minute),
+	}, 10)
+	if err != nil {
+		t.Fatalf("SearchFiltered: %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionID != wanted {
+		t.Fatalf("filtered hits = %+v, want only %s", hits, wanted)
+	}
+	if hits[0].Agent != "research" || hits[0].CronJob != "daily" || hits[0].ParentID != "root-1" || hits[0].StartedAt.IsZero() {
+		t.Fatalf("search metadata missing: %+v", hits[0])
+	}
+}
+
 func TestCurrentSessionRecordLookup(t *testing.T) {
 	st, _ := Open(t.TempDir())
 	if err := st.SetCurrentSession("web", "sess-a"); err != nil {
