@@ -6,10 +6,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestSetStoreSwapsReminderTarget covers the reload bug: a session's sidecar
-// store handle must be repointable at a new *runs.Store (the new generation's
-// open handle onto the SAME db file) without losing reminder writes once the
-// old handle closes.
 func TestSetStoreSwapsReminderTarget(t *testing.T) {
 	dir := t.TempDir()
 	st1, err := runs.Open(dir)
@@ -21,7 +17,6 @@ func TestSetStoreSwapsReminderTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSession(SessionOpts{StoreID: id, Store: st1})
-	// Second handle to the same DB stands in for the reload's new generation.
 	st2, err := runs.Open(dir)
 	if err != nil {
 		t.Fatal(err)

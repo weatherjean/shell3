@@ -74,9 +74,6 @@ func TestKitCommandIsReachableThroughParts(t *testing.T) {
 	defer cleanup()
 	lc := parts.LoadedConfig()
 
-	if !lc.HasCommand("standup") {
-		t.Fatal("a kit declaring command: installed no command hook")
-	}
 	out, err := lc.RunCommand(context.Background(), "standup", "week")
 	if err != nil {
 		t.Fatalf("RunCommand: %v", err)

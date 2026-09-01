@@ -114,8 +114,8 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	if cfg.LLM == nil {
 		t.Error("cfg.LLM is nil")
 	}
-	if cfg.Personality.SystemPrompt == "" {
-		t.Error("cfg.Personality.SystemPrompt is empty")
+	if cfg.Profile.SystemPrompt == "" {
+		t.Error("cfg.Profile.SystemPrompt is empty")
 	}
 	if cfg.WorkDir != tmp {
 		t.Errorf("WorkDir = %q, want %q", cfg.WorkDir, tmp)
@@ -135,14 +135,14 @@ func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	defer cleanup()
-	if cfg.ModeLabel != "main" {
-		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "main")
+	if cfg.Agent != "main" {
+		t.Errorf("default active agent = %q, want %q", cfg.Agent, "main")
 	}
-	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are a coder") {
-		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Personality.SystemPrompt)
+	if !strings.HasPrefix(cfg.Profile.SystemPrompt, "you are a coder") {
+		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Profile.SystemPrompt)
 	}
-	if strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
-		t.Errorf("system prompt should NOT contain Environment section: %q", cfg.Personality.SystemPrompt)
+	if strings.Contains(cfg.Profile.SystemPrompt, "## Environment") {
+		t.Errorf("system prompt should NOT contain Environment section: %q", cfg.Profile.SystemPrompt)
 	}
 }
 
@@ -214,9 +214,6 @@ func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 	return parts, cleanup
 }
 
-// TestSessionConfigs_Independent pins the invariant: two configs derived from
-// one Parts hold independent agent state — deriving one for a different agent
-// never changes the other (there is no process-global active-agent state).
 func TestSessionConfigs_Independent(t *testing.T) {
 	parts, cleanup := subagentParts(t)
 	defer cleanup()
@@ -230,18 +227,14 @@ func TestSessionConfigs_Independent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if a.ModeLabel != "main" {
-		t.Fatalf("config A's agent changed to %q when B re-resolved", a.ModeLabel)
+	if a.Agent != "main" {
+		t.Fatalf("config A's agent changed to %q when B re-resolved", a.Agent)
 	}
-	if b.ModeLabel != "researcher" {
-		t.Fatalf("config B should be researcher, got %q", b.ModeLabel)
+	if b.Agent != "researcher" {
+		t.Fatalf("config B should be researcher, got %q", b.Agent)
 	}
 }
 
-// TestSessionConfig_ContextReadPerSession pins the fresh-turn contract:
-// context files are read at session-config build, so an edit landing between
-// two sessions is visible to the second without a reload. The first session's
-// already-rendered prompt keeps the old body.
 func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 	tmp := t.TempDir()
 	writeTree(t, tmp, map[string]string{
@@ -263,8 +256,8 @@ func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"## Context", "### memory.md", "MEMORY-V1"} {
-		if !strings.Contains(cfg1.Personality.SystemPrompt, want) {
-			t.Fatalf("first session prompt missing %q:\n%s", want, cfg1.Personality.SystemPrompt)
+		if !strings.Contains(cfg1.Profile.SystemPrompt, want) {
+			t.Fatalf("first session prompt missing %q:\n%s", want, cfg1.Profile.SystemPrompt)
 		}
 	}
 
@@ -275,14 +268,14 @@ func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cfg2.Personality.SystemPrompt, "MEMORY-V2") {
-		t.Errorf("second session prompt missing rewritten body:\n%s", cfg2.Personality.SystemPrompt)
+	if !strings.Contains(cfg2.Profile.SystemPrompt, "MEMORY-V2") {
+		t.Errorf("second session prompt missing rewritten body:\n%s", cfg2.Profile.SystemPrompt)
 	}
-	if strings.Contains(cfg2.Personality.SystemPrompt, "MEMORY-V1") {
-		t.Errorf("second session prompt still carries the stale body:\n%s", cfg2.Personality.SystemPrompt)
+	if strings.Contains(cfg2.Profile.SystemPrompt, "MEMORY-V1") {
+		t.Errorf("second session prompt still carries the stale body:\n%s", cfg2.Profile.SystemPrompt)
 	}
-	if !strings.Contains(cfg1.Personality.SystemPrompt, "MEMORY-V1") {
-		t.Errorf("first session prompt should retain the old body:\n%s", cfg1.Personality.SystemPrompt)
+	if !strings.Contains(cfg1.Profile.SystemPrompt, "MEMORY-V1") {
+		t.Errorf("first session prompt should retain the old body:\n%s", cfg1.Profile.SystemPrompt)
 	}
 }
 
@@ -303,9 +296,6 @@ func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	}
 }
 
-// TestBuild_AlwaysOpensStore characterizes the store-open path: the store is
-// opened unconditionally so the conversation always persists (saveHistory) and
-// the agent can read it back with rg/cat.
 func TestBuild_AlwaysOpensStore(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
@@ -360,16 +350,13 @@ func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentRuntime(researcher): %v", err)
 	}
-	if srt.ModeLabel != "researcher" {
-		t.Errorf("ModeLabel = %q, want %q", srt.ModeLabel, "researcher")
-	}
-	if srt.Personality.Name != "researcher" {
-		t.Errorf("Personality.Name = %q, want %q", srt.Personality.Name, "researcher")
+	if srt.Agent != "researcher" {
+		t.Errorf("Agent = %q, want %q", srt.Agent, "researcher")
 	}
 	if len(srt.Subagents) != 0 {
 		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty — no peer to dispatch", srt.Subagents)
 	}
-	for _, td := range srt.Personality.Tools {
+	for _, td := range srt.Profile.Tools {
 		if td.Name == "task" {
 			t.Error("an employee with no peer must not carry the task tool — its enum would be empty")
 		}
@@ -384,8 +371,8 @@ func TestSessionConfig_ResolvesSubagentAsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionConfig with Agent=researcher: %v", err)
 	}
-	if cfg.ModeLabel != "researcher" {
-		t.Errorf("SessionConfig ModeLabel = %q, want %q", cfg.ModeLabel, "researcher")
+	if cfg.Agent != "researcher" {
+		t.Errorf("SessionConfig Agent = %q, want %q", cfg.Agent, "researcher")
 	}
 }
 
@@ -428,11 +415,6 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 	}
 }
 
-// TestAgentRuntime_TaskToolInSchema proves the invariant: the `task` tool
-// appears in the main agent's schema iff the kit declares an employee
-// (delegation is inferred, there is no toggle) — and the allowlist (names + descriptions) is
-// baked into the tool's subagent_type parameter, which is the model's only
-// source for it.
 func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -442,7 +424,7 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 		t.Fatalf("AgentRuntime(main): %v", err)
 	}
 	toolSet := make(map[string]bool)
-	for _, td := range rt.Personality.Tools {
+	for _, td := range rt.Profile.Tools {
 		toolSet[td.Name] = true
 	}
 	for _, want := range []string{"task", "task_list", "task_status", "task_cancel"} {
@@ -450,7 +432,7 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 			t.Errorf("agent with subagents should have %q in its tool schema", want)
 		}
 	}
-	for _, td := range rt.Personality.Tools {
+	for _, td := range rt.Profile.Tools {
 		if td.Name != "task" {
 			continue
 		}
@@ -479,7 +461,7 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentRuntime2(main): %v", err)
 	}
-	for _, td := range rt2.Personality.Tools {
+	for _, td := range rt2.Profile.Tools {
 		for _, mgmt := range []string{"task", "task_list", "task_status", "task_cancel"} {
 			if td.Name == mgmt {
 				t.Errorf("agent with no subagents should NOT have %q in its tool schema", mgmt)
@@ -520,9 +502,9 @@ func TestAgentRuntime_EmployeesGetTaskToo(t *testing.T) {
 		t.Fatalf("AgentRuntime(researcher): %v", err)
 	}
 	var task *llm.ToolDefinition
-	for i, td := range rt.Personality.Tools {
+	for i, td := range rt.Profile.Tools {
 		if td.Name == "task" {
-			task = &rt.Personality.Tools[i]
+			task = &rt.Profile.Tools[i]
 		}
 	}
 	if task == nil {
@@ -536,8 +518,8 @@ func TestAgentRuntime_EmployeesGetTaskToo(t *testing.T) {
 }
 
 func toolNames(rt chat.ActiveAgent) []string {
-	out := make([]string, 0, len(rt.Personality.Tools))
-	for _, td := range rt.Personality.Tools {
+	out := make([]string, 0, len(rt.Profile.Tools))
+	for _, td := range rt.Profile.Tools {
 		out = append(out, td.Name)
 	}
 	return out

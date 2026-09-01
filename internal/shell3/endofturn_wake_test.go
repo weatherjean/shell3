@@ -36,7 +36,7 @@ func (c *gateClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDe
 func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	gc := &gateClient{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: gc, ModeLabel: "code"}
+		return chat.Config{LLM: gc, Agent: "code"}
 	})
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {

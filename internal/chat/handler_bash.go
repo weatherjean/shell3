@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/procutil"
 )
 
 // defaultBashTimeoutSeconds caps bash tool runtime when caller does not set timeout_seconds.
@@ -90,24 +91,6 @@ func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON strin
 	return []string{"bash", "-c", command}, "", false
 }
 
-// ConfigureGroupKill puts cmd and its descendants in their own process group
-// and signals the whole tree (SIGTERM to the group) on cancel — bare SIGKILL
-// on the shell leaves grandchildren (e.g. node spawned by npx, a server
-// started with `&`) holding our stdio pipes. waitDelay bounds how long Wait
-// blocks on those pipes after the process exits, so a lingering grandchild
-// can't wedge the caller forever. Shared by the foreground bash tool and the
-// background job runtime (internal/shell3).
-func ConfigureGroupKill(cmd *exec.Cmd, waitDelay time.Duration) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	}
-	cmd.WaitDelay = waitDelay
-}
-
 // runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with
 // extraEnv appended to os.Environ() (nil = inherit only), capturing combined
 // stdout+stderr, honoring timeout + cancellation. It returns the elided output
@@ -124,7 +107,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 	if len(extraEnv) > 0 {
 		c.Env = append(os.Environ(), extraEnv...)
 	}
-	ConfigureGroupKill(c, bashWaitDelay)
+	procutil.ConfigureGroupCancel(c, bashWaitDelay)
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf

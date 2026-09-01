@@ -30,8 +30,6 @@ func TestParseBookmarksFixture(t *testing.T) {
 		t.Fatalf("page-kind binds %q", bm.Tools[0].Func)
 	}
 
-	// The test block must bind its own function, not the tool's — this is the
-	// binding-ceiling behaviour on a realistic file.
 	if bm.Tests[0].Func != "bm_test_page_kind" {
 		t.Fatalf("test binds %q, want bm_test_page_kind", bm.Tests[0].Func)
 	}

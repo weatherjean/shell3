@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/kit"
+	"github.com/weatherjean/shell3/internal/procutil"
 )
 
 // hookKind discriminates the kit hook kinds, each its own table.
@@ -257,9 +258,7 @@ func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any, env .
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	// A killed hook may leave children holding the stdout pipe; Wait must not
-	// block on them past the kill.
-	cmd.WaitDelay = time.Second
+	procutil.ConfigureGroupCancel(cmd, time.Second)
 	cmd.Stdin = bytes.NewReader(in)
 	stdout := &cappedBuffer{max: hookOutputCap}
 	stderr := &cappedBuffer{max: hookOutputCap}
@@ -374,16 +373,6 @@ func (c *LoadedConfig) RunToolResult(ctx context.Context, agentName, name, argsJ
 // ErrNoSuchCommand means no command by that name is declared, so the caller's
 // own handling applies. Distinct from one that ran and failed.
 var ErrNoSuchCommand = errors.New("no such kit command")
-
-// HasCommand is asked before routing a verb no built-in claims.
-func (c *LoadedConfig) HasCommand(name string) bool {
-	return !c.hooks.get(hookCommand, name).empty()
-}
-
-// CommandNames lists the declared commands, sorted, for a front-end's menu.
-func (c *LoadedConfig) CommandNames() []string {
-	return slices.Sorted(maps.Keys(c.hooks[hookCommand]))
-}
 
 // RunCommand runs a kit-declared command and returns its trimmed stdout;
 // whatever was typed after the verb reaches the function as $ARG.

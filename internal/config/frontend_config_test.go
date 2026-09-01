@@ -2,8 +2,6 @@ package config
 
 import "testing"
 
-// The telegram token is a secret like every other: it lives in .env and
-// reaches the YAML as an env: reference.
 func TestParseYAMLTelegram(t *testing.T) {
 	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  token: env:TELEGRAM_TOKEN\n  chat_id: \"123456789\"\n  group_messages: all\n",
 		map[string]string{"TELEGRAM_TOKEN": "123:abc"})
@@ -44,9 +42,6 @@ func TestParseYAMLTelegramUnknownKey(t *testing.T) {
 	}
 }
 
-// Present tells "no telegram: block" apart from "block with blank fields" —
-// the second is what `shell3 boot` writes when the user defers the token, and
-// what `shell3 health` must fail on.
 func TestParseYAMLTelegramPresent(t *testing.T) {
 	blank, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  token: \"\"\n  chat_id: \"\"\n", nil)
 	if err != nil {

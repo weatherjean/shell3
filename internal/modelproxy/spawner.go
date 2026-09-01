@@ -1,15 +1,6 @@
 //go:build unix
 
-// Package modelproxy lazily brings up a model's proxy command.
-//
-// A model may declare a `run_proxy` shell command in the kit wiring. The first time
-// an agent activates that model, Spawner runs the command once — detached, in
-// its own process group, fire-and-forget. The OS port bind acts as the mutex: a
-// command spawned while a proxy is already listening simply fails to bind and
-// exits harmlessly. Spawn failures are never fatal; the first request to the
-// model surfaces any real problem as an ordinary API error.
-//
-// The proxy outlives shell3 — it is never killed or reaped on exit.
+// Package modelproxy starts detached model proxy commands on first use.
 package modelproxy
 
 import (

@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// FuzzParseDotEnvValue exercises the .env value parser (inline-comment stripping
-// + quote-pair removal) for panics and pins two invariants: a value with no '#'
-// is never altered by comment stripping, and an already-trimmed, unquoted value
-// with no '#' is returned unchanged by parseDotEnvValue.
 func FuzzParseDotEnvValue(f *testing.F) {
 	f.Add(`plain`)
 	f.Add(`"quoted value"`)

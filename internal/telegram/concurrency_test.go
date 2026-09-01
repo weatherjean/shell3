@@ -34,9 +34,6 @@ func TestRoomsRunTurnsConcurrently(t *testing.T) {
 	}
 }
 
-// The global cap is what stops N rooms fanning out N concurrent agents.
-// Crucially, a message queued BECAUSE of the cap has no waker of its own —
-// only another room finishing frees it, which is what startNextWorkAll does.
 func TestCapQueuesAndDrains(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -73,9 +70,6 @@ func TestCapQueuesAndDrains(t *testing.T) {
 	}
 }
 
-// /stop is scoped: it cancels the room it was typed in and leaves the others
-// running. A shared cancel would make one room's stop button a kill switch
-// for everyone.
 func TestStopScopesToItsRoom(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -103,8 +97,6 @@ func TestStopScopesToItsRoom(t *testing.T) {
 	}
 }
 
-// A reload swaps the Parts every room shares, so it is refused while ANY room
-// is mid-turn rather than racing one.
 func TestReloadRefusedWhileAnotherRoomIsBusy(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	ctx := context.Background()
@@ -122,9 +114,6 @@ func TestReloadRefusedWhileAnotherRoomIsBusy(t *testing.T) {
 	if !b.beginReload() {
 		t.Fatal("with every room idle the reload must proceed")
 	}
-	// While the latch is held no room may start a turn: they all share one
-	// Parts, and a turn against the outgoing generation is the race the latch
-	// exists to prevent.
 	other := b.conv(-200)
 	other.mu.Lock()
 	_, _, ok := other.takeSlotLocked(ctx)

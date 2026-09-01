@@ -37,13 +37,11 @@ func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// A non-allowlisted sender, even @mentioning the bot, is nothing.
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 9, ID: "1", Text: "@mybot deploy"})
 	if len(b.allConvs()) != 0 {
 		t.Fatal("an unauthorized sender must not enrol a room")
 	}
 
-	// An allowlisted sender talking to the ROOM is not talking to the bot.
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "2", Text: "lunch?"})
 	time.Sleep(20 * time.Millisecond)
 	if got := len(fc.sentReplies()) + len(fc.htmlTexts()); got != 0 {
@@ -107,8 +105,6 @@ func TestTwoRoomsHoldSeparateSessions(t *testing.T) {
 	}
 }
 
-// Each room's current session is persisted under its own surface, so a
-// restart resumes every room rather than merging them.
 func TestRoomSessionsPersistPerSurface(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -135,7 +131,7 @@ func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.SetCurrentSession(TelegramSurface(-200), "sess-b"); err != nil {
+	if err := st.SetCurrentSession(roomSurface("telegram", -200), "sess-b"); err != nil {
 		t.Fatal(err)
 	}
 	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
@@ -166,10 +162,6 @@ func TestInboxNamesRooms(t *testing.T) {
 	}
 }
 
-// The DEFAULT mail route is WakeOwner, so it must resolve a room the same way
-// PostCompletion does. After a restart no room is live yet, and a
-// live-registry-only check would send every recovered job's report to the
-// home chat — the routing this feature exists to avoid.
 func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -183,7 +175,7 @@ func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetCurrentSession(TelegramSurface(-200), seed.ID()); err != nil {
+	if err := st.SetCurrentSession(roomSurface("telegram", -200), seed.ID()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,14 +226,12 @@ func TestRoomSurvivesSupergroupMigration(t *testing.T) {
 		t.Fatalf("marker under the new surface = %q,%v; want %q", got, ok, sessID)
 	}
 	if st := b.threads.currentStore(); st != nil {
-		if id, ok := st.CurrentSession(TelegramSurface(-100)); ok && id != "" {
+		if id, ok := st.CurrentSession(roomSurface("telegram", -100)); ok && id != "" {
 			t.Fatalf("old surface still marks session %q", id)
 		}
 	}
 }
 
-// A migration announcement has no sender, so it must not be mistaken for an
-// unauthorized message — and it must not enrol a room that never existed.
 func TestMigrationOfAnUnknownRoomIsANoop(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
 	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "group", MigratedTo: -1009999})

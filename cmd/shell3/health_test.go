@@ -120,7 +120,6 @@ func TestHealthFailsOnBrokenHook(t *testing.T) {
 }
 
 func TestHealthOKWithStrictHook(t *testing.T) {
-	// A gate that deliberately blocks everything is a valid (strict) gate.
 	cfg := writeHealthTree(t, map[string]string{
 		"shell3.sh": kitWithWiring(healthWiring, `printf '{"block": true, "reason": "locked down"}'`),
 	})
@@ -130,8 +129,6 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	}
 }
 
-// `shell3 health` is documented as THE config check, so a telegram block the
-// front-end would refuse to start on must fail here rather than printing OK.
 func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
 	cases := map[string]string{
 		"no token":       "telegram:\n  token: \"\"\n  chat_id: \"123456789\"\n",
@@ -169,8 +166,6 @@ func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
 	}
 }
 
-// No telegram block at all is legitimate (an `shell3 ask`-only config), so it
-// reports the consequence plainly, without failing.
 func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
 	cfg := writeHealthTree(t, nil)
 	out, err := runHealthAt(t, cfg)

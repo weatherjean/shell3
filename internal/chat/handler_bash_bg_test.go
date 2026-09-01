@@ -9,13 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 )
 
-func TestBashBgHandler_Name(t *testing.T) {
-	h := BashBgHandler{}
-	if h.Name() != "bash_bg" {
-		t.Fatal("wrong name")
-	}
-}
-
 func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	wd := t.TempDir()
 	var gotCmd string

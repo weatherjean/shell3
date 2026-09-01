@@ -63,8 +63,6 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 }
 
-// TestRenderBaseConfigChatID verifies the boot answer becomes live config: the
-// chat id renders quoted into the telegram block (or empty when deferred).
 func TestRenderBaseConfigChatID(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://localhost:1/v1", EnvKey: "K", Model: "m",
@@ -111,10 +109,6 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 	})
 }
 
-// TestRenderedYAMLHasNoMediaBlock guards the removal of the media: block from
-// the yaml template for good: a boot may never emit
-// media:/stt:/tts:/describe:/imagegen: again, but media_keep_days (the
-// janitor knob) must survive.
 func TestRenderedYAMLHasNoMediaBlock(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}
@@ -147,10 +141,6 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 	}
 }
 
-// TestRenderedConfigLoads renders the base config, supplies the .env secrets it
-// references, and loads it through the real config loader — verifying the
-// shipped templates + files parse and produce the expected agent/tool/skill
-// shape. This is the canonical "does our default config work" test.
 func TestRenderedConfigLoads(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: ""}
@@ -274,9 +264,6 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	}
 }
 
-// A scaffolded config must be runnable, which means it must reference the
-// bot token key: the telegram block resolves env:TELEGRAM_TOKEN at load, so a
-// fresh boot that omitted this line would produce a config that cannot run.
 func TestBaseConfigWiresTheBotToken(t *testing.T) {
 	dir := t.TempDir()
 	if err := RenderBaseConfig(dir, Values{
@@ -294,10 +281,6 @@ func TestBaseConfigWiresTheBotToken(t *testing.T) {
 	}
 }
 
-// The kit template ships a commented cron: example. A declaration block is
-// itself a comment fence, so an example written with real #--- fences would
-// not be an example — it would be an armed job on every fresh boot. The
-// example's fences are ##---, and this pins that they stay inert.
 func TestScaffoldCronExampleIsInert(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test"}
@@ -344,11 +327,6 @@ func TestScaffoldShipsSelfKnowledgeSkill(t *testing.T) {
 	}
 }
 
-// The auditor is the harness's own heartbeat: a daily agent cron that looks
-// for judgment which escaped the turn layer — a model call hand-rolled into a
-// script, a secret read outside .env, a tool that returns a verdict. It ships
-// armed, because the failure it catches was found by a human reading a
-// transcript, four days after the guidance meant to prevent it had shipped.
 func TestScaffoldShipsTheAuditor(t *testing.T) {
 	dir := t.TempDir()
 	if err := RenderBaseConfig(dir, Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}, false); err != nil {

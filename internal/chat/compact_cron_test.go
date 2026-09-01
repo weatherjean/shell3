@@ -8,7 +8,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -35,13 +34,14 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	)
 
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		ConfigDir:   "/cfg",
-		Agent:       "syncer",
-		CronJob:     "nightly-sync",
-		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
-		ToolConfig:  ToolConfig{Store: st, Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		ConfigDir:  "/cfg",
+		Agent:      "syncer",
+		ModelID:    "test-model",
+		CronJob:    "nightly-sync",
+		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig: ToolConfig{Store: st, Log: LogOrNoop(nil)},
 	}
 
 	sess := NewSession(SessionOpts{StoreID: origID, Store: st})
@@ -85,6 +85,9 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	}
 	if rolledMeta.Agent != "syncer" {
 		t.Fatalf("rolled session agent = %q, want %q", rolledMeta.Agent, "syncer")
+	}
+	if rolledMeta.Model != "test-model" {
+		t.Fatalf("rolled session model = %q, want %q", rolledMeta.Model, "test-model")
 	}
 
 	costs, err := st.CronRollup(time.Time{})

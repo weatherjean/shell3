@@ -7,7 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 func TestSession_AccumulatesUsageAcrossTurns(t *testing.T) {
@@ -17,7 +16,7 @@ func TestSession_AccumulatesUsageAcrossTurns(t *testing.T) {
 				{TextDelta: "hi"},
 				{Usage: &llm.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110}},
 			}}),
-			ModeLabel: "code",
+			Agent: "code",
 		}
 	}
 	rt := newTestRuntime(t, mk)
@@ -52,8 +51,8 @@ func TestSession_AccumulatesUsageWithinMultiRoundTurn(t *testing.T) {
 					{Usage: &llm.Usage{PromptTokens: 150, CompletionTokens: 20}},
 				}},
 			),
-			ModeLabel: "code",
-			Personality: persona.Persona{Tools: []llm.ToolDefinition{{
+			Agent: "code",
+			Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{
 				Name: "bash", Parameters: map[string]any{"type": "object"},
 			}}},
 		}

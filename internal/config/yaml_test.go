@@ -212,10 +212,6 @@ func TestParseYAMLDuplicateTelegramChatFails(t *testing.T) {
 	}
 }
 
-// TestParseYAMLMediaBlockIsUnknownKey pins the subtraction: the media: block
-// (imagegen/describe/tts/stt, all now removed) is a removed key entirely, so
-// declaring any sub-block under it is a strict-decode load error like any
-// other unknown field — never silently ignored, never a deprecation warning.
 func TestParseYAMLMediaBlockIsUnknownKey(t *testing.T) {
 	for _, y := range []string{
 		"models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n",
@@ -269,8 +265,6 @@ func TestParseYAMLKeepRecentClamp(t *testing.T) {
 	}
 }
 
-// A strict-decode failure must name the wiring's own blocks, not the Go types
-// behind them.
 func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -296,10 +290,6 @@ func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 	}
 }
 
-// yamlTypeNames is a hand-maintained shadow of the yaml* wire structs; a new
-// block added without a map entry would degrade its strict-decode errors to
-// the generic "the shell3: block" label silently. Walk yamlFile's type graph and
-// assert coverage, so the drift is a test failure instead.
 func TestYAMLTypeNamesCoverEveryWireStruct(t *testing.T) {
 	seen := map[string]bool{}
 	var walk func(rt reflect.Type)

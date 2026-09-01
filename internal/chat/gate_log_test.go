@@ -113,8 +113,6 @@ func TestGateNonBashBlockIsLogged(t *testing.T) {
 	}
 }
 
-// A gate that logs the whole command would spill a secret typed on the command
-// line into a file with different permissions than .env has. Cap it instead.
 func TestGateLogTruncatesLongCommands(t *testing.T) {
 	lg := &capLogger{}
 	cfg := gateCfg(lg, ToolCallVerdict{Action: ActionBlock, Reason: "nope"})

@@ -3,8 +3,8 @@ package shell3
 import "errors"
 
 // ErrBusy reports a call needing an idle session while a turn is in flight.
-// Send returns it as an immediate Error event; Compact, Clear and
-// RegisterHostTool return it directly. Drain the Send channel, then retry.
+// Send returns it as an immediate Error event; RegisterHostTool returns it
+// directly. Drain the Send channel, then retry.
 var ErrBusy = errors.New("shell3: a turn is in flight; drain the Send channel before calling this")
 
 // ErrClosed reports a Send on a closed session: the channel emits one Error

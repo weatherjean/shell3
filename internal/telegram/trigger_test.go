@@ -63,10 +63,6 @@ func TestSentIDRingIsBounded(t *testing.T) {
 	}
 }
 
-// A reply is decided from Telegram's own author field, not from what this
-// process remembers sending. The remembered set is empty after a restart, so
-// a group whose only trigger was "reply to me" used to go deaf until someone
-// @mentioned it again — every restart, silently.
 func TestAddressedReplyToBotSurvivesRestart(t *testing.T) {
 	c := &conversation{}
 	c.setGroup("supergroup")

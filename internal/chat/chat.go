@@ -2,11 +2,9 @@ package chat
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -15,9 +13,16 @@ import (
 // llm.TrafficInspector, exposing the last bytes for error dumps.
 type LLMClient = llm.Streamer
 
-// AgentKnobs follow every agent switch as one unit: ActiveAgent carries them,
-// ApplyActiveAgent copies them into Config, NewTurnConfig forwards them. A
-// knob added here flows through all three with no per-field copy to forget.
+// AgentProfile is the model-facing part of one resolved agent: its current
+// system prompt and exposed tool schema. It lives with the turn
+// configuration that consumes it; there is no separate persona subsystem.
+type AgentProfile struct {
+	SystemPrompt string
+	Tools        []llm.ToolDefinition
+}
+
+// AgentKnobs carries the resolved per-agent runtime settings as one unit from
+// assembly into each turn.
 type AgentKnobs struct {
 	// HostToolNames routes to the HostTool dispatcher. Entries must match the
 	// names in the LLM tool schema.
@@ -25,8 +30,6 @@ type AgentKnobs struct {
 	// Subagents is the allowlist internal/shell3 validates task spawns
 	// against; the schema-side listing lives in the task tool itself.
 	Subagents []string
-	// Environment gates the standing Environment reminder.
-	Environment bool
 	// ContextWindow feeds the reminder tracker's usage warnings; 0 = unknown.
 	ContextWindow int
 	// CompactAt is the model's auto-compaction prompt-token threshold (0 = off).
@@ -39,14 +42,12 @@ type AgentKnobs struct {
 	PruneAt int
 }
 
-// ActiveAgent is everything the chat loop needs to run the next turn under a
-// different agent.
+// ActiveAgent is the resolved runtime bundle for one declared agent.
 type ActiveAgent struct {
 	AgentKnobs
-	Personality  persona.Persona
-	ModeLabel    string
+	Profile      AgentProfile
+	Agent        string
 	ActiveSkills []string
-	ActiveTools  []string
 	LLM          LLMClient
 	Params       llm.RequestParams
 	ModelID      string
@@ -61,8 +62,8 @@ type Config struct {
 	Store *runs.Store
 	// RunsDir is where job logs live, named in the Environment reminder.
 	RunsDir string
-	// Personality is the loaded persona (system prompt, allowed tools).
-	Personality persona.Persona
+	// Profile is the resolved agent's system prompt and allowed tools.
+	Profile AgentProfile
 	// RefreshPrompt rebuilds the system prompt at the start of EVERY turn, so
 	// a long-lived conversation tracks current context files rather than a
 	// session-creation snapshot. Nil freezes the prompt at construction.
@@ -74,11 +75,8 @@ type Config struct {
 	PromptSuffix func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
-	// StatusLine is the provider/model/effort line front-ends show, and how
-	// reminder tracking detects a model change.
-	StatusLine string
-	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
-	ModeLabel string
+	// ModelID is the provider model identifier used by this agent.
+	ModelID string
 	// ConfigDir is recorded per session so a resume reloads the right config.
 	// Agent-independent: set once at assembly.
 	ConfigDir string
@@ -93,12 +91,9 @@ type Config struct {
 	// stderr, carried here so a front-end can surface them in-band to someone
 	// who never sees that stderr line.
 	ConfigWarnings []string
-	// ActiveSkills lists skill names enabled for this persona.
+	// ActiveSkills lists skill names enabled for this agent.
 	ActiveSkills []string
-	// ActiveTools lists tool names enabled for this agent.
-	ActiveTools []string
-	// AgentKnobs are copied wholesale by ApplyActiveAgent, so they follow
-	// agent switches.
+	// AgentKnobs are copied wholesale by ApplyActiveAgent.
 	AgentKnobs
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
@@ -135,27 +130,20 @@ type MCPServerStatus struct {
 	Err       string
 }
 
-// AgentStatusLine joins the agent label and model id — the single source for
-// this format.
-func AgentStatusLine(rt ActiveAgent) string {
-	return fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
-}
-
 // ApplyActiveAgent copies an agent's runtime bundle into the config — client,
-// persona, params, tool and skill sets, knobs, status line. Assembly routes
+// profile, params, tool and skill sets, knobs, and model id. Assembly routes
 // through it, so the agent-derived field copy lives in one place.
 //
 // It deliberately does NOT touch the agent-independent fields (Store, WorkDir,
 // ConfigDir, Headless, Log, RefreshPrompt, RunToolCall), set once at assembly.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
-	c.Personality = rt.Personality
+	c.Profile = rt.Profile
 	c.Params = rt.Params
-	c.ModeLabel = rt.ModeLabel
+	c.Agent = rt.Agent
+	c.ModelID = rt.ModelID
 	c.ActiveSkills = rt.ActiveSkills
-	c.ActiveTools = rt.ActiveTools
 	c.AgentKnobs = rt.AgentKnobs
-	c.StatusLine = AgentStatusLine(rt)
 }
 
 // NewHandlers constructs the built-in tool handler map, looked up by name
@@ -192,10 +180,10 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 			Log:                LogOrNoop(cfg.Log),
 		},
 		LLM:           cfg.LLM,
-		Personality:   cfg.Personality,
+		Profile:       cfg.Profile,
 		RefreshPrompt: cfg.RefreshPrompt,
 		PromptSuffix:  cfg.PromptSuffix,
-		StatusLine:    cfg.StatusLine,
+		ModelID:       cfg.ModelID,
 		ConfigDir:     cfg.ConfigDir,
 		Agent:         cfg.Agent,
 		ParentID:      cfg.ParentID,

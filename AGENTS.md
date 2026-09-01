@@ -126,8 +126,8 @@ change. `docs/internals.md` contains the full detail.
 
 ### Front ends, media, and storage
 
-- Telegram is the primary front end. It long-polls outbound; the read-only web
-  dash binds loopback. The console transport drives the same bot contract.
+- Telegram is the primary front end. The console transport drives the same bot
+  contract, while `shell3 ask` provides local one-shot and interactive use.
 - Commands are host-answered without a model turn. Event hooks observe the
   session stream asynchronously through a bounded, non-blocking dispatcher.
 - Media perception and generation are bring-your-own declared tools. The
@@ -160,7 +160,6 @@ internal/mediadir/       Media path resolution and cleanup
 internal/modelproxy/     Model proxy process management
 internal/notify/         Shared completion notification types
 internal/paths/          Global and local path resolution
-internal/persona/        Agent prompt/tool/parameter carrier
 internal/render/         Self-contained status and stored-record HTML renderers
 internal/review/         Guardian LLM for soft gate-review verdicts
 internal/runs/           SQLite history, outbox, markers, and janitors

@@ -36,19 +36,8 @@ func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt s
 	return renderAskEvents(w, sess.Send(ctx, prompt))
 }
 
-// FollowAskJobs mirrors the bot's wake loop for a one-shot run: while the
-// session has a running job or a queued notice, it renders the wake turn the
-// host would run. It KEEPS THE PROCESS ALIVE until every job completes — a
-// one-shot run must never exit at turn end and kill in-flight work.
-//
-// No timeout; only ctx cancellation cuts it short. It blocks on BOTH the Wake
-// bus and the job-progress bus, so a completion that queues without an
-// immediate wake is still noticed rather than parking the run forever.
-//
-// ask installs NO CompletionHost, so the runtime's library fallback delivers
-// every raw notice straight to the owning session and this loop narrates
-// everything — the verbose debugging view. Mail routing is exercised on the
-// real bot loop.
+// FollowAskJobs keeps a one-shot process alive while jobs or queued notices
+// remain, rendering each wake turn until completion or context cancellation.
 func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *shell3.Session) error {
 	announced := 0 // running count last printed, so the waiting note isn't repeated per progress event
 	for {

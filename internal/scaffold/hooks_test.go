@@ -146,9 +146,6 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 	}
 }
 
-// The two judgment-call rules soft-deny: the LLM reviewer decides instead of
-// a hard refusal. With no reviewer wired the runtime fails these closed, so
-// the demotion is never weaker than the old block.
 func TestScaffoldedGateReviewsTheJudgmentCalls(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
@@ -169,20 +166,11 @@ func TestScaffoldedGateReviewsTheJudgmentCalls(t *testing.T) {
 	}
 }
 
-// The credential rule must judge the right field for the right tool: a bash
-// command's actual text, or another tool's TARGET PATH — never a file body
-// that merely mentions .env in passing. That distinction is what makes the
-// scripting skill's documented pattern (a lib/bin wrapper that greps the one
-// key it needs out of .env at point of use) actually usable, while a direct
-// read/write/delete of the credential file itself, by any route, still
-// refuses.
 func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
 	envGrep := `key="$(grep '^OPENWEATHER_KEY=' ~/.shell3/.env | cut -d= -f2-)"`
 
-	// Writing a lib/bin wrapper whose BODY greps .env is the harness's
-	// documented, intended way to use a secret — it must be allowed.
 	t.Run("edit_file writing a lib/bin script that greps .env is allowed", func(t *testing.T) {
 		argsJSON, err := json.Marshal(map[string]any{
 			"path":       "/tmp/lib/bin/weather",
@@ -206,7 +194,6 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 		}
 	})
 
-	// But the credential file itself is still off limits, by any route.
 	t.Run("edit_file targeting .env directly is still blocked", func(t *testing.T) {
 		argsJSON, err := json.Marshal(map[string]any{
 			"path":       "~/.shell3/.env",
@@ -237,9 +224,6 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 	}
 }
 
-// Nothing may ask. Unattended — which is most of the time — an ask parks the
-// turn until it times out and then denies anyway, so it is a slow block that
-// also holds the single-turn gate.
 func TestScaffoldedGateNeverAsks(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
@@ -253,12 +237,6 @@ func TestScaffoldedGateNeverAsks(t *testing.T) {
 	}
 }
 
-// A subagent with no gate of its own runs ungated, and there is no fallback
-// to the main agent's — so shipping the assistant without one would make
-// delegation a way around every rule the main agent has. The main agent may
-// not read .env; if the assistant could, the main agent need only dispatch it
-// and the secret lands in the job transcript. One `gate: [main, assistant]`
-// block governs both, so the rules cannot drift apart.
 func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
@@ -327,10 +305,6 @@ func TestScaffoldedGateAllowsPerceptionTools(t *testing.T) {
 		}
 	}
 
-	// The deleted gate rule had a separate bash-redirect arm distinct from
-	// edit_file; a rule regrown only in the redirect arm would pass every
-	// case above and still block this one. The command must actually carry a
-	// model URL, or it would never have tripped the old rule either.
 	bashCmd := "cat <<'EOF' > /tmp/see.py\n" +
 		"import urllib.request\n" +
 		"URL = 'https://api.openai.com/v1/chat/completions'\n" +
@@ -340,16 +314,6 @@ func TestScaffoldedGateAllowsPerceptionTools(t *testing.T) {
 	}
 }
 
-// A refusal that blocks a METHOD must name the sanctioned way to do the same
-// work, and must NOT carry the blanket policy suffix. The suffix forbids "no
-// alternative command, path, or tool" and then says "stop and tell the
-// operator" — which forbids the very alternative the credential rule exists to
-// point at, leaving escalation as the only branch standing.
-//
-// Observed 2026-08-25: blocked from reading the Notion token, the agent
-// stopped and asked its operator to paste database URLs by hand. It was
-// obeying the text exactly. Running a script that reads the token at point of
-// use was allowed the whole time.
 func TestScaffoldedGateRoutesInsteadOfDeadEnding(t *testing.T) {
 	dir := scaffoldForHooks(t)
 

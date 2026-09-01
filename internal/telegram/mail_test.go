@@ -65,7 +65,7 @@ func gatedRuntime(t *testing.T, g *gatedFirstClient) *shell3.Runtime {
 	t.Cleanup(func() { _ = st.Close() })
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: g, ModeLabel: "code",
+			LLM: g, Agent: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
@@ -119,10 +119,6 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 		r, ok := fc.lastReply()
 		return ok && r.replyTo == "3" && strings.Contains(r.text, "batched reply")
 	})
-	// One batch turn: the model saw both queued messages in one call (call 2).
-	// Depending on timing they arrive as the batch turn's user message (queue
-	// path) or as an injected steer block (steer path) — either way, ONE extra
-	// model call carries both.
 	calls := g.inner.CallsSnapshot()
 	if len(calls) != 2 {
 		t.Fatalf("model calls = %d, want 2 (first turn + one batch)", len(calls))

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -68,7 +67,7 @@ func TestAskResumeFollowsItsOwnThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rememberAskSession(st, askID)
+	rememberAskSession(st, askID, "")
 
 	tgID, err := st.NewSession(runs.Meta{Workdir: "/w", ConfigDir: "/c"})
 	if err != nil {
@@ -90,24 +89,22 @@ func TestAskResumeSkipsSweptSession(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	rememberAskSession(st, "sess-that-was-swept")
+	rememberAskSession(st, "sess-that-was-swept", "")
 	if got := askResumeID(st); got != "" {
 		t.Fatalf("askResumeID for a missing session = %q, want empty", got)
 	}
 }
 
 func TestAskAgentDoesNotClaimTheMarker(t *testing.T) {
-	src, err := os.ReadFile("ask.go")
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(src)
-	agentBranch := strings.Index(s, "return runAskAgent(")
-	remember := strings.Index(s, "rememberAskSession(rt.Parts().Store()")
-	if agentBranch < 0 || remember < 0 {
-		t.Fatal("ask.go no longer has both the --agent branch and the marker write")
-	}
-	if remember < agentBranch {
-		t.Error("rememberAskSession runs before the --agent early return, so an --agent run claims ask's resume marker")
+	defer func() { _ = st.Close() }()
+
+	rememberAskSession(st, "interactive-session", "")
+	rememberAskSession(st, "agent-parent-session", "researcher")
+	if got, ok := st.CurrentSession(askSurface); !ok || got != "interactive-session" {
+		t.Fatalf("--agent changed ask's resume marker to %q", got)
 	}
 }

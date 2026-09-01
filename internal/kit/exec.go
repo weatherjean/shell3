@@ -12,8 +12,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/procutil"
 )
 
 // paramName is the identifier shape a param must have: it becomes an
@@ -101,8 +102,6 @@ func coerce(typ string, v any) (string, error) {
 type Runner struct {
 	// Path is the kit file sourced before the function is called.
 	Path string
-	// Bash is the interpreter; "" means "bash" from PATH.
-	Bash string
 	// Env is the base environment. nil means the minimal set (see baseEnv): a
 	// tool inherits no secrets, and reads the one key it needs at point of use.
 	Env []string
@@ -146,22 +145,10 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 	if err != nil {
 		return "", err
 	}
-	sh := r.Bash
-	if sh == "" {
-		sh = "bash"
-	}
-
-	cmd := exec.CommandContext(ctx, sh, "-c", SourceScript(r.Path, t.Func))
+	cmd := exec.CommandContext(ctx, "bash", "-c", SourceScript(r.Path, t.Func))
 	cmd.Dir = r.Dir
 	cmd.Env = append(r.baseEnv(os.LookupEnv), env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	}
-	cmd.WaitDelay = toolWaitDelay
+	procutil.ConfigureGroupCancel(cmd, toolWaitDelay)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

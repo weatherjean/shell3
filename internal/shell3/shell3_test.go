@@ -25,10 +25,10 @@ func TestTranslate(t *testing.T) {
 		{"tool call", chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}, &Event{Kind: ToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}},
 		{"tool result", chat.Event{Kind: chat.EventToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}, &Event{Kind: ToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}},
 		{"system reminder", chat.Event{Kind: chat.EventSystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}, &Event{Kind: SystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}},
-		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &chat.EventUsageData{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, &Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
-		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &chat.EventUsageData{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, &Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
+		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, &Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
+		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &llm.Usage{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, &Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
 		{"retry", chat.Event{Kind: chat.EventRetry, Text: "retrying"}, &Event{Kind: Retry, Text: "retrying"}},
-		{"compacted", chat.Event{Kind: chat.EventCompacted, Text: "context auto-compacted at 100000 tokens", Usage: &chat.EventUsageData{PromptTokens: 1200, TotalTokens: 1200}}, &Event{Kind: Compacted, Text: "context auto-compacted at 100000 tokens", PromptTokens: 1200, TotalTokens: 1200}},
+		{"compacted", chat.Event{Kind: chat.EventCompacted, Text: "context auto-compacted at 100000 tokens", Usage: &llm.Usage{PromptTokens: 1200, TotalTokens: 1200}}, &Event{Kind: Compacted, Text: "context auto-compacted at 100000 tokens", PromptTokens: 1200, TotalTokens: 1200}},
 		{"error", chat.Event{Kind: chat.EventError, Text: "boom"}, &Event{Kind: Error}},
 		{"session start dropped", chat.Event{Kind: chat.EventSessionStart}, nil},
 		{"user message dropped", chat.Event{Kind: chat.EventUserMessage}, nil},
@@ -80,9 +80,6 @@ func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Sessi
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = t.TempDir()
 	}
-	if cfg.Personality.Name == "" {
-		cfg.Personality.Name = "test"
-	}
 	return newSession(cfg, SessionOpts{})
 }
 
@@ -95,9 +92,6 @@ func TestSession_ID_NoStoreReportsEmpty(t *testing.T) {
 	}
 }
 
-// TestSend_AfterCloseReturnsErrClosed pins the teardown contract: a Send that
-// races session close (e.g. a Wake-driven queued drain) must be rejected with
-// ErrClosed instead of running a turn against the ended store record.
 func TestSend_AfterCloseReturnsErrClosed(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	if err := s.Close(); err != nil {
@@ -114,10 +108,6 @@ func TestSend_AfterCloseReturnsErrClosed(t *testing.T) {
 	}
 }
 
-// TestSession_History_CarriesReasoning proves a live turn's reasoning reaches
-// the stored message history (llm.Message.ReasoningContent) — the Chat-tab
-// thinking path; it is independent of resume (which doesn't persist reasoning
-// by design).
 func TestSession_History_CarriesReasoning(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{ReasoningDelta: "let me think about 42"},
@@ -227,8 +217,6 @@ func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
 		t.Fatal("Close deadlocked: drain wedged on the abandoned unbuffered Send channel")
 	}
 
-	// Teardown must also CLOSE the abandoned Send channel so a consumer that
-	// later (or concurrently) ranges over it observes EOF instead of hanging.
 	for {
 		select {
 		case _, ok := <-out:
@@ -280,24 +268,17 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 	s := newTestSession(t, client, chat.Config{})
 
 	out := s.Send(context.Background(), "hi")
-	// Drain the turn channel in the background so drain() can forward the
-	// terminal event (a real caller drains; this avoids the unrelated
-	// unbuffered-Send-channel block, which is a separate finding).
 	go func() {
 		for range out {
 		}
 	}()
 
-	// Wait until the turn is actually in-flight (Stream entered and blocked).
 	select {
 	case <-client.entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stream never entered")
 	}
 
-	// Close must cancel the in-flight turn AND join its goroutine before
-	// returning. Before the fix, Close returns without cancelling, so the
-	// blocked Stream goroutine is leaked and `returned` is never closed.
 	closeDone := make(chan struct{})
 	go func() {
 		_ = s.Close()
@@ -309,9 +290,6 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 		t.Fatal("Close did not return (deadlock)")
 	}
 
-	// Join proof: by the time Close returned, the turn's Stream must have
-	// returned (i.e. Close waited for the turn goroutine, so the deferred
-	// history persist completed before the store would be closed).
 	select {
 	case <-client.returned:
 	default:
@@ -351,14 +329,14 @@ func TestRoute_SetsIsHostTool(t *testing.T) {
 func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	client := fakellm.New()
 	cfg := chat.Config{
-		ModeLabel:    "code",
-		StatusLine:   "openai │ gpt-x │ high",
+		Agent:        "code",
+		ModelID:      "gpt-x",
 		AgentKnobs:   chat.AgentKnobs{ContextWindow: 4096},
 		ActiveSkills: []string{"a", "b"},
 		Params:       llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
 	}
-	cfg.Personality.SystemPrompt = "be helpful"
-	cfg.Personality.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}
+	cfg.Profile.SystemPrompt = "be helpful"
+	cfg.Profile.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}
 	s := newTestSession(t, client, cfg)
 	defer s.Close()
 
@@ -366,7 +344,7 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	if snap.Agent != "code" || snap.Model != "gpt-x" {
 		t.Fatalf("snapshot header wrong: %+v", snap)
 	}
-	if snap.StatusLine != "openai │ gpt-x │ high" || snap.ContextWindow != 4096 {
+	if snap.ContextWindow != 4096 {
 		t.Fatalf("snapshot status/window wrong: %+v", snap)
 	}
 	if snap.SystemPrompt != "be helpful" {

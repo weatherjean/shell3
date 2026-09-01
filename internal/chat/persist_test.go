@@ -36,9 +36,6 @@ func TestFlushMessages_PersistsFullStreamIncludingToolResults(t *testing.T) {
 	}
 }
 
-// flushMessages must stop at the first append failure and report only the
-// contiguous persisted prefix, so a caller never advances its high-water mark
-// past an unwritten message (which would drop it permanently).
 func TestFlushMessages_StopsAtFirstFailure(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)

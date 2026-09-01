@@ -140,7 +140,8 @@ func TestRunnerRunSurfacesStderr(t *testing.T) {
 
 func TestRunnerCancellationKillsChildProcessGroup(t *testing.T) {
 	dir := t.TempDir()
-	marker := filepath.Join(dir, "child-survived")
+	killed := filepath.Join(dir, "child-killed")
+	survived := filepath.Join(dir, "child-survived")
 	src := `#---
 # agent: a
 #---
@@ -154,7 +155,11 @@ EOF
 # description: starts a child
 #---
 a_wait() {
-  (sleep 1; touch ` + ShellQuote(marker) + `) &
+  (
+    trap 'touch ` + ShellQuote(killed) + `; exit 0' TERM
+    sleep 5
+    touch ` + ShellQuote(survived) + `
+  ) &
   wait
 }
 `
@@ -165,10 +170,17 @@ a_wait() {
 	if err == nil {
 		t.Fatal("cancelled tool returned no error")
 	}
-	// If cancellation killed only the wrapper shell, its child would live long
-	// enough to create the marker.
-	time.Sleep(1200 * time.Millisecond)
-	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(killed); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("tool child did not receive cancellation")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, statErr := os.Stat(survived); !os.IsNotExist(statErr) {
 		t.Fatalf("tool child survived cancellation: %v", statErr)
 	}
 }

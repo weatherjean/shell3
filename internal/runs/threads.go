@@ -42,24 +42,3 @@ func (s *Store) SurfaceForSession(sessionID string) (string, bool) {
 	}
 	return surface, true
 }
-
-// SurfacesWithPrefix lists surface → session id for every surface starting
-// with prefix — the enrolled-rooms listing ("telegram:"). An unreadable row
-// is skipped rather than failing the listing: this feeds a view, never a
-// decision.
-func (s *Store) SurfacesWithPrefix(prefix string) map[string]string {
-	out := map[string]string{}
-	rows, err := s.db.Query(`SELECT surface, session_id FROM threads WHERE surface LIKE ? || '%'`, prefix)
-	if err != nil {
-		return out
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var surface, id string
-		if err := rows.Scan(&surface, &id); err != nil {
-			continue
-		}
-		out[surface] = id
-	}
-	return out
-}

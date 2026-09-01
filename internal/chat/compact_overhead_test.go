@@ -4,8 +4,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 type capturingLog struct {
@@ -36,16 +34,12 @@ func (l *capturingLog) matching(sub string) int {
 
 const overheadWarnSub = "compaction budget"
 
-// A system prompt over half of compact_at is the deadlock precondition: it is
-// re-rendered from disk every turn, so compaction can never reclaim it. The
-// operator must be told, because the only other symptom is the provider
-// rejecting the request for length much later.
 func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
-		Personality: persona.Persona{SystemPrompt: strings.Repeat("brain ", 8000)},
-		AgentKnobs:  AgentKnobs{CompactAt: 1000},
-		ToolConfig:  ToolConfig{Log: log},
+		Profile:    AgentProfile{SystemPrompt: strings.Repeat("brain ", 8000)},
+		AgentKnobs: AgentKnobs{CompactAt: 1000},
+		ToolConfig: ToolConfig{Log: log},
 	}
 	sess := &Session{}
 
@@ -65,9 +59,9 @@ func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
-		Personality: persona.Persona{SystemPrompt: "you are a helpful agent"},
-		AgentKnobs:  AgentKnobs{CompactAt: 1000},
-		ToolConfig:  ToolConfig{Log: log},
+		Profile:    AgentProfile{SystemPrompt: "you are a helpful agent"},
+		AgentKnobs: AgentKnobs{CompactAt: 1000},
+		ToolConfig: ToolConfig{Log: log},
 	}
 	warnFixedOverhead(cfg, &Session{})
 	if got := log.matching(overheadWarnSub); got != 0 {
@@ -78,7 +72,7 @@ func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 func TestWarnFixedOverhead_MeasuresRefreshedPrompt(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
-		Personality:   persona.Persona{SystemPrompt: "small at build time"},
+		Profile:       AgentProfile{SystemPrompt: "small at build time"},
 		RefreshPrompt: func() string { return strings.Repeat("grown ", 8000) },
 		AgentKnobs:    AgentKnobs{CompactAt: 1000},
 		ToolConfig:    ToolConfig{Log: log},

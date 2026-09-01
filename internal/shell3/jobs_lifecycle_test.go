@@ -14,14 +14,12 @@ func subagentCfg(client chat.LLMClient) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
 			LLM:        client,
-			ModeLabel:  "code",
+			Agent:      "code",
 			AgentKnobs: chat.AgentKnobs{Subagents: []string{"explorer"}},
 		}
 	}
 }
 
-// TestStartSubagent_ConcurrencyCap pins the subagent slot reservation: with
-// max_concurrent=1 and one subagent running, a second spawn is refused.
 func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, subagentCfg(block))
@@ -44,8 +42,6 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	_ = rt.jobs.cancel(id, false)
 }
 
-// TestSubagentCancelMidRun pins that cancelling a running subagent unwinds
-// the child turn and reports the job as failed (not a clean done).
 func TestSubagentCancelMidRun(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, subagentCfg(block))
@@ -63,7 +59,6 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	// finishSubagent wakes the parent when the job goroutine unwinds.
 	waitForWake(t, rt, parent)
 	var found JobInfo
 	deadline := time.Now().Add(5 * time.Second)
@@ -86,9 +81,6 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	}
 }
 
-// TestRuntimeClose_JoinsLiveCommandJob pins Close ordering: with a command
-// job still running, Runtime.Close must cancel it, join its goroutine, and
-// return — no hang, no write-after-close on the store. Run under -race.
 func TestRuntimeClose_JoinsLiveCommandJob(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	if _, err := rt.jobs.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, ""); err != nil {

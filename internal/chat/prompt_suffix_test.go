@@ -2,17 +2,15 @@ package chat
 
 import (
 	"fmt"
+	"github.com/weatherjean/shell3/internal/runs"
 	"strings"
 	"testing"
-
-	"github.com/weatherjean/shell3/internal/persona"
-	"github.com/weatherjean/shell3/internal/runs"
 )
 
 func TestRenderSystemPromptCallsSuffixEveryTurn(t *testing.T) {
 	n := 0
 	cfg := TurnConfig{
-		Personality:  persona.Persona{SystemPrompt: "base"},
+		Profile:      AgentProfile{SystemPrompt: "base"},
 		PromptSuffix: func() string { n++; return fmt.Sprintf("brief %d", n) },
 	}
 	if got := renderSystemPrompt(cfg); !strings.Contains(got, "brief 1") {
@@ -25,7 +23,7 @@ func TestRenderSystemPromptCallsSuffixEveryTurn(t *testing.T) {
 
 func TestRenderSystemPromptKeepsRefreshedPrompt(t *testing.T) {
 	cfg := TurnConfig{
-		Personality:   persona.Persona{SystemPrompt: "stale"},
+		Profile:       AgentProfile{SystemPrompt: "stale"},
 		RefreshPrompt: func() string { return "fresh prompt" },
 		PromptSuffix:  func() string { return "room brief" },
 	}
@@ -39,7 +37,7 @@ func TestRenderSystemPromptKeepsRefreshedPrompt(t *testing.T) {
 }
 
 func TestRenderSystemPromptWithoutSuffix(t *testing.T) {
-	base := TurnConfig{Personality: persona.Persona{SystemPrompt: "base"}}
+	base := TurnConfig{Profile: AgentProfile{SystemPrompt: "base"}}
 	if got := renderSystemPrompt(base); got != "base" {
 		t.Fatalf("render = %q, want the prompt untouched", got)
 	}

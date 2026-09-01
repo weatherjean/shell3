@@ -7,14 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestReloadRepointsSessionStore covers the reload bug at the runtime level:
-// an idle front-end session surviving applyReload must have its chat.Session
-// sidecar store handle repointed at the NEW generation's store, not left on
-// the old one (which closes once the parked generation drains). fakeReloadState
-// reuses rt.store for every call in the other reload tests, which can't
-// distinguish "swapped" from "never touched" — this test drives applyReload
-// with a distinct second store to make the swap observable, then closes the
-// old store and confirms the session's sess now reads through the new one.
 func TestReloadRepointsSessionStore(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	oldStore := rt.store

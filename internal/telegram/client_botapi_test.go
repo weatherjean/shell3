@@ -4,15 +4,57 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
+
+func TestBotAPIClientSendHTMLReplyOnWire(t *testing.T) {
+	var path string
+	var payload map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse request: %v", err)
+		}
+		payload = map[string]string{}
+		for key := range r.Form {
+			payload[key] = r.Form.Get(key)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":123,"date":0,"chat":{"id":42,"type":"private"}}}`))
+	}))
+	defer srv.Close()
+
+	b, err := bot.New("token", bot.WithServerURL(srv.URL), bot.WithSkipGetMe())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &BotAPIClient{b: b}
+	id, err := c.SendHTMLReply(context.Background(), 42, "<b>hello</b>", "7", SendOpt{Silent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "123" || !strings.HasSuffix(path, "/bottoken/sendMessage") {
+		t.Fatalf("id=%q path=%q", id, path)
+	}
+	if payload["parse_mode"] != "HTML" || payload["disable_notification"] != "true" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	var reply map[string]any
+	if err := json.Unmarshal([]byte(payload["reply_parameters"]), &reply); err != nil || reply["message_id"] != float64(7) {
+		t.Fatalf("reply_parameters = %#v", payload["reply_parameters"])
+	}
+}
 
 func TestNormalizeMessage_CaptionIsTheText(t *testing.T) {
 	m := &models.Message{
@@ -65,8 +107,6 @@ func TestCaptionedPhoto_ReachesTurnPrompt(t *testing.T) {
 	}
 }
 
-// withSendRetry retries transient network failures and gives up immediately
-// on API rejections and cancelled contexts.
 func TestWithSendRetry(t *testing.T) {
 	calls := 0
 	out, err := withSendRetry(context.Background(), func() (string, error) {

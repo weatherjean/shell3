@@ -4,7 +4,18 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/runs"
 )
+
+func reminderSnapshot(s *Session) []runs.ReminderLine {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	out := make([]runs.ReminderLine, 0, len(s.standingReminders)+len(s.reminderLog))
+	for _, text := range s.standingReminders {
+		out = append(out, runs.ReminderLine{Text: text})
+	}
+	return append(out, s.reminderLog...)
+}
 
 func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	s := NewSession(SessionOpts{})
@@ -13,7 +24,7 @@ func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	emitSystemReminder(s, "<system-reminder>context: 10%</system-reminder>")
 	s.append(llm.Message{Role: llm.RoleAssistant, Content: "hello"})
 
-	rems := s.Reminders()
+	rems := reminderSnapshot(s)
 	if len(rems) != 1 {
 		t.Fatalf("want 1 reminder, got %d", len(rems))
 	}
@@ -22,18 +33,5 @@ func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	}
 	if rems[0].Text == "" {
 		t.Fatal("reminder text not recorded")
-	}
-}
-
-func TestReminderLog_ClearedOnSetMessages(t *testing.T) {
-	s := NewSession(SessionOpts{})
-	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
-	emitSystemReminder(s, "<system-reminder>model changed</system-reminder>")
-	if len(s.Reminders()) != 1 {
-		t.Fatal("setup: reminder not recorded")
-	}
-	s.SetMessages(nil)
-	if got := len(s.Reminders()); got != 0 {
-		t.Fatalf("reminders should be cleared on SetMessages, got %d", got)
 	}
 }

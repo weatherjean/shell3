@@ -47,31 +47,13 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// schemaVersion is stamped via PRAGMA user_version once schema.go has been
-// applied. Bump it on ANY table-shape change, rather than judging
-// compatibility case by case. A mismatched database is archived and recreated,
-// so no code ever reads an older shape and no stored history is destroyed.
-//
-// v10 is: sessions/messages/reminders/messages_fts; threads(surface, session_id)
-// for each front-end's current conversation; cron_status(name, json);
-// outbox(id, kind, json) for the restart-durable completion queue; and
-// prompts(hash, text) + turn_prompts(session_id, seq, hash, ts), the
-// content-addressed record of what each turn's system prompt said. messages
-// carries ts, so a question about a WINDOW is answerable without inferring
-// time from the session's own start and end.
-//
-// cron_status and outbox are their OWN tables, not rows in threads:
-// threads.session_id is trusted to name a real session — Sweep prunes any row
-// where it does not — so a job name or JSON blob there would be deleted by
-// the next startup's janitor before it could be read back.
+// schemaVersion changes with every table-shape change. Mismatched databases
+// are archived and recreated rather than migrated or read with an older shape.
 const schemaVersion = 10
 
 // openDB opens path, applying the schema fresh or recreating the file when
 // its stamp does not match schemaVersion. A mismatched database is never
-// patched in place — its database/WAL/SHM bundle is archived under one suffix
-// and a fresh store is built loudly. The failure mode this guards: CREATE TABLE IF NOT EXISTS is
-// a no-op against an existing table, so an older database would keep missing
-// every column added since and fail writes row by row.
+// patched in place; its database/WAL/SHM bundle is archived together.
 func openDB(path string) (*sql.DB, error) {
 	db, err := openRaw(path)
 	if err != nil {

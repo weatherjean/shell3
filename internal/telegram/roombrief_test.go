@@ -59,8 +59,6 @@ func TestRoomBriefIncludesDeclaredContext(t *testing.T) {
 	}
 }
 
-// The brief is a closure called every turn: a description edited
-// mid-conversation must land on the next turn, not the next restart.
 func TestRoomBriefRefreshesAfterCacheDrop(t *testing.T) {
 	fc := newFakeClient()
 	fc.chatTitle, fc.chatDesc = "infra", "first"

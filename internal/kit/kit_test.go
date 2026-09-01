@@ -66,7 +66,7 @@ func TestParseAssembles(t *testing.T) {
 	}
 
 	main := k.Agents[0]
-	if main.Name != "main" || main.PromptFunc != "main_prompt" || main.Model != "opus" {
+	if main.Name != "main" || main.Model != "opus" {
 		t.Fatalf("main = %+v", main)
 	}
 
@@ -133,9 +133,6 @@ func TestParseBlockWithNoFunctionFails(t *testing.T) {
 	}
 }
 
-// An agent block with a missing prompt function must NOT silently bind the
-// following tool's implementation. Without a binding ceiling this parses
-// cleanly and wrongly.
 func TestParseMissingPromptFuncDoesNotStealNextFunc(t *testing.T) {
 	src := []byte(
 		"#---\n# agent: a\n#---\n" +

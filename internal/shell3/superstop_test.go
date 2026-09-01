@@ -58,8 +58,6 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	}
 }
 
-// A normal single-job kill still routes its completion — suppression is
-// superstop's, not cancellation's.
 func TestNormalKillStillRoutes(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}
@@ -72,8 +70,8 @@ func TestNormalKillStillRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	if err := parent.KillJob(id); err != nil {
-		t.Fatalf("KillJob: %v", err)
+	if err := rt.jobs.cancel(id, false); err != nil {
+		t.Fatalf("cancel: %v", err)
 	}
 	rt.jobs.wait()
 	waitFor(t, "completion routed", func() bool {

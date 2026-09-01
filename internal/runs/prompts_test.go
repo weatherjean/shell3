@@ -81,7 +81,7 @@ func TestSavePromptIsNotSearchable(t *testing.T) {
 	if err := st.SavePrompt("s1", 0, "gravitational singularity", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	hits, err := st.Search("gravitational", 10)
+	hits, err := st.SearchFiltered("gravitational", SearchFilter{}, 10)
 	if err != nil && !strings.Contains(err.Error(), "no such") {
 		t.Fatal(err)
 	}

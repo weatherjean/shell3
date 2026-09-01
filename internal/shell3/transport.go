@@ -2,7 +2,6 @@ package shell3
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/strutil"
@@ -12,7 +11,7 @@ import (
 func notifyBg(id, cmd string, exit *int, preview string) notify.Notification {
 	return notify.Notification{
 		Kind: notify.KindBgDone, ID: id, Cmd: cmd, Exit: exit,
-		Preview: preview, TS: time.Now().UTC().Format(time.RFC3339),
+		Preview: preview,
 	}
 }
 

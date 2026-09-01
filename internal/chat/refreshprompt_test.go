@@ -6,7 +6,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 func TestRefreshPromptRerendersPerTurn(t *testing.T) {
@@ -17,7 +16,7 @@ func TestRefreshPromptRerendersPerTurn(t *testing.T) {
 	current := "prompt v1"
 	cfg := TurnConfig{
 		LLM:           fake,
-		Personality:   persona.Persona{SystemPrompt: "stale snapshot"},
+		Profile:       AgentProfile{SystemPrompt: "stale snapshot"},
 		RefreshPrompt: func() string { return current },
 		AgentKnobs:    AgentKnobs{ContextWindow: 4096},
 		ToolConfig:    ToolConfig{Log: LogOrNoop(nil)},
@@ -48,7 +47,7 @@ func TestRefreshPromptNilOrEmptyKeepsSnapshot(t *testing.T) {
 		fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}})
 		cfg := TurnConfig{
 			LLM:           fake,
-			Personality:   persona.Persona{SystemPrompt: "construction prompt"},
+			Profile:       AgentProfile{SystemPrompt: "construction prompt"},
 			RefreshPrompt: refresh,
 			AgentKnobs:    AgentKnobs{ContextWindow: 4096},
 			ToolConfig:    ToolConfig{Log: LogOrNoop(nil)},

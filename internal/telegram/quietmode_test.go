@@ -34,7 +34,6 @@ func TestQuietStore_SetRoundtrip(t *testing.T) {
 	if !s.Get() {
 		t.Error("after Set(true): Get() = false, want true")
 	}
-	// A fresh store over the same path sees the persisted value (restart).
 	if !(&QuietStore{Path: s.Path}).Get() {
 		t.Error("fresh store over same path: Get() = false, want true")
 	}

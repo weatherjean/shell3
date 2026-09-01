@@ -16,13 +16,12 @@ type ToolInfo struct {
 
 // Snapshot is a read-only view of the session's current agent state: everything
 // the Status view needs. It is a point-in-time copy; mutate the
-// Session (e.g. Clear, RegisterHostTool) and call Snapshot again to observe
+// Session (e.g. RegisterHostTool) and call Snapshot again to observe
 // changes. Safe to call concurrently with a running turn: cfg reads are taken
 // under s.mu against the between-turns writers (a front-end may poll it mid-turn).
 type Snapshot struct {
 	Agent         string
 	Model         string
-	StatusLine    string
 	ContextWindow int
 	SystemPrompt  string
 	Skills        []string
@@ -35,8 +34,9 @@ type Snapshot struct {
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool
 	// Warnings are non-fatal config load issues (e.g. a skipped invalid skill
-	// file). A front-end surfaces them in-band at startup — a browser
-	// user otherwise never sees the stderr line they were printed on.
+	// file). A front-end surfaces them in-band at startup — a Telegram or
+	// alternate-screen user otherwise never sees the stderr line they were
+	// printed on.
 	Warnings []string
 	// MCP lists every declared MCP server's live health (nil when no
 	// mcp: block is declared).
@@ -45,21 +45,21 @@ type Snapshot struct {
 
 // Snapshot returns the current agent state (see Snapshot).
 func (s *Session) Snapshot() Snapshot {
-	// Copy the cfg fields out under s.mu so a concurrent cfg writer (Clear,
-	// RegisterHostTool — both between turns) can't race the read. Release
-	// before SplitStatus so we never hold s.mu across it.
+	// Copy the cfg fields out under s.mu so a concurrent cfg writer (reload or
+	// RegisterHostTool, both between turns) can't race the read. Release
+	// before calling the live MCP status closure.
 	s.mu.Lock()
 	// The displayed prompt is the authored prompt PLUS the host standing
 	// reminders (Environment) — they're injected into every turn but
-	// kept out of cfg.Personality.SystemPrompt, so the status document
+	// kept out of cfg.Profile.SystemPrompt, so the status document
 	// surfaces the full effective context here.
-	systemPrompt := s.cfg.Personality.SystemPrompt
+	systemPrompt := s.cfg.Profile.SystemPrompt
 	if rems := s.sess.StandingReminders(); len(rems) > 0 {
 		systemPrompt += "\n\n## Host reminders (injected each turn — not part of the authored prompt above)\n\n" + strings.Join(rems, "\n\n")
 	}
 	snap := Snapshot{
-		Agent:         s.cfg.ModeLabel,
-		StatusLine:    s.cfg.StatusLine,
+		Agent:         s.cfg.Agent,
+		Model:         s.cfg.ModelID,
 		ContextWindow: s.cfg.ContextWindow,
 		SystemPrompt:  systemPrompt,
 		Skills:        slices.Clone(s.cfg.ActiveSkills),
@@ -67,7 +67,7 @@ func (s *Session) Snapshot() Snapshot {
 		ToolHooksOn:   s.cfg.RunToolCall != nil,
 		Warnings:      slices.Clone(s.cfg.ConfigWarnings),
 	}
-	for _, t := range s.cfg.Personality.Tools {
+	for _, t := range s.cfg.Profile.Tools {
 		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
 	}
 	mcpStatus := s.cfg.MCPStatus
@@ -78,7 +78,6 @@ func (s *Session) Snapshot() Snapshot {
 		snap.MCP = mcpStatus()
 	}
 
-	_, snap.Model = chat.SplitStatus(snap.StatusLine)
 	return snap
 }
 

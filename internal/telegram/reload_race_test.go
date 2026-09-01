@@ -8,11 +8,6 @@ import (
 	"testing"
 )
 
-// A reload rewires the bot's cron job runner. It can run on a TURN goroutine
-// (the agent's reload tool applies at end of turn, after the turn slot is
-// released) while the update loop is concurrently handling commands that
-// read the guarded fields (e.g. /run reads runJob). Nothing serializes the
-// two, so they must be guarded by b.mu.
 func TestReloadRacesCommandHandling(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "ok")

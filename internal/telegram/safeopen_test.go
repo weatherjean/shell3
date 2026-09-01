@@ -26,10 +26,6 @@ func safeSendTree(t *testing.T) (cfg, work string) {
 	return cfg, work
 }
 
-// A symlink with an innocent name pointing at the credentials file must be
-// refused: the pre-resolution name check alone would pass it, and both the
-// tool's own .env guard and the shipped hook's credential denylist judge the
-// requested path text, never the target.
 func TestSafeOpenRefusesSymlinkToDotenv(t *testing.T) {
 	cfg, work := safeSendTree(t)
 	link := filepath.Join(work, "report.txt")
@@ -60,8 +56,6 @@ func TestSafeOpenRefusesHardlinkToDotenv(t *testing.T) {
 	}
 }
 
-// Any other config-tree file is refused too — by path for a direct or
-// symlinked reference, by inode for a hardlink.
 func TestSafeOpenRefusesConfigTreeFiles(t *testing.T) {
 	cfg, work := safeSendTree(t)
 	kitPath := filepath.Join(cfg, "notes.md")
@@ -149,7 +143,6 @@ func TestReadLimitedBoundsBeyondStat(t *testing.T) {
 	}
 }
 
-// A cancelled turn must abandon the read rather than hold the goroutine.
 func TestReadLimitedHonoursContext(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.bin")

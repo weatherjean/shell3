@@ -37,9 +37,6 @@ func TestCommand_RunNoRunner(t *testing.T) {
 	}
 }
 
-// /run with no argument replies with usage instead of calling the runner —
-// the usage text wraps <job> in a code span (like /cancel's usage) so the
-// markdown->HTML renderer doesn't swallow it as a bogus tag.
 func TestCommand_RunMissingArg(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -215,7 +212,6 @@ func TestCommand_BotnameSuffixIsStripped(t *testing.T) {
 	}
 }
 
-// /quiet reports and flips the persisted toggle; junk gets usage.
 func TestQuietCommand(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))

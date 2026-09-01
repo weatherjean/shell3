@@ -141,9 +141,6 @@ func TestConsole_SilentTag(t *testing.T) {
 	}
 }
 
-// "#<chatid> text" drives another room, so the whole multi-room loop is
-// exercisable by hand with no credentials. The room counts as a group, which
-// means the line must address the bot — same rule as a live group.
 func TestConsoleParseLineRoomPrefix(t *testing.T) {
 	c := NewConsoleClient(strings.NewReader(""), io.Discard, ConsoleChatID)
 	m := c.parseLine("#-100 @shell3console deploy")

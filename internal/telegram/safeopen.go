@@ -18,31 +18,10 @@ import (
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
-// safeOpen resolves path and opens it for sending, refusing anything that is
-// not a plain file the user meant to receive. It is the whole security
-// argument for send_media_telegram, so each step states what it does and does
-// NOT close:
-//
-//  1. The requested name, then the symlink-resolved name, are matched against
-//     the dotenv pattern — catching the obvious case, and a symlink whose own
-//     name is clean but whose target is not.
-//  2. The resolved path is checked against the config directory, catching a
-//     symlink into the config tree, exempting the media dir: it lives under
-//     the config dir but holds exactly what this tool exists to send back.
-//  3. Opened O_NOFOLLOW|O_NONBLOCK. O_NOFOLLOW refuses only if the FINAL
-//     component is a symlink at open time — parents are still followed, and a
-//     hardlink is not a symlink at all — so this alone is not race-free.
-//     O_NONBLOCK stops a writerless FIFO parking the turn forever; host tools
-//     have no timeout of their own.
-//  4. From here everything reads the fd, not the path, so nothing can be
-//     swapped underneath: the type must be a regular file, and the fd's
-//     (dev, ino) is compared against every regular file in the config tree,
-//     media dir aside. A hardlink's resolved path lies outside the config dir
-//     by construction but is never a different inode, so this walk — not step
-//     2 — is what closes the hardlink route to .env or the kit.
-//
-// The caller bounds the read itself: a pre-read Stat's size can be stale, and
-// is 0 for a character device.
+// safeOpen opens a regular file while excluding credentials and the config
+// tree. It checks both unresolved and resolved names, uses O_NOFOLLOW and
+// O_NONBLOCK, then compares the opened inode with config files to catch
+// hardlinks and path races. The media directory is exempt.
 func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 	if !filepath.IsAbs(path) {
 		if workDir == "" {
@@ -50,9 +29,6 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 		}
 		path = filepath.Join(workDir, path)
 	}
-	// The .env beside the kit and its siblings, mirroring the loader's guard.
-	// On the unresolved name this catches the obvious case; a symlink is
-	// resolved and re-checked below, before anything is read.
 	if paths.IsCredentialFile(filepath.Base(path)) {
 		return nil, nil, errors.New("refusing to send a credentials file")
 	}
@@ -64,7 +40,6 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 		return nil, nil, errors.New("refusing to send a credentials file")
 	}
 
-	// mediadir.Dir() creates the directory too, so EvalSymlinks can succeed.
 	mediaResolved := ""
 	if mdir, merr := mediadir.Dir(); merr == nil {
 		if r, rerr := filepath.EvalSymlinks(mdir); rerr == nil {

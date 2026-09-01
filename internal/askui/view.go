@@ -149,20 +149,11 @@ func (m *model) welcomeCard() string {
 		Render(strings.Join(lines, "\n"))
 }
 
-// footerSeg is one visual chunk of the footer: its styled (rendered) form for
-// display, paired with the plain-text form uiSnapshot reports — computed
-// together in buildFooter so the two can never drift apart.
+// footerSeg is one visual chunk of the footer, retaining plain text beside its
+// rendered form so tests can inspect footer behavior without scraping ANSI.
 type footerSeg struct {
 	plain    string
 	rendered string
-}
-
-func plainSegs(segs []footerSeg) []string {
-	out := make([]string, len(segs))
-	for i, s := range segs {
-		out[i] = s.plain
-	}
-	return out
 }
 
 func renderedSegs(segs []footerSeg) []string {
@@ -173,9 +164,7 @@ func renderedSegs(segs []footerSeg) []string {
 	return out
 }
 
-// buildFooter computes the footer's left and right segments. renderFooter joins
-// the rendered form for display; uiSnapshot reports the plain form — both read
-// off this one computation.
+// buildFooter computes the footer's left and right segments.
 func (m *model) buildFooter() (left, right []footerSeg) {
 	// Left: the model with its context-window fill (ctx: x%), then the transient
 	// last-action notice (auto-hidden after noticeTTL), then the live turn state

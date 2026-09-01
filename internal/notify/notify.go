@@ -20,11 +20,10 @@ const (
 
 // Notification is one completion event surfaced into a live agent's context.
 type Notification struct {
-	Kind    Kind   `json:"kind"`              // KindBgDone | KindAgentDone | KindAgentUpdate
-	ID      string `json:"id,omitempty"`      // job or subagent id
-	Status  string `json:"status,omitempty"`  // free-form completion status
-	Exit    *int   `json:"exit,omitempty"`    // process exit code, if known
-	Preview string `json:"preview,omitempty"` // short human-readable summary
-	Cmd     string `json:"cmd,omitempty"`     // the command that ran (bg jobs)
-	TS      string `json:"ts"`                // RFC3339 completion timestamp
+	Kind    Kind   // KindBgDone | KindAgentDone | KindAgentUpdate
+	ID      string // job or subagent id
+	Status  string // free-form completion status
+	Exit    *int   // process exit code, if known
+	Preview string // short human-readable summary
+	Cmd     string // the command that ran (bg jobs)
 }

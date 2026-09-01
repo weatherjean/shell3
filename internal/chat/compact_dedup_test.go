@@ -8,16 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestCompactInto_NoDuplicateMessages verifies that compactInto does NOT
-// re-append messages that were already persisted by prior saveHistory calls.
-//
-// Before the fix, compactInto flushed the FULL sess.messages slice to the
-// outgoing session's stored transcript. Since saveHistory already appended those
-// same messages across prior turns, every message got duplicated in the
-// append-only JSONL file.
-//
-// After the fix, compactInto flushes only sess.messages[persistedLen:] — the
-// unsaved tail — so already-persisted messages are never written twice.
 func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -41,14 +31,10 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 		}
 	}
 
-	// Build the session as the turn loop would leave it after those turns:
-	// sess.messages = all three messages, persistedLen = 3 (all on disk).
 	sess := NewSession(SessionOpts{StoreID: prevID})
 	sess.messages = append(sess.messages, msgs...)
 	sess.persistedLen = len(msgs) // high-water mark: all persisted
 
-	// Call compactInto; it should flush ONLY the unsaved tail (nothing, since
-	// persistedLen == len(sess.messages)) to the outgoing session.
 	compactInto(CompactSummary{Summary: "compacted"}, st, sess, nil, applog.Noop{}, "", "", "", "", "", "")
 
 	got, err := st.LoadMessages(prevID)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
@@ -16,7 +15,7 @@ func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.Interject("actually use repo B")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()
@@ -29,8 +28,6 @@ func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	if !sawReminder {
 		t.Fatalf("queued interject should surface as a system-reminder event; events=%+v", events)
 	}
-	// The model-visible injection lands on the turn's user message copy, not
-	// on the session's persisted history.
 	for _, m := range sess.messages {
 		if strings.Contains(m.Content, "user sent additional input") {
 			t.Fatalf("interject reminder leaked into persisted history: %q", m.Content)
@@ -47,8 +44,8 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 	)
 	sess, c := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "t"},
+		LLM:     fake,
+		Profile: AgentProfile{SystemPrompt: "t"},
 		Handlers: map[string]ToolHandler{"echo": funcHandler{name: "echo",
 			fn: func(context.Context, string, json.RawMessage, ToolConfig) (string, error) {
 				sess.Interject("stop, wrong file")
@@ -79,7 +76,7 @@ func TestInterject_MultipleInterjectionsDrainIntoOneReminder(t *testing.T) {
 	sess.Interject("first note")
 	sess.Interject("second note")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()
@@ -98,10 +95,6 @@ func TestInterject_MultipleInterjectionsDrainIntoOneReminder(t *testing.T) {
 	}
 }
 
-// TestInterject_CrossGoroutine: Interject called from a separate goroutine
-// while a tool handler is executing is safely serialized by the mutex and
-// appears as a reminder in that same turn. The -race detector exercises the
-// inboxMu critical section.
 func TestInterject_CrossGoroutine(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -111,13 +104,10 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 	)
 	sess, c := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "t"},
+		LLM:     fake,
+		Profile: AgentProfile{SystemPrompt: "t"},
 		Handlers: map[string]ToolHandler{"work": funcHandler{name: "work",
 			fn: func(context.Context, string, json.RawMessage, ToolConfig) (string, error) {
-				// Push from a separate goroutine; wait for it to finish before
-				// the handler returns so the interject always lands before the
-				// next LLM round.
 				done := make(chan struct{})
 				go func() {
 					sess.Interject("from goroutine")
@@ -147,7 +137,7 @@ func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.InterjectNotice("subagent x finished (done). Result: built the thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	var rem string
@@ -176,8 +166,8 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 	)
 	sess, c := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "t"},
+		LLM:     fake,
+		Profile: AgentProfile{SystemPrompt: "t"},
 		Handlers: map[string]ToolHandler{"echo": funcHandler{name: "echo",
 			fn: func(context.Context, string, json.RawMessage, ToolConfig) (string, error) {
 				sess.InterjectNotice("subagent bg1 finished (done).")
@@ -197,15 +187,12 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 	}
 }
 
-// TestInterject_WhitespaceOnly_NoSystemReminder: an Interject containing only
-// whitespace must not produce a SystemReminder event — the reminder block
-// should be suppressed entirely (no header-only XML block).
 func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.Interject("   ")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()

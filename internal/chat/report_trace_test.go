@@ -7,7 +7,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 const probeReport = "TASK REPORT — cron nightly (clean)\nstatus: clean\noutput tail: 3 files synced"
@@ -18,7 +17,7 @@ func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakel
 		{Events: []llm.StreamEvent{{TextDelta: "Done — moved."}, {Done: true}}},
 	}, scripts...)...)
 	sess, _ := newCollectorSession(SessionOpts{})
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "move the files"}, nil)
 	return sess, fake, cfg
 }
@@ -45,8 +44,6 @@ func TestReportLandsAtEndOfWakeContext(t *testing.T) {
 	}
 }
 
-// The agent must be able to explain its own reply later: a compact trace of
-// the delivered report persists, even though the full report does not.
 func TestReportLeavesPersistedTrace(t *testing.T) {
 	sess, _, cfg := newReportSession(t,
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}})
@@ -71,9 +68,6 @@ func TestReportLeavesPersistedTrace(t *testing.T) {
 	}
 }
 
-// The trace also repairs the transcript shape: without it the wake reply
-// follows the previous assistant message with no turn between them, which
-// reads as if the agent spoke twice unprompted.
 func TestReportTraceKeepsTranscriptAlternating(t *testing.T) {
 	sess, _, cfg := newReportSession(t,
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}})
@@ -109,7 +103,7 @@ func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 func TestReminderStillRidesCurrentUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}, {Done: true}}})
 	sess, _ := newCollectorSession(SessionOpts{})
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.Interject("also check the logs")
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "deploy it"}, nil)
 

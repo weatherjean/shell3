@@ -169,8 +169,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session) (before, a
 	prevTokens := sess.lastPromptTokens
 	// Same Meta the front-ends write on a fresh session, so the rolled one
 	// keeps its model recorded.
-	_, metaModel := SplitStatus(cfg.StatusLine)
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, metaModel, cfg.Agent, cfg.ParentID, cfg.CronJob) {
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, cfg.ModelID, cfg.Agent, cfg.ParentID, cfg.CronJob) {
 		// Roll failed, history untouched: do not reset the gauge or emit a
 		// misleading compacted event.
 		return before, before, errors.New("runs-session roll failed; history untouched")
@@ -337,7 +336,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	sess.id = newSessionID
 	sess.messages = newMsgs
 	// Reminder anchors index the pre-compaction slice, so the rewrite
-	// invalidates them. Drop the log as SetMessages does: stale high-Seq
+	// invalidates them. Drop the log: stale high-Seq
 	// anchors break History()'s non-decreasing-Seq interleave and hide every
 	// later reminder. The new session has its own empty sidecar.
 	sess.reminderLog = nil

@@ -118,7 +118,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 	if eff := c.params.ReasoningEffort; eff != "" && eff != "none" {
 		// OpenAI API accepts only minimal|low|medium|high; clamp xhigh→high
-		// so a vendor-neutral persona that requests xhigh still works here.
+		// so a vendor-neutral agent profile that requests xhigh still works here.
 		if eff == "xhigh" {
 			eff = "high"
 		}

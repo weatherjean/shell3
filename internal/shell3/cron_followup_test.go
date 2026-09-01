@@ -28,7 +28,7 @@ func assertNoWakeFor(t *testing.T, rt *Runtime, s *Session, d time.Duration) {
 func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	g := newGatedLLM("main answer", "follow-up answer")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	host := &fakeHost{}
 	rt.SetCompletionHost(host)
@@ -78,15 +78,10 @@ func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	assertNoWakeFor(t, rt, parent, 200*time.Millisecond)
 }
 
-// TestCronSubagentOrphanFloors covers the orphan path: when follow-ups are
-// unavailable (poisoned), the lingering bash_bg is cascade-cancelled at the
-// main turn's end, so its completion arrives FAILED — and a failure is never
-// silent: the ⚠️ floor posts with the cron label. The pinned parent is never
-// woken, and no fresh agent turn is spent on an ownerless failure.
 func TestCronSubagentOrphanFloors(t *testing.T) {
 	g := newGatedLLM("main answer")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	host := &fakeHost{}
 	rt.SetCompletionHost(host)
@@ -112,9 +107,6 @@ func TestCronSubagentOrphanFloors(t *testing.T) {
 
 	waitFor(t, "main-turn mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
 
-	// The poisoned job is cascade-cancelled → its completion is a failure →
-	// the ⚠️ floor posts with the cron label (no follow-up turn ever runs,
-	// and no fresh turn is spent on it).
 	waitFor(t, "orphan floor post", func() bool {
 		posts, _, _ := host.snapshot()
 		if len(posts) < 1 {

@@ -73,8 +73,6 @@ func TestTaskStatusHandler_MissingID(t *testing.T) {
 	}
 }
 
-// TestTaskCancelHandler_CallsCancelJob verifies the handler passes the id to
-// cfg.CancelJob and returns its output.
 func TestTaskCancelHandler_CallsCancelJob(t *testing.T) {
 	var gotID string
 	cfg := ToolConfig{
@@ -96,7 +94,6 @@ func TestTaskCancelHandler_CallsCancelJob(t *testing.T) {
 	}
 }
 
-// TestTaskCancelHandler_MissingID returns an error string.
 func TestTaskCancelHandler_MissingID(t *testing.T) {
 	cfg := ToolConfig{
 		CancelJob: func(id string) string { return "should not be called" },

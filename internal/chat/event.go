@@ -112,19 +112,9 @@ type Event struct {
 	ToolError  bool
 	// ToolCallID links a tool_call to its tool_result.
 	ToolCallID string
-	Usage      *EventUsageData
+	Usage      *llm.Usage
 	// Meta carries small extras, such as session_end's status.
 	Meta map[string]string
-}
-
-// EventUsageData is the provider's token accounting: per-stream on EventUsage,
-// cumulative on EventTurnDone.
-type EventUsageData struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	// CachedTokens is the cache-hit share of PromptTokens, 0 if unreported.
-	CachedTokens int
 }
 
 func emitSessionEnd(s *Session, status string) {
@@ -178,17 +168,7 @@ func emitError(s *Session, err error) {
 }
 
 func emitUsage(s *Session, u llm.Usage) {
-	emit(s, Event{Kind: EventUsage, Time: time.Now(), SessionID: s.id, Usage: usageData(u)})
-}
-
-// usageData is the one mapping onto the event payload, shared by both.
-func usageData(u llm.Usage) *EventUsageData {
-	return &EventUsageData{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		CachedTokens:     u.CachedTokens,
-	}
+	emit(s, Event{Kind: EventUsage, Time: time.Now(), SessionID: s.id, Usage: &u})
 }
 
 func emitAssistantReasoning(s *Session, text string) {
@@ -211,7 +191,7 @@ func emitCompacted(s *Session, prevTokens, newTokens int) {
 		Time:      time.Now(),
 		SessionID: s.id,
 		Text:      fmt.Sprintf("context auto-compacted at %d tokens", prevTokens),
-		Usage:     &EventUsageData{PromptTokens: newTokens, TotalTokens: newTokens},
+		Usage:     &llm.Usage{PromptTokens: newTokens, TotalTokens: newTokens},
 	})
 }
 
@@ -221,7 +201,7 @@ func emitRetry(s *Session, n *llm.RetryNotice) {
 }
 
 func emitTurnDone(s *Session, u llm.Usage) {
-	emit(s, Event{Kind: EventTurnDone, Time: time.Now(), SessionID: s.id, Usage: usageData(u)})
+	emit(s, Event{Kind: EventTurnDone, Time: time.Now(), SessionID: s.id, Usage: &u})
 }
 
 // emit delivers an event to the session sink. Delivery is synchronous and

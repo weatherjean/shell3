@@ -26,8 +26,6 @@ func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 
 	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, nil, applog.Noop{}, "", "", "", "", "", "")
 
-	// New session id is now sess.id; its persisted messages must equal the
-	// compacted in-memory list.
 	got, err := st.LoadMessages(sess.id)
 	if err != nil {
 		t.Fatalf("load: %v", err)

@@ -10,21 +10,8 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// A run replay can be genuinely large — a real session
-// runs 44 to 455 messages and renders to 100–500 KB of markdown, where every
-// tool result sits open at full length. Reading it means scrolling past
-// hundreds of results to find one call.
-//
-// This renders the same data as a self-contained page: one <details> per
-// message, reasoning and tool output folded shut, expand what you want. The
-// folding is plain HTML — no framework, no script for the common case — so a
-// 500 KB transcript opens instantly.
-//
-// Everything that came from a model or a tool is escaped. Tool output is
-// arbitrary bytes: a result containing "</details>" or "<script>" must land as
-// text, not as markup that eats the rest of the page.
-
-// RunReplayHTML renders one run as a self-contained HTML page.
+// RunReplayHTML renders a run as self-contained HTML with reasoning and tool
+// output folded. All model and tool content is escaped.
 func RunReplayHTML(root, id string) (string, error) {
 	// filepath.Base leaves "." and ".." unchanged, so the equality check alone
 	// would admit both.

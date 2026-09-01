@@ -82,14 +82,40 @@ func TestRunHTMLEmptyRun(t *testing.T) {
 	}
 }
 
-// The replay id is used to query the store; a traversal-shaped id must be
-// rejected before anything touches it. (filepath.Base leaves "." and ".."
-// unchanged, so the equality check alone would admit both — pinned here.)
 func TestRunHTMLRejectsTraversalIDs(t *testing.T) {
 	for _, id := range []string{"", ".", "..", "../other", "a/b", "runs/../../etc"} {
 		if _, err := RunReplayHTML(t.TempDir(), id); err == nil {
 			t.Errorf("RunReplayHTML accepted invalid id %q", id)
 		}
+	}
+}
+
+func TestRunReplayHTMLLoadsStoredConversation(t *testing.T) {
+	root := t.TempDir()
+	st, err := runs.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(runs.Meta{Agent: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "stored <question>"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleAssistant, Content: "stored answer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := RunReplayHTML(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(page, "stored &lt;question&gt;") || !strings.Contains(page, "stored answer") {
+		t.Fatalf("stored conversation missing:\n%s", page)
 	}
 }
 

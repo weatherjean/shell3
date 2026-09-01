@@ -32,7 +32,6 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Errorf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
 	}
 
-	// It must write the global .gitignore protecting credentials and logs.
 	ggi, err := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
 	if err != nil {
 		t.Errorf("global .gitignore missing: %v", err)

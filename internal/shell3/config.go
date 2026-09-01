@@ -1,6 +1,8 @@
 package shell3
 
 import (
+	"slices"
+
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
@@ -29,19 +31,23 @@ func sessionConfigFrom(parts *agentsetup.Parts) func(SessionOpts) (chat.Config, 
 	}
 }
 
-// Telegram returns the telegram: config the Runtime currently holds (zero
-// value when the config declares none). Locked because Reload swaps it under
-// rt.mu while the front-end reads it: the bot token and chat id are read as
-// the bot starts, so an unsynchronised read is a race the reload path would
-// eventually lose.
+// Telegram returns the current generation's telegram: config (zero value when
+// the config declares none). Locked because Reload swaps Parts under rt.mu.
 func (rt *Runtime) Telegram() TelegramConfig {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return rt.telegram
+	if rt.parts == nil {
+		return TelegramConfig{}
+	}
+	return rt.parts.Telegram()
 }
 
-// Cron returns the kit's `cron:` jobs, in declaration order.
-func (rt *Runtime) Cron() []CronJob { return rt.cron }
+// Cron returns a snapshot of the kit's `cron:` jobs, in declaration order.
+func (rt *Runtime) Cron() []CronJob {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return slices.Clone(rt.cron)
+}
 
 // Parts returns the runtime's current shared config assembly, for host code
 // that needs config-derived resources Runtime doesn't otherwise expose.

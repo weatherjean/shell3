@@ -1,11 +1,48 @@
 package chat
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/edittool"
 )
+
+func TestEditHandlerCreatesFileEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	h := NewHandlers()["edit_file"]
+	out, err := h.Execute(context.Background(), "call-1", json.RawMessage(
+		`{"file_path":"notes/result.txt","old_string":"","new_string":"alpha\nbeta\n"}`),
+		ToolConfig{WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "notes", "result.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha\nbeta\n" {
+		t.Fatalf("file = %q", data)
+	}
+	for _, want := range []string{"Created", "+alpha", "+beta"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("result missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestEditHandlerReturnsArgumentErrorsInBand(t *testing.T) {
+	out, err := (EditHandler{}).Execute(context.Background(), "call-1", json.RawMessage(`{bad`), ToolConfig{WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("dispatch error = %v; model-facing edit failures belong in the tool result", err)
+	}
+	if !strings.Contains(out, "error: bad arguments") {
+		t.Fatalf("result = %q", out)
+	}
+}
 
 func TestFormatEditResultShowsFiveLineCreatedPreview(t *testing.T) {
 	content := strings.Join([]string{

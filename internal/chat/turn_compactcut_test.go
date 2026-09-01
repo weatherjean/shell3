@@ -37,9 +37,6 @@ func TestCompactionCut_SnapsForwardOffOrphanToolResult(t *testing.T) {
 		{Role: llm.RoleTool, ToolCallID: "1", Name: "bash", Content: "big-output-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		msg(llm.RoleAssistant, "done"),
 	}
-	// keepRecent=2: msgs[3] ("done") contributes 1 token < 2, so the walk-back
-	// continues to index 2 (the tool result, ~10 tokens), which lands on a tool
-	// message and MUST be snapped forward — exercising the orphan-snap invariant.
 	cut := compactionCut(msgs, 2)
 	if msgs[cut].Role == llm.RoleTool {
 		t.Fatalf("cut landed on a tool message (index %d); tail would start with an orphan result", cut)

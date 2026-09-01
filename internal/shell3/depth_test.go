@@ -11,7 +11,7 @@ import (
 func TestDispatchDepth(t *testing.T) {
 	g := newGatedLLM("l1 answer", "l2 answer", "l3 answer")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -57,7 +57,7 @@ func TestDispatchDepth(t *testing.T) {
 func TestDepth2ResultWakesItsParent(t *testing.T) {
 	g := newGatedLLM("l1 answer", "l2 answer", "l1 follow-up")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	host := &fakeHost{wakeOK: false}
 	rt.SetCompletionHost(host)

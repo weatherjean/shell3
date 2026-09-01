@@ -1,9 +1,6 @@
 package shell3
 
-import (
-	"errors"
-	"time"
-)
+import "time"
 
 // JobProgress is an incremental progress event emitted on the JobEvents() bus
 // for each background job. Chunk events carry a non-empty Chunk field; the
@@ -72,20 +69,6 @@ func (s *Session) Jobs() []JobInfo {
 		return nil
 	}
 	return rt.jobs.list()
-}
-
-// KillJob cancels one background job (the Jobs view's cancel action). For
-// command jobs this sends a cancellation signal; for subagent jobs it cancels
-// the child session's context. It does not block; the job leaves the live list
-// once it exits.
-func (s *Session) KillJob(id string) error {
-	rt := s.runtimeHandle()
-	if rt == nil || rt.jobs == nil {
-		return errors.New("shell3: no job runtime")
-	}
-	// Cancelled from outside the conversation, so the completion still
-	// routes: it is how the agent learns the job ended.
-	return rt.jobs.cancel(id, false)
 }
 
 // KilledJob describes one job /superstop killed — enough for the summary the

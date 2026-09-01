@@ -7,25 +7,8 @@ import (
 	"time"
 )
 
-// prompts.go stores the SYSTEM PROMPT each turn actually ran with.
-//
-// Without it a stored conversation records what the model said and never what
-// it was told, which makes the most common class of surprise — "why did it
-// think that?" — unanswerable after the fact. shell3's prompt is assembled
-// from files that change under a live conversation (memory, `context:` files,
-// the skills index, a Telegram room's description), so "what was in the prompt
-// at 10:33" is a real question with a real answer, and it used to be lost the
-// moment the turn ended.
-//
-// Storage is content-addressed because the prompt is re-rendered every turn
-// but changes rarely: identical text across two hundred turns is ONE prompts
-// row plus two hundred tiny references. This is a write-side record only —
-// nothing here changes a single byte sent to the provider, so it cannot
-// affect prompt caching.
-//
-// Deliberately NOT indexed for search: the history tool searches what was
-// said (user and assistant text), and folding a 20 KB prompt into that index
-// would swamp every query with matches from the machinery.
+// System prompts are stored by content hash and referenced per turn. They are
+// intentionally excluded from conversation search.
 
 // PromptRecord is one turn's system prompt, as stored.
 type PromptRecord struct {

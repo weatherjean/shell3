@@ -205,7 +205,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		}
 		now := time.Now()
 		page := render.StatusPageHTML(sess, rt, version, cronSess.Jobs(),
-			cronStatusFn(), cronCostFn(), statusRooms(b), b.Inbox(), now)
+			cronStatusFn(), cronCostFn(), b.Rooms(), b.Inbox(), now)
 		return "shell3-status-" + now.UTC().Format("20060102-150405") + ".html", []byte(page), nil
 	})
 
@@ -229,18 +229,6 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 			s.Stop()
 		}
 	}, nil
-}
-
-func statusRooms(b *telegram.Bot) []render.RoomInfo {
-	rooms := b.Rooms()
-	out := make([]render.RoomInfo, 0, len(rooms))
-	for _, r := range rooms {
-		out = append(out, render.RoomInfo{
-			ChatID: r.ChatID, Title: r.Title, Busy: r.Busy,
-			Jobs: r.Jobs, Queued: r.Queued, SessionID: r.SessionID,
-		})
-	}
-	return out
 }
 
 // redeliverEvery: long enough that a hard outage costs a handful of retries

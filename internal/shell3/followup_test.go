@@ -84,7 +84,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	g := newGatedLLM("main answer", "follow-up answer")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -137,12 +137,10 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	}
 }
 
-// TestCancelSubagentCascades verifies task_cancel on a subagent kills the
-// bash_bg jobs its child started and closes the child session.
 func TestCancelSubagentCascades(t *testing.T) {
 	g := newGatedLLM("unused")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -182,7 +180,7 @@ func TestCancelSubagentCascades(t *testing.T) {
 func TestOrphanJobDegradesToRoot(t *testing.T) {
 	g := newGatedLLM("main answer")
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: g, ModeLabel: "code"}
+		return chat.Config{LLM: g, Agent: "code"}
 	})
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {

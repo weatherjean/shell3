@@ -26,29 +26,13 @@ type reloadState struct {
 	parts         *agentsetup.Parts // nil in unit tests
 	store         *runs.Store       // new generation's runs store
 	cron          []CronJob         // new cron jobs (armed by the host)
-	telegram      TelegramConfig    // new telegram mirror
 	maxConcurrent int               // background.max_concurrent (0 = default)
 	agents        int               // agent count for the result
 	models        int               // model count for the result
 }
 
-// Reload re-reads the config and applies it to the running Runtime without
-// restarting the process — the host-side entry for /reload and the reload tool.
-//
-//   - Validate first: a new Parts is built from the config dir, and on ANY
-//     error it is discarded with the running config untouched.
-//   - Front-end idle: the CALLER ensures its session has no turn in flight.
-//     Reload holds rt.mu, so it serializes against Session() and Close().
-//   - Background work does NOT block: running jobs and subagent children keep
-//     the Parts they were built with, and the OLD generation's teardown is
-//     parked until they drain. Nothing running closes it immediately.
-//   - In place: idle root sessions keep their identity and history; only cfg
-//     and handlers are rebuilt. Subagent children are left untouched.
-//     Decorator-registered host tools ARE re-applied.
-//
-// NOTE: the kept s.sess closed over the OLD cfg.ContextWindow, so a changed
-// context_window reaches an already-live session only at restart. Rebuilding
-// s.sess would drop its in-memory history, so it is deliberately not done.
+// Reload validates new configuration before swapping it into idle root
+// sessions. Running jobs retain their Parts generation until they drain.
 func (rt *Runtime) Reload() (ReloadResult, error) {
 	homeDir := rt.homeDir
 	if homeDir == "" {
@@ -69,7 +53,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		parts:         newParts,
 		store:         newParts.Store(),
 		cron:          newParts.Cron(),
-		telegram:      newParts.Telegram(),
 		maxConcurrent: newParts.BackgroundMaxConcurrent(),
 		agents:        newParts.AgentCount(),
 		models:        newParts.ModelCount(),
@@ -126,7 +109,6 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 	rt.cleanup = st.cleanup
 	rt.store = st.store
 	rt.cron = st.cron
-	rt.telegram = st.telegram
 	rt.parts = st.parts
 	// A running job still holds the old generation's handles, so its teardown
 	// waits until they drain. Nothing running closes now.
@@ -168,8 +150,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		// subscriber goes silent on the first reload and stays silent.
 		s.sess.SetOnEvent(cfg.OnEvent)
 		s.handlers = chat.NewHandlers()
-		// rt.sessionConfig rebuilt the cfg, Environment toggle included, so
-		// the standing reminders are replaced wholesale.
+		// Replace the standing reminders wholesale from the rebuilt config.
 		s.applyHostReminders()
 		s.mu.Unlock()
 		redecorate = append(redecorate, s)

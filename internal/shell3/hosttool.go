@@ -26,14 +26,14 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 		return errors.New("shell3: host tool requires a Name and Handler")
 	}
 	// Guard the cfg mutations against a concurrent Snapshot read (the Status view polls it)
-	// (reads Personality.Tools under s.mu). Between turns by contract, enforced
+	// (reads Profile.Tools under s.mu). Between turns by contract, enforced
 	// by the busy check below.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.busy {
 		return ErrBusy
 	}
-	s.cfg.Personality.Tools = append(s.cfg.Personality.Tools, llm.ToolDefinition{
+	s.cfg.Profile.Tools = append(s.cfg.Profile.Tools, llm.ToolDefinition{
 		Name: t.Name, Description: t.Description, Parameters: t.Parameters,
 	})
 	if s.cfg.HostToolNames == nil {

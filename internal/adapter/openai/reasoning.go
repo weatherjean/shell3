@@ -45,35 +45,16 @@ func deltaReasoning(d openai.ChatCompletionChunkChoiceDelta) string {
 	return ""
 }
 
-// visibleContent decides how much of a chunk's `content` is answer text, given
-// the reasoning fragment that arrived on the SAME delta.
-//
-// MiniMax on api.minimax.io streams reasoning and answer BOTH through
-// `content`, and the only thing distinguishing them is whether the sibling
-// reasoning field is set on that delta. Verified across the captured corpus in
-// testdata/minimax: in default mode 39 of 40 "content+reasoning" chunks carry
-// content byte-identical to the reasoning, and the fortieth is the boundary
-// chunk whose content is the reasoning plus its opening "<think>" wrapper.
-// Appending every content delta blindly — which is what this adapter used to do
-// — therefore interleaves the model's thinking into its own reply, which is why
-// answers arrived duplicated and spliced mid-sentence.
-//
-// The rule: when a delta carries reasoning, its content is that same reasoning
-// unless it demonstrably continues past it. Returning "" for the duplicate case
-// is what keeps thinking out of the answer.
+// visibleContent removes content duplicated by a sibling reasoning delta.
 func visibleContent(content, reasoning string) string {
 	if reasoning == "" || content == "" {
 		return content
 	}
 	if content == reasoning {
-		return "" // pure duplicate: the common case
+		return ""
 	}
-	// Boundary chunk: content is the reasoning with a "<think>" wrapper glued
-	// on. Suffix-match rather than equality so the wrapper is dropped with it.
 	if strings.HasSuffix(content, reasoning) {
 		return ""
 	}
-	// Content genuinely diverges from the reasoning on this delta — keep it and
-	// let the leading-tag filter downstream decide about any wrapper.
 	return content
 }

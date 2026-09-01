@@ -21,7 +21,6 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	if got := m.list(); len(got) != 1 || got[0].ID != id || got[0].Kind != JobCommand {
 		t.Fatalf("list = %+v, want one JobCommand id=%s", got, id)
 	}
-	// Join the job goroutine (a real sync point), then read the output once.
 	m.wg.Wait()
 	if !strings.Contains(m.output(id), "hi") {
 		t.Fatalf("output never contained 'hi': %q", m.output(id))
@@ -53,7 +52,6 @@ func TestJobManagerConcurrencyCap(t *testing.T) {
 	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, notify.ReportAuto, ""); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
-	// Don't leak the sleeping job's goroutine past the test.
 	if err := m.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -126,7 +124,6 @@ func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	// Join the job goroutine, then read once.
 	m.wg.Wait()
 	if !strings.Contains(m.output(id), "retained") {
 		t.Fatalf("output never contained 'retained': %q", m.output(id))
@@ -156,9 +153,6 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 
-	// Wait for the Wake (child is done). The job record flips Done on the job
-	// goroutine, which the Wake does not strictly order against — poll briefly
-	// rather than asserting the first snapshot.
 	waitForWake(t, rt, parent)
 	var found JobInfo
 	deadline := time.Now().Add(3 * time.Second)
@@ -196,7 +190,6 @@ func TestJobManagerDoneCap(t *testing.T) {
 		}
 	}
 
-	// Wait until all goroutines have finished.
 	m.wg.Wait()
 
 	jobs := m.list()
@@ -210,8 +203,6 @@ func TestJobManagerDoneCap(t *testing.T) {
 	}
 }
 
-// TestJobManagerCancelDoneJobIsNoOp verifies that cancel() on a finished job
-// returns nil and does not panic.
 func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil, notify.ReportAuto, "")
@@ -259,11 +250,6 @@ func TestFormatJobStatus_UnknownID(t *testing.T) {
 	}
 }
 
-// Polling a still-running job is the one thing models keep doing despite the
-// start message saying not to: status → "running" → status → … burns the turn
-// and blocks the queue while the wake would have delivered the result. The
-// first check is legitimate (progress, on the user's ask); repeats on the SAME
-// running job get a hard instruction to end the turn instead.
 func TestFormatJobStatus_RepeatPollsGetToldToStop(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
@@ -347,17 +333,12 @@ func TestCommandRealExitCode(t *testing.T) {
 	}
 }
 
-// TestCommandCancelWithLingeringGrandchild verifies that cancelling a bash_bg
-// job whose grandchild still holds the stdout pipe does not wedge the wait
-// goroutine: the process-group kill takes the tree down and WaitDelay bounds
-// the pipe wait, so wg.Wait returns promptly (this used to hang forever).
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	// Let the shell start, then cancel the job.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && !strings.Contains(m.output(id), "started") {
 		time.Sleep(10 * time.Millisecond)
@@ -383,7 +364,7 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 					Err:    errors.New("provider exploded"),
 				},
 			),
-			ModeLabel: "code",
+			Agent: "code",
 		}
 	})
 	parent, err := rt.Session(SessionOpts{})
@@ -395,10 +376,6 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 	waitForWake(t, rt, parent)
-	// JobInfo carries the error. The wake is delivered BEFORE the job's done
-	// bookkeeping (finishSubagent's documented ordering — and the durable
-	// outbox delete now sits between the two), so poll briefly rather than
-	// assuming the wake implies markDone already ran.
 	var found JobInfo
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -428,7 +405,6 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	}
 }
 
-// TestFormatJobCancel_UnknownID returns an error string.
 func TestFormatJobCancel_UnknownID(t *testing.T) {
 	m := newJobManager(nil, 8)
 	got := m.formatJobCancel("ghost")
@@ -437,7 +413,6 @@ func TestFormatJobCancel_UnknownID(t *testing.T) {
 	}
 }
 
-// TestFormatJobCancel_KnownJob returns "cancelled task <id>".
 func TestFormatJobCancel_KnownJob(t *testing.T) {
 	m := newJobManager(nil, 8)
 	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, notify.ReportAuto, "")
@@ -450,9 +425,6 @@ func TestFormatJobCancel_KnownJob(t *testing.T) {
 	}
 }
 
-// TestStartSubagentEnforcesAllowlist verifies the task tool's StartSubagent
-// path rejects any subagent_type not in the active agent's registered-subagent
-// allowlist — the list the task tool's schema advertises.
 func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config {
 		cfg := fakeCfg("ok")()
@@ -475,8 +447,6 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 	}
 }
 
-// TestStartSubagentEmptyAllowlist verifies an agent with no registered subagents
-// cannot spawn anything (the task tool is not even in its schema).
 func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})

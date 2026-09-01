@@ -9,12 +9,8 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// stubHandler is a minimal ToolHandler that returns a fixed output string. An
-// optional onExec hook runs first — tests use it to cancel the turn context
-// mid-loop (the guard engine that used to drive cancellation was removed).
 type stubHandler struct {
 	name   string
 	out    string
@@ -58,10 +54,10 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		Handlers:   map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, sess := collectTurn(t, context.Background(), cfg, "hi")
@@ -100,10 +96,10 @@ func TestRunTurn_UnknownTool(t *testing.T) {
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		Handlers:   map[string]ToolHandler{},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, sess := collectTurn(t, context.Background(), cfg, "hi")
@@ -132,9 +128,6 @@ func hasKind(evs []Event, k EventKind) bool {
 	return false
 }
 
-// TestRunTurn_MidLoopCtxCancel_EmitsError characterizes mid-loop cancellation:
-// the first tool handler cancels the context, so the second iteration's
-// top-of-loop ctx check trips and the turn ends with error (not turn_done).
 func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -146,10 +139,8 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		// The handler cancels during the first call; the next iteration's ctx
-		// check trips and ends the turn with error.
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
 		Handlers:   map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
 		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
@@ -164,12 +155,6 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	}
 }
 
-// TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls pins the cancellation
-// invariant: even when the context is cancelled mid-loop, every tool_call in
-// the persisted assistant message gets exactly one matching RoleTool result.
-// A gap leaves a dangling tool_call that makes the NEXT request 400
-// ("tool call result does not follow tool call"). Calls "a" (executed before
-// the cancel) and "b" (skipped by the cancel) must both be paired.
 func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -181,10 +166,10 @@ func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		Handlers:   map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, ctx, cfg, "hi")
@@ -212,7 +197,6 @@ func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 	if len(gotIDs) != len(wantIDs) {
 		t.Fatalf("result/tool_call count mismatch: results=%d tool_calls=%d", len(gotIDs), len(wantIDs))
 	}
-	// The skipped call is paired with a synthetic cancelled result.
 	if !hasToolMessage(sess, "echo", "cancelled") {
 		t.Fatalf("expected a synthetic cancelled result for the skipped call; session=%+v", sess.messages)
 	}
@@ -249,10 +233,10 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
@@ -289,10 +273,10 @@ func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
 		{Usage: &llm.Usage{PromptTokens: 9, TotalTokens: 9}},
 	}})
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 0},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 0},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -313,10 +297,10 @@ func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 		{Usage: &llm.Usage{PromptTokens: 9, TotalTokens: 9}},
 	}})
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 1},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 1},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -337,10 +321,10 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
@@ -362,9 +346,6 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 	}
 }
 
-// TestRunTurn_CtxCancel_PreservesTypedError pins that cancellation surfaces as
-// the typed context.Canceled (not a look-alike string error), so front-ends can
-// errors.Is across the internal/shell3 boundary.
 func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -375,10 +356,10 @@ func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		Handlers:   map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, _ := collectTurn(t, ctx, cfg, "hi")

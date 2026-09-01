@@ -2,16 +2,9 @@ package llm
 
 import (
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-func TestMessageHasNoContentParts(t *testing.T) {
-	if _, ok := reflect.TypeOf(Message{}).FieldByName("ContentParts"); ok {
-		t.Fatal("Message.ContentParts survived; nothing produces parts any more")
-	}
-}
 
 func TestMessageOperatorContentIsNotSerialized(t *testing.T) {
 	raw, err := json.Marshal(Message{

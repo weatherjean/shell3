@@ -6,7 +6,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -19,19 +18,6 @@ func openTestStore(t *testing.T) *runs.Store {
 	return st
 }
 
-// TestRun_PersistsHistoryBeforeTurnDone pins the ordering invariant that the
-// turn's messages are persisted to the store *before* the turn_done event is
-// emitted.
-//
-// Why it matters: turn_done is the signal front-ends (internal/shell3) use
-// to decide a turn is finished and that mutating session state — Clear,
-// Rollback → SetMessages — is now safe. saveHistory reads sess.messages. If
-// turn_done fired first, a front-end reacting to it could write sess.messages
-// concurrently with saveHistory's read: a data race.
-//
-// The sink is invoked synchronously inside Run, so observing turn_done from it
-// means everything Run did before emitting it — including the saveHistory in
-// beforeDone — has already happened. The assertion runs right there.
 func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	st := openTestStore(t)
 	sessionID, err := st.NewSession(runs.Meta{})
@@ -52,7 +38,6 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 			return
 		}
 		sawTurnDone = true
-		// Verify that messages have been persisted before turn_done fires.
 		msgs, err := st.LoadMessages(sessionID)
 		if err != nil {
 			t.Errorf("LoadMessages: %v", err)
@@ -66,9 +51,9 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 
 	sess := NewSession(SessionOpts{StoreID: sessionID, Sink: sink})
 	cfg := TurnConfig{
-		LLM:         llmClient,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		ToolConfig:  ToolConfig{Store: st, Log: LogOrNoop(nil)},
+		LLM:        llmClient,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		ToolConfig: ToolConfig{Store: st, Log: LogOrNoop(nil)},
 	}
 
 	sess.Run(context.Background(), cfg, "hi there")

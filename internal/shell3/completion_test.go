@@ -12,14 +12,12 @@ import (
 )
 
 type fakeHost struct {
-	mu     sync.Mutex
-	posts  []string
-	wakes  []string
-	fresh  []string
-	wakeOK bool
-	mails  []Mail
-	// postErr, when set, makes every PostCompletion report delivery failure
-	// (a transport outage) — the router must then keep the outbox row.
+	mu      sync.Mutex
+	posts   []string
+	wakes   []string
+	fresh   []string
+	wakeOK  bool
+	mails   []Mail
 	postErr error
 }
 

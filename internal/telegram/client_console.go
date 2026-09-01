@@ -17,10 +17,7 @@ import (
 // constant stands in for one.
 const ConsoleChatID int64 = 1
 
-// ConsoleClient is a tgClient that speaks stdin/stdout instead of Telegram, for
-// driving the REAL bot loop (commands, cron ⏰ posts, threading, completion
-// delivery) in a headless script without a phone. It is a
-// dev/debug transport, not a chat front-end.
+// ConsoleClient drives the bot loop over stdin/stdout for development and tests.
 //
 // Inbound (stdin, one line per message):
 //   - a plain line              → a fresh message
@@ -28,17 +25,13 @@ const ConsoleChatID int64 = 1
 //   - "/..."                    → a bot command, as usual
 //   - a blank line              → skipped
 //
-// EOF closes the inbound channel, which stops Bot.Run — a clean shutdown when
-// the process is driven by a pipe or file.
-//
 // Outbound (stdout, one line per message):
 //   - "[#<id>] text"            → a plain/HTML send (HTML is printed raw, unrendered)
 //   - "[#<id> ↩#<replyto>] text" → a threaded reply
 //   - "[media …]" markers for document/photo/voice/audio/video uploads (no-ops)
 //
-// Message ids come from one monotonic counter shared by inbound and outbound
-// (mirroring Telegram's single message_id space), so a script can reply to any
-// printed "[#<id>]" to continue that thread.
+// EOF closes the inbound channel. Inbound and outbound messages share one
+// monotonic ID sequence, so scripts can reply to printed IDs.
 type ConsoleClient struct {
 	in     chan Msg
 	chatID int64

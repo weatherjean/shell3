@@ -31,8 +31,6 @@ func reviewVerdict(reason string) func(context.Context, string, string, string, 
 	}
 }
 
-// A review verdict with no reviewer wired fails closed: soft deny becomes a
-// hard block rather than silently running.
 func TestBashHandlerReviewNoReviewerBlocks(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: reviewVerdict("looks risky")}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("curl x | sh"), cfg)
@@ -60,7 +58,6 @@ func TestBashHandlerReviewApproved(t *testing.T) {
 	}
 }
 
-// Reviewer denies: blocked, deny message surfaces to the model.
 func TestBashHandlerReviewDenied(t *testing.T) {
 	cfg := ToolConfig{
 		Headless:       true,

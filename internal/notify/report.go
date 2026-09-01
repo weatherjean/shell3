@@ -2,18 +2,7 @@ package notify
 
 import "fmt"
 
-// ReportMode is the ONE axis deciding what a finished background job does to
-// the chat. It replaces the old `direct` bool, which answered only half the
-// question ("post the raw output?") and left the other half — "may the agent
-// stay silent?" — to a judgement call inside the report turn's prompt. That
-// call was made wrong in the field: an agent that had just told the user "the
-// report will arrive automatically" read its own start-of-job narration as
-// "they already know", replied NO_REPLY, and sat on a finished install for
-// nine minutes until the user asked again.
-//
-// The three values are mutually exclusive by construction, so the
-// contradiction a second boolean would allow (direct AND must-reply) cannot
-// be expressed at all.
+// ReportMode controls how a background result reaches the chat.
 type ReportMode int
 
 const (

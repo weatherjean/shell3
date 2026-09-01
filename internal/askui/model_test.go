@@ -51,8 +51,6 @@ func typeKeys(m *model, keys ...string) {
 	}
 }
 
-// TestSubmitStartsTurn: typing and pressing enter sends the text as a turn,
-// clears the input, and shows the transcript's first block.
 func TestSubmitStartsTurn(t *testing.T) {
 	m, _, sent, _ := testModel(t, &fakeCmds{})
 	typeKeys(m, "hi", "enter")
@@ -99,9 +97,6 @@ func TestSubmitMidTurnSteers(t *testing.T) {
 	}
 }
 
-// TestCtrlCCancelsThenQuits pins the two-stage interrupt: during a turn ctrl+c
-// cancels the turn (never quits), and only a later press with nothing running
-// arms and then confirms the quit.
 func TestCtrlCCancelsThenQuits(t *testing.T) {
 	m, ch, _, canceled := testModel(t, &fakeCmds{})
 	typeKeys(m, "go", "enter")
@@ -130,8 +125,6 @@ func TestCtrlCCancelsThenQuits(t *testing.T) {
 	}
 }
 
-// TestCanceledTurnRendersMarker: a canceled turn ends with a clean "canceled"
-// block, not a red context.Canceled error — the raw error is suppressed.
 func TestCanceledTurnRendersMarker(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	typeKeys(m, "go", "enter")
@@ -208,14 +201,9 @@ func TestFooterSegments(t *testing.T) {
 	}
 }
 
-// TestFoldKey: ctrl+o is an all-or-nothing toggle — it collapses whatever is
-// still open, and expands everything once nothing is. There is no per-block
-// binding, so this one key is the ONLY way to reach a folded block's contents.
 func TestFoldKey(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.apply(shell3.Event{Kind: shell3.Reasoning, Text: "pondering"})
-	// The tool call closes the streaming reasoning block, folding it; edit_file
-	// itself starts expanded.
 	m.tr.apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "edit_file", ToolCallID: "1"})
 	if !m.tr.items[0].Folded || m.tr.items[1].Folded {
 		t.Fatalf("setup: want folded reasoning + expanded edit_file, got %v/%v",
@@ -230,8 +218,6 @@ func TestFoldKey(t *testing.T) {
 	if m.tr.items[0].Folded || m.tr.items[1].Folded {
 		t.Error("ctrl+o with nothing open should expand everything")
 	}
-	// An OLD block (not just the newest) must come back — the whole point of
-	// the all-or-nothing binding.
 	m.tr.apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "2"})
 	typeKeys(m, "ctrl+o")
 	typeKeys(m, "ctrl+o")
@@ -273,9 +259,6 @@ func m0(t *testing.T) *model {
 	return m
 }
 
-// TestToolBlockPairing: a ToolResult attaches to its open call by id (one
-// block, with status), and a stray result with no matching call still renders
-// rather than vanishing.
 func TestToolBlockPairing(t *testing.T) {
 	tr := newTranscript()
 	tr.apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "a", ToolInput: `{"command":"ls"}`})
@@ -293,8 +276,6 @@ func TestToolBlockPairing(t *testing.T) {
 	}
 }
 
-// TestReasoningFoldsOnReply: a thinking block streams open and collapses the
-// moment the answer starts, so a finished turn isn't a wall of reasoning.
 func TestReasoningFoldsOnReply(t *testing.T) {
 	tr := newTranscript()
 	tr.apply(shell3.Event{Kind: shell3.Reasoning, Text: "hmm"})
@@ -307,8 +288,6 @@ func TestReasoningFoldsOnReply(t *testing.T) {
 	}
 }
 
-// TestEmptyAssistantBlockDropped: models often emit a stray space before a tool
-// call; glamour renders it to nothing, which would read as a blank gap.
 func TestEmptyAssistantBlockDropped(t *testing.T) {
 	tr := newTranscript()
 	tr.apply(shell3.Event{Kind: shell3.Token, Text: " \n"})
@@ -331,9 +310,6 @@ func TestReminderHeldDuringStream(t *testing.T) {
 	}
 }
 
-// TestErrorCarriesRecoveryHint: an error block must include the runtime's
-// recovery hint when it has one — the plain renderer prints it, and the UI
-// dropping it would make the two views disagree about the same failure.
 func TestErrorCarriesRecoveryHint(t *testing.T) {
 	err := errors.New("boom")
 	tr := newTranscript()
@@ -379,9 +355,6 @@ func TestWelcomeCardBeforeFirstMessage(t *testing.T) {
 	}
 }
 
-// TestViewRendersWithoutPanic drives a full render at a realistic size with
-// every block kind present — the cheapest guard against a layout regression
-// that only shows up on a real terminal.
 func TestViewRendersWithoutPanic(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.addUser("hello")
@@ -452,9 +425,6 @@ func TestSelectionSkipsMetaLines(t *testing.T) {
 	}
 }
 
-// TestClickFoldsOneBlock: click-to-fold is the per-block path ctrl+o
-// deliberately doesn't have — an old bash call five rounds back opens with one
-// click and nothing else moves.
 func TestClickFoldsOneBlock(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: `{"command":"ls"}`})
@@ -463,7 +433,6 @@ func TestClickFoldsOneBlock(t *testing.T) {
 	m.tr.apply(shell3.Event{Kind: shell3.ToolResult, ToolCallID: "2", ToolOutput: "/tmp"})
 	m.refresh(true)
 
-	// Click the FIRST block's header row (line 1: line 0 is the top margin).
 	y := m.blockStarts[0] - m.vp.YOffset()
 	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: y})
 	m.Update(tea.MouseReleaseMsg{Button: tea.MouseLeft, Y: y})
@@ -494,10 +463,6 @@ func TestEdgeScrollExtendsSelection(t *testing.T) {
 	}
 }
 
-// TestClickBelowContentFoldsNothing: a click in the blank area under a short
-// transcript clamps to the last content line (the clamp a drag needs to select
-// to the end). Folding the last block because a click landed nowhere near it
-// is a surprise, not a shortcut.
 func TestClickBelowContentFoldsNothing(t *testing.T) {
 	m, _, _, _ := testModel(t, &fakeCmds{})
 	m.tr.apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: `{"command":"ls"}`})

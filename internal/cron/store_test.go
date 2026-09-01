@@ -88,7 +88,7 @@ func TestScheduler_NewJobNoRestoredHistory(t *testing.T) {
 
 func TestNew_NilStoreNoPanic(t *testing.T) {
 	jobs := []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "worker"}}
-	s, err := New(&fakeDispatcher{}, jobs)
+	s, err := NewWithStore(&fakeDispatcher{}, nil, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,9 +112,6 @@ func TestScheduler_SaveFailureIsNotFatal(t *testing.T) {
 	}
 }
 
-// TestStoreRunStore_RoundTrip exercises the real runs-store-backed RunStore:
-// save a job's status, reopen (a fresh Store handle, standing in for a
-// restart), and confirm LoadStatus returns it unchanged.
 func TestStoreRunStore_RoundTrip(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)
@@ -133,7 +130,6 @@ func TestStoreRunStore_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh handle onto the same database — the shape of an actual restart.
 	st2, err := runs.Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -150,23 +146,6 @@ func TestStoreRunStore_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestCronStatus_SurvivesStartupJanitor is the regression test for the
-// reviewed defect: cron_status was originally a row in the shared threads
-// table, keyed by job name with the JobStatus JSON stuffed into
-// threads.session_id. runs.Sweep unconditionally deletes any threads row
-// whose session_id doesn't name a live session
-// (`DELETE FROM threads WHERE session_id NOT IN (SELECT id FROM sessions)`),
-// and a JSON blob is never a real session id — so every cron-status row was
-// deleted on the very first startup, before cron.NewWithStore ever got to
-// read it back. cmd/shell3/telegram.go calls openThreads (which runs the
-// startup janitors, including Sweep) BEFORE wireHost (which arms cron), so
-// this ordering is not a corner case: it is what every real process does.
-//
-// This test drives exactly that sequence — save, Sweep (the real janitor,
-// not a stand-in), then load through a fresh scheduler — so a future change
-// that reintroduces the same footgun (whether in cron_status itself or in
-// wherever cron history ends up living next) fails here instead of only in
-// production telemetry.
 func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)
@@ -188,8 +167,6 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Simulate the restart: a fresh Store handle, then a fresh scheduler
-	// built the way armCron builds one, restoring from RunStore.
 	st2, err := runs.Open(root)
 	if err != nil {
 		t.Fatal(err)

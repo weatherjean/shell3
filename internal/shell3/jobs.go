@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
+	"github.com/weatherjean/shell3/internal/procutil"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -40,8 +40,8 @@ func (k JobKind) String() string {
 
 const defaultMaxConcurrent = 8
 
-// bgWaitDelay bounds cmd.Wait on the stdio pipes after a cancel. Longer than
-// chat's bashWaitDelay — background jobs are off the turn's critical path.
+// bgWaitDelay bounds cmd.Wait on the stdio pipes after a cancel. Background
+// jobs are off the turn's critical path, so they get a little longer to drain.
 const bgWaitDelay = 3 * time.Second
 
 // maxDoneJobs caps how many finished jobs are retained in memory.
@@ -189,15 +189,7 @@ type bgJob struct {
 	// may swap Runtime.store while a subagent keeps running.
 	store *runs.Store
 
-	// suppress marks a job whose completion must NOT be routed: killed by
-	// superstop, where the one summary is the record rather than N ⚠️ posts,
-	// or cancelled on purpose through task_cancel / KillJob.
-	//
-	// A deliberate cancel is not a failure. Without this the cancelled job's
-	// manufactured "context canceled" reached the user as
-	// `⚠️ sub2 (…) failed: context canceled` — reading like a breakage —
-	// and reached the agent as a FAILED task report about work it had itself
-	// just called off. Observed live 2026-08-25.
+	// suppress drops completions deliberately covered by superstop or task_cancel.
 	suppress bool
 
 	// shutdownCancel marks a job cancelAll killed on teardown: its "context
@@ -365,7 +357,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
-	chat.ConfigureGroupKill(cmd, bgWaitDelay)
+	procutil.ConfigureGroupCancel(cmd, bgWaitDelay)
 	j := &bgJob{
 		id: id, kind: JobCommand, title: command, parent: parent,
 		parentID:      parentName(parent),
@@ -561,9 +553,8 @@ func (m *jobManager) output(id string) string {
 // result and does not also need a FAILED report about work it just called
 // off — nor does the user need the ⚠️ floor post that came with it.
 //
-// A host-initiated KillJob passes false and still routes: there the cancel
-// came from outside the conversation, so the completion is the only way the
-// agent learns the job ended.
+// Passing false is reserved for host-level cancellation, whose completion is
+// the only way the agent learns the job ended.
 func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 	// Copy under the lock: finishers write j.finished under m.mu.
 	m.mu.Lock()
@@ -1029,7 +1020,6 @@ func (m *jobManager) runFollowUps(sub *bgJob) {
 		}
 		n := notify.Notification{
 			Kind: notify.KindAgentUpdate, ID: sub.id, Preview: summary,
-			TS: time.Now().UTC().Format(time.RFC3339),
 		}
 		if errText != "" {
 			n.Status = "error: " + errText
@@ -1155,7 +1145,6 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 		Kind:    notify.KindAgentDone,
 		ID:      id, // the job id (sub1), matching the spawn message + task_* tools
 		Preview: summary,
-		TS:      time.Now().UTC().Format(time.RFC3339),
 	}
 	if errText != "" {
 		n.Status = "error: " + strutil.Truncate(errText, 200)

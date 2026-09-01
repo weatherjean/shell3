@@ -11,12 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// TestStreamOnEventSingleGoroutine asserts onEvent is invoked from a single
-// goroutine. The SSE response interleaves reasoning fields (extracted by the
-// tap goroutine) with content (parsed by the SDK main loop); before the fix
-// both goroutines called onEvent, so writing a shared unguarded builder on
-// every call races under -race. After the fix all onEvent calls are funneled
-// onto the Stream goroutine. Run with: go test -race.
 func TestStreamOnEventSingleGoroutine(t *testing.T) {
 	const n = 200
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +33,6 @@ func TestStreamOnEventSingleGoroutine(t *testing.T) {
 
 	c := NewClient(srv.URL, "test-key", "test-model")
 
-	// shared is written on EVERY onEvent call with no lock: data-race-free only
-	// if onEvent is single-goroutine.
 	var shared strings.Builder
 	var reasoning, content strings.Builder
 	err := c.Stream(context.Background(),

@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -80,7 +79,7 @@ type model struct {
 	noticeAt      time.Time // when notice was last set; the footer hides it after noticeTTL
 }
 
-func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds sessionCmds, agentName, statusLine string) *model {
+func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds sessionCmds, agentName, modelName string) *model {
 	// No line numbers, a dynamic "›" prompt, unlimited length, height up to
 	// inputMaxRows, custom newline keys; everything else default.
 	ta := textarea.New()
@@ -118,9 +117,8 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 		follow:    true,
 		isDark:    true, // assume dark until the terminal reports its background
 		agentName: agentName,
+		modelName: modelName,
 	}
-	// The footer's model label comes from the canonical status-line parser.
-	_, m.modelName = chat.SplitStatus(statusLine)
 	// "› " only on a single logical line's first visual row, so a wrapped
 	// input is not marked on every row. Width 2 keeps text aligned either way.
 	m.ta.SetPromptFunc(2, func(pi textarea.PromptInfo) string {

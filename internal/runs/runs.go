@@ -244,7 +244,7 @@ func (s *Store) SessionMeta(id string) (Meta, error) {
 	return m, nil
 }
 
-// ReminderLine mirrors chat.ReminderRecord for faithful replay.
+// ReminderLine is one persisted system reminder for faithful replay.
 type ReminderLine struct {
 	Seq  int    `json:"seq"`
 	Text string `json:"text"`

@@ -1,15 +1,7 @@
-// Package edittool ports opencode's str-replace edit algorithm: replacer
-// strategies tried in order, each yielding candidate substrings matching the
-// requested old_string, and the first uniquely-locatable match wins.
-//
-// A direct Go port of opencode's edit tool, under opencode's terms:
+// Package edittool implements string-replacement file edits. Its matching
+// algorithm is ported from opencode:
 //
 //	https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/edit.ts
-//
-// opencode in turn cites cline (diff-apply) and gemini-cli (editCorrector).
-//
-// Error strings here are model-facing tool output, deliberately unprefixed —
-// they are shown to the LLM verbatim as guidance.
 package edittool
 
 import (

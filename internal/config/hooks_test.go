@@ -77,8 +77,6 @@ func TestHookBlock(t *testing.T) {
 	}
 }
 
-// A legacy ask verdict fails closed: the key no longer exists, and a hook
-// still printing it must block loudly rather than silently allow.
 func TestHookAskFailsClosed(t *testing.T) {
 	c := gate(t, `echo '{"ask": "Run?", "reason": "denied", "ask_timeout": 30}'`)
 	v := c.RunToolCall(context.Background(), "main", "bash", "git push", "{}", false)
@@ -98,8 +96,6 @@ func TestHookReviewVerdict(t *testing.T) {
 	}
 }
 
-// Precedence: the safe outcome wins — block > review > argv > command. A hook
-// printing both block and review must block; review beats a rewrite.
 func TestHookReviewPrecedence(t *testing.T) {
 	c := gate(t, `echo '{"block": true, "review": true, "reason": "no"}'`)
 	if v := c.RunToolCall(context.Background(), "main", "bash", "x", "{}", false); v.Action != ActionBlock {
@@ -124,8 +120,6 @@ func TestHookRewriteAndArgv(t *testing.T) {
 	}
 }
 
-// A present-but-malformed argv (empty array, or an empty element) fails
-// closed — it must block, never fall through to run the command unwrapped.
 func TestHookMalformedArgvBlocks(t *testing.T) {
 	for name, script := range map[string]string{
 		"empty-array":   `echo '{"argv": []}'`,
@@ -140,7 +134,6 @@ func TestHookMalformedArgvBlocks(t *testing.T) {
 }
 
 func TestHookReadsPayload(t *testing.T) {
-	// The script blocks with the command it saw — round-trips stdin JSON.
 	script := `
 in=$(cat)
 cmd=$(printf '%s' "$in" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p')

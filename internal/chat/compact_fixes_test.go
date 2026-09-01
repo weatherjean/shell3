@@ -8,7 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -33,7 +32,7 @@ func TestCompactInto_ResetsReminderLog(t *testing.T) {
 		{Role: llm.RoleUser, Content: "c"},
 		{Role: llm.RoleAssistant, Content: "d"},
 	}
-	sess.reminderLog = []ReminderRecord{{Seq: 1, Text: "old reminder"}, {Seq: 3, Text: "old reminder 2"}}
+	sess.reminderLog = []runs.ReminderLine{{Seq: 1, Text: "old reminder"}, {Seq: 3, Text: "old reminder 2"}}
 	tail := sess.messages[2:]
 
 	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "", "", "", "", "")
@@ -86,10 +85,10 @@ func TestCompactNow_FewLargeMessages(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100000, KeepRecent: 20},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100000, KeepRecent: 20},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, c := newCollectorSession(SessionOpts{})
 	big := strings.Repeat("x", 8000)
@@ -116,10 +115,10 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY"}}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, _ := newCollectorSession(SessionOpts{})
 	seedHistory(sess, "MARKER", 500)

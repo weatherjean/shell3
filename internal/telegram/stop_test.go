@@ -12,9 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
 
-// TestStopCancelsInFlightTurn proves that /stop reaches and cancels a turn that
-// is still running: handleMsg must not block the bot, and /stop must unwind the
-// in-flight turn (turnActive clears) and reply "stopped".
 func TestStopCancelsInFlightTurn(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -29,8 +26,6 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 		t.Fatal("turn never started: handleMsg did not launch the turn")
 	}
 
-	// The turn is in flight: turnActive must be true (the loop stayed responsive
-	// because handleMsg ran the turn on its own goroutine).
 	c := tconv(b)
 	c.mu.Lock()
 	inflight := c.turnActive
@@ -39,7 +34,6 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 		t.Fatal("turnActive is false while a turn is in flight: handleMsg did not mark the turn active on its own goroutine")
 	}
 
-	// /stop runs synchronously on the test goroutine and must return promptly.
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
 	deadline := time.Now().Add(2 * time.Second)

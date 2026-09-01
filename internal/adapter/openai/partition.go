@@ -2,21 +2,8 @@ package openai
 
 import "strings"
 
-// tagPartitioner splits streamed content into answer and reasoning text by
-// tracking <think>…</think>, incrementally and across chunk boundaries.
-//
-// It exists because MiniMax does not reliably keep reasoning out of `content`.
-// visibleContent's cheap rule catches the common shape — a content delta
-// byte-identical to its sibling reasoning field — but when the model's own
-// output quotes think-tags the provider's de-duplication breaks down, and
-// whole paragraphs of chain-of-thought arrive in `content` wrapped in tags
-// with no reasoning field beside them. Only a scanner separates those.
-//
-// The hard part is that text ABOUT think-tags must survive: `<think>` inside
-// backticks, or in a fenced block, is answer text and not a delimiter. So the
-// scanner tracks Markdown code context and ignores any tag inside it. Without
-// that, asking the agent to explain a regex truncates its reply at the first
-// quoted tag.
+// tagPartitioner splits streamed <think> blocks from answers across chunk
+// boundaries. Tags inside Markdown code remain visible content.
 type tagPartitioner struct {
 	// pending is a trailing fragment that may still become a tag or fence
 	// marker once more arrives: "<thi", "``".

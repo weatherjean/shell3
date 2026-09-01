@@ -2,26 +2,9 @@
 
 package telegram
 
-// The conversation log is the wire record: every message this process
-// receives and every message it sends, in order, as JSONL.
-//
-// It exists because no other record is complete. The runs store holds what the
-// MODEL saw — user text, assistant replies, tool calls — and nothing else. The
-// host answers /reload, /new, /stop and /status itself, with no model turn, so
-// its replies (`❌ reload failed: …`, `✅ reloaded`) write no message row; the
-// completion router's ⚠️/⏰/🔔 posts write none either; and neither is in the
-// app log. A failed reload therefore left NO trace anywhere on disk, and the
-// only way to see one after the fact was for the operator to quote it back to
-// the bot, which is how both of 2026-08-25's were found.
-//
-// It logs at the TRANSPORT, below both authorization gates, so a message
-// dropped for being from a stranger or unaddressed in a group still appears.
-// That is the "why did it ignore me" case, which by construction leaves no
-// other evidence at all — the bot discards it before a room even exists.
-//
-// Off unless `shell3 telegram --convo-log` asks for it: it records everything
-// said in every room the bot can see, which is not a thing to write to disk
-// unasked.
+// The optional conversation log records all transport traffic as JSONL,
+// including host replies, completion posts, and messages rejected before a
+// room exists. It may contain every message visible to the bot.
 
 import (
 	"context"

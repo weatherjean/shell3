@@ -35,24 +35,6 @@ func (s *Session) Messages() []llm.Message {
 	return out
 }
 
-// SetMessages replaces the conversation history wholesale. The write-side
-// counterpart of Messages(); used to seed a session's history.
-func (s *Session) SetMessages(msgs []llm.Message) {
-	s.msgMu.Lock()
-	defer s.msgMu.Unlock()
-	s.messages = msgs
-	// Clamp the persisted high-water mark to the new (possibly shorter)
-	// history, so the next flush writes from the right point.
-	s.persistedLen = min(s.persistedLen, len(msgs))
-	// Reminder anchors index into the message slice, so replacing history
-	// invalidates them: drop the log rather than show stale reminders against
-	// the new conversation, and clear the sidecar that mirrors it.
-	s.reminderLog = nil
-	if s.store != nil && s.id != "" {
-		_ = s.store.TruncateReminders(s.id)
-	}
-}
-
 // Run executes one user→assistant turn: it emits the user_message event, runs
 // the turn loop, and (if cfg.Store is non-nil) persists newly appended messages
 // to the store. Persistence happens inside the turn, before the terminal

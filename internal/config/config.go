@@ -95,8 +95,7 @@ type MCPServer struct {
 
 // LoadedConfig is the parsed config directory.
 type LoadedConfig struct {
-	Models  []Model
-	Secrets map[string]string
+	Models []Model
 	// BackgroundMaxConcurrent caps concurrent background jobs; 0 = unset, and
 	// the runtime applies its default (8) at the read site.
 	BackgroundMaxConcurrent int

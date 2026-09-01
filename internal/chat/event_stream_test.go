@@ -93,11 +93,6 @@ func TestEmitTurnDone(t *testing.T) {
 	}
 }
 
-// TestSinkDeliversEveryEventInOrder pins the sink-mode guarantee that replaced
-// the old buffered channel: every emit — high-volume tokens included — is
-// delivered synchronously and in order, with nothing dropped. (The old design
-// had a non-blocking emit that silently dropped tokens when the buffer filled;
-// that path no longer exists.)
 func TestSinkDeliversEveryEventInOrder(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
 	const n = 1000

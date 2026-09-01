@@ -10,27 +10,11 @@ import (
 // once per this interval, so a long network outage doesn't flood the log.
 const pollHealthLogEvery = time.Minute
 
-// pollQuietRecovery is how long the transport must go without a new error
-// before an open outage is declared over. It exists because the only healthy
-// signal the library hands us is an inbound UPDATE (see ok, called from
-// onUpdate): a chat nobody talks in produces none, so an outage stayed open
-// in the log for hours after the transport came back, and its reported
-// duration ran until the next human message rather than until the last
-// error. A broken long-poll errors continuously, so silence is the signal.
-//
-// The value must comfortably exceed one poll attempt (long-poll timeout plus
-// the HTTP client's own), or a slow poll would read as recovery. The
-// deliberate tradeoff: an INTERMITTENT fault (the live install saw errors
-// ~20 minutes apart) now logs as a series of short outage/recovery pairs
-// instead of one long outage. That is noisier and true; the previous
-// behaviour was quieter and false.
+// pollQuietRecovery exceeds one long-poll attempt so silence can signal
+// recovery even when no inbound update arrives.
 const pollQuietRecovery = 5 * time.Minute
 
-// pollHealth tracks Telegram transport errors (getUpdates long-poll failures,
-// send errors) so outages land in the app log instead of only on stderr —
-// the beach-day incident: the bot silently lost api.telegram.org for ~17
-// minutes and nothing in shell3.log said why messages weren't arriving.
-// The library keeps retrying on its own; this is observability, not recovery.
+// pollHealth records transport outages; the library owns retries.
 type pollHealth struct {
 	mu      sync.Mutex
 	now     func() time.Time // injectable for tests

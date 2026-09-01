@@ -57,9 +57,6 @@ func (fakeDispatcher) Dispatch(agent, prompt string, opts shell3.DispatchOpts) (
 	return "sub-1", nil
 }
 
-// TestReloadAndRearm_ArmsNewScheduler pins the happy path: a reload whose config
-// declares a cron job stops nothing (no prior scheduler) and arms exactly one
-// new scheduler wired to the bot's /run handler.
 func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
@@ -81,10 +78,8 @@ func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	}
 }
 
-// TestReloadAndRearm_NoJobsClearsSchedule pins that reloading into a jobless
-// config stops the prior scheduler, returns nil, and clears the /run handler.
 func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.NewWithStore(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +101,8 @@ func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
 	}
 }
 
-// TestReloadAndRearm_ReloadErrorKeepsOldSchedule pins the fail-safe: a reload
-// error leaves the running scheduler untouched (returned unchanged).
 func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.NewWithStore(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +125,7 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 }
 
 func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.NewWithStore(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,13 +147,8 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	}
 }
 
-// TestSchedulerJobsReflectsRunAsync pins what b.SetCronStatus wires directly
-// to sched.Jobs() now (see hostwiring.go): a never-run job's LastRun stays
-// empty, a fired one picks it up, and Scheduler.Run's own goroutine means the
-// effect lands asynchronously — a caller reading Jobs() right after Run must
-// not assume it's already reflected.
 func TestSchedulerJobsReflectsRunAsync(t *testing.T) {
-	sched, err := cron.New(fakeDispatcher{}, []shell3.CronJob{
+	sched, err := cron.NewWithStore(fakeDispatcher{}, nil, []shell3.CronJob{
 		{Name: "fired", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"},
 		{Name: "never", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"},
 	})
@@ -175,9 +163,6 @@ func TestSchedulerJobsReflectsRunAsync(t *testing.T) {
 	if err := sched.Run("fired"); err != nil {
 		t.Fatal(err)
 	}
-	// Scheduler.Run fires off its own goroutine (it must not block the bot's
-	// single update loop for a slow tool job), so its effect on Jobs() lands
-	// asynchronously.
 	hasFired := func() bool {
 		for _, j := range sched.Jobs() {
 			if j.Name == "fired" && j.LastRun != "" {

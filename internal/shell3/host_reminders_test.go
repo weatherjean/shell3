@@ -10,31 +10,30 @@ import (
 
 func hostReminderText(s *Session) string {
 	var b strings.Builder
-	for _, r := range s.sess.Reminders() {
-		b.WriteString(r.Text)
+	for _, r := range s.sess.StandingReminders() {
+		b.WriteString(r)
 		b.WriteString("\n")
 	}
 	return b.String()
 }
 
 func findReminder(s *Session, sub string) string {
-	for _, r := range s.sess.Reminders() {
-		if strings.Contains(r.Text, sub) {
-			return r.Text
+	for _, r := range s.sess.StandingReminders() {
+		if strings.Contains(r, sub) {
+			return r
 		}
 	}
 	return ""
 }
 
-func hostRemindersCfg(env bool) func() chat.Config {
+func hostRemindersCfg() func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
-			LLM:        fakellm.New(fakellm.Script{}),
-			ModeLabel:  "code",
-			StatusLine: "openai │ gpt-x",
-			ConfigDir:  "/cfg",
-			RunsDir:    "/root/.shell3_project/runs",
-			AgentKnobs: chat.AgentKnobs{Environment: env},
+			LLM:       fakellm.New(fakellm.Script{}),
+			Agent:     "code",
+			ModelID:   "gpt-x",
+			ConfigDir: "/cfg",
+			RunsDir:   "/root/.shell3_project/runs",
 		}
 	}
 }
@@ -47,15 +46,14 @@ func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 }
 
 func TestHostReminders_Environment(t *testing.T) {
-	rt := newHostRemindersRuntime(t, hostRemindersCfg(true))
+	rt := newHostRemindersRuntime(t, hostRemindersCfg())
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.sess.SetID("sess-42")
 	s.applyHostReminders()
 
-	env := findReminder(s, "session id")
+	env := findReminder(s, "Environment")
 	if env == "" {
 		t.Fatalf("expected an Environment standing reminder mentioning the session id:\n%s", hostReminderText(s))
 	}
@@ -63,7 +61,7 @@ func TestHostReminders_Environment(t *testing.T) {
 		t.Errorf("Environment reminder not wrapped in <system-reminder>:\n%s", env)
 	}
 
-	prompt := s.cfg.Personality.SystemPrompt
+	prompt := s.cfg.Profile.SystemPrompt
 	if strings.Contains(prompt, "## Environment") {
 		t.Errorf("system prompt must not contain the host Environment section:\n%s", prompt)
 	}
@@ -72,18 +70,7 @@ func TestHostReminders_Environment(t *testing.T) {
 	if !strings.Contains(shown, "Host reminders") {
 		t.Errorf("Snapshot prompt missing the Host reminders section:\n%s", shown)
 	}
-	if !strings.Contains(shown, "session id") {
+	if !strings.Contains(shown, "Environment") {
 		t.Errorf("Snapshot prompt must surface the Environment standing reminder:\n%s", shown)
-	}
-}
-
-func TestHostReminders_Off(t *testing.T) {
-	rt := newHostRemindersRuntime(t, hostRemindersCfg(false))
-	s, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := hostReminderText(s); strings.TrimSpace(got) != "" {
-		t.Errorf("expected no standing reminders with the toggle off, got:\n%s", got)
 	}
 }

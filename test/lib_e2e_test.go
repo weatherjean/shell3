@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 func TestLibE2E_SingleTurn(t *testing.T) {
@@ -21,8 +20,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 		},
 	})
 
-	// Collect events via the synchronous sink — delivered inline during
-	// Start/Run/End on this goroutine, so no channel or goroutine is needed.
 	type evRec struct {
 		Kind chat.EventKind
 		Text string
@@ -33,10 +30,10 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 	}})
 
 	cfg := chat.TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: nil},
-		StatusLine:  "test │ model",
-		ToolConfig:  chat.ToolConfig{Log: applog.Noop{}},
+		LLM:        fake,
+		Profile:    chat.AgentProfile{SystemPrompt: "you are a test", Tools: nil},
+		ModelID:    "model",
+		ToolConfig: chat.ToolConfig{Log: applog.Noop{}},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

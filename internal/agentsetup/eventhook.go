@@ -67,12 +67,7 @@ func newEventDispatcher(depth int, run func(context.Context, string, string, []b
 func (d *eventDispatcher) serve() {
 	defer close(d.done)
 	for {
-		// Closure is checked FIRST, on its own. In a two-way select Go picks
-		// randomly when both cases are ready, so a backlog of slow events
-		// could keep winning the draw and each one paid the full per-event
-		// timeout before shutdown was noticed — turning Close's bound into a
-		// coin flip, and never reaching the drain budget that exists to bound
-		// it. Observed as a Close that took 25-45s where 15s was the ceiling.
+		// Prefer closure so a ready backlog cannot delay the bounded drain.
 		select {
 		case <-d.closed:
 			d.drain()
@@ -162,14 +157,6 @@ func (d *eventDispatcher) countDropped(n int) {
 		chat.LogOrNoop(d.log).Warn("event hook is falling behind; dropping events",
 			"dropped", total, "queue_depth", cap(d.q))
 	}
-}
-
-// Dropped reports how many events were discarded because the subscriber could
-// not keep up. Read by tests; operators see the count in the app log warning.
-func (d *eventDispatcher) Dropped() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.dropped
 }
 
 // Close stops the worker. Idempotent; safe to call concurrently with Post.

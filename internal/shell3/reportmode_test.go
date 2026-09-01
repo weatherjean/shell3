@@ -118,10 +118,6 @@ func TestReportRawPostsAndDoesNotMail(t *testing.T) {
 	}
 }
 
-// A deliberate task_cancel is not a failure. Before this, cancelling a
-// subagent posted `⚠️ sub2 (…) failed: context canceled` to the user — reading
-// like a breakage — and mailed the agent a FAILED report about work it had
-// itself just called off. Observed live 2026-08-25.
 func TestCancelledJobRoutesNoCompletion(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}
@@ -135,8 +131,6 @@ func TestCancelledJobRoutesNoCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	// true = the model's own task_cancel, which already read "cancelled task
-	// sub2" as its tool result.
 	if err := rt.jobs.cancel(id, true); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -148,8 +142,6 @@ func TestCancelledJobRoutesNoCompletion(t *testing.T) {
 	}
 }
 
-// Cancelling something ALREADY finished still routes its completion: the work
-// happened, and its result is not the caller's to discard by being late.
 func TestCancelAfterFinishStillRoutes(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}

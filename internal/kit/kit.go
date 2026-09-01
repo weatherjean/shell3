@@ -103,7 +103,7 @@ type Test struct {
 
 // Agent is one declared agent and everything scoped under it.
 type Agent struct {
-	Name, Desc, Model, Workdir, PromptFunc string
+	Name, Desc, Model, Workdir string
 	// Prompt is the system prompt, read statically from the prompt function's
 	// heredoc.
 	Prompt string
@@ -227,7 +227,7 @@ func Parse(src []byte) (*Kit, error) {
 				k.Agents = append(k.Agents, Agent{
 					Name: d.name, Desc: d.desc, Model: d.model, Workdir: d.workdir,
 					Use: d.use, Context: d.context, MCP: d.mcp, MCPAll: d.mcpAll,
-					PromptFunc: f.name, Prompt: prompt, Line: d.line,
+					Prompt: prompt, Line: d.line,
 				})
 				curAgent, curGroup = &k.Agents[len(k.Agents)-1], nil
 			} else {

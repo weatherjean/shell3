@@ -12,13 +12,14 @@ import (
 )
 
 // fakeCfgWithStore mirrors fakeCfg but wires a shared SQLite runs Store so
-// turns persist their message stream. ContextWindow is set because newSession's
-// ContextWindowFor closure (and the turn's reminder accounting) reads it.
+// turns persist their message stream. ContextWindow feeds the turn's reminder
+// accounting directly.
 func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
 			LLM:        fakellm.New(scripts...),
-			ModeLabel:  "code",
+			Agent:      "code",
+			ModelID:    "test-model",
 			Store:      st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}
@@ -34,16 +35,6 @@ func openTestStore(t *testing.T) *runs.Store {
 	return st
 }
 
-// TestResume_CarriesPriorContext proves end-to-end (via the fakellm harness)
-// that resuming a session by id (SessionOpts.ResumeID) loads the prior
-// conversation and that a second turn accumulates into the SAME session's
-// persisted messages — i.e. context carries over under one session id.
-//
-// Two runtimes are used deliberately: newTestRuntime's sessionConfig calls
-// mk() per session, and each mk() builds a fresh fakellm with the full script
-// list (consuming script[0] first). Splitting the first run and the resumed
-// run across two runtimes — both sharing the SAME *runs.Store — gives each
-// turn its own script without script-sharing ambiguity.
 func TestResume_CarriesPriorContext(t *testing.T) {
 	st := openTestStore(t)
 
@@ -58,8 +49,17 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 	if id == "" {
 		t.Fatal("first session has no store id; persistence cannot be proven")
 	}
+	meta, err := st.SessionMeta(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Agent != "code" {
+		t.Fatalf("stored agent = %q, want resolved config agent", meta.Agent)
+	}
+	if meta.Model != "test-model" {
+		t.Fatalf("stored model = %q, want resolved model id", meta.Model)
+	}
 
-	// Sanity: the first turn persisted (>= user + assistant).
 	msgs, err := st.LoadMessages(id)
 	if err != nil || len(msgs) < 2 {
 		t.Fatalf("first run didn't persist: len=%d err=%v", len(msgs), err)

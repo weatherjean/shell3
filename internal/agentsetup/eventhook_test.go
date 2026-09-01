@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+func droppedEvents(d *eventDispatcher) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.dropped
+}
+
 func TestEventDispatcherDeliversAsynchronously(t *testing.T) {
 	var mu sync.Mutex
 	var got []string
@@ -35,9 +41,6 @@ func TestEventDispatcherDeliversAsynchronously(t *testing.T) {
 	}
 }
 
-// A full queue drops the OLDEST pending event rather than blocking the
-// producer. A hook slower than the event stream must degrade into gaps in the
-// observer's view, never into a stalled turn.
 func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -55,7 +58,7 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 
 	d.Post("main", "first", nil) // claimed by the worker, blocks on release
 	for i := 0; i < 100; i++ {
-		if d.Dropped() == 0 && len(d.q) == 0 {
+		if droppedEvents(d) == 0 && len(d.q) == 0 {
 			break
 		}
 		time.Sleep(time.Millisecond)
@@ -79,8 +82,8 @@ func TestEventDispatcherDropsOldestWhenFull(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if d.Dropped() == 0 {
-		t.Error("Dropped() = 0, want the overflow counted")
+	if droppedEvents(d) == 0 {
+		t.Error("dropped events = 0, want the overflow counted")
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -98,14 +101,6 @@ func TestEventDispatcherPostAfterCloseIsNoop(t *testing.T) {
 	d.Post("main", "turn_done", nil)
 }
 
-// Close drains what is already queued. A subscriber writing an audit log must
-// not lose the tail of a session just because the process is shutting down —
-// the events most worth keeping (the error, the turn that ended it) are
-// exactly the ones in flight when it does.
-//
-// The queue is filled deep on purpose: a worker whose select merely races
-// "closed" against "next item" would deliver a couple of them by luck, so a
-// two-event version of this test passes against a dispatcher that drops.
 func TestEventDispatcherCloseDrainsQueue(t *testing.T) {
 	const queued = 50
 	release := make(chan struct{})
@@ -138,8 +133,6 @@ func TestEventDispatcherCloseDrainsQueue(t *testing.T) {
 	}
 }
 
-// Draining is bounded: a subscriber that hangs must not hold shutdown open
-// forever. Close gives the backlog a grace budget and then gives up.
 func TestEventDispatcherCloseIsBounded(t *testing.T) {
 	d := newEventDispatcher(8, func(ctx context.Context, _, _ string, _ []byte) error {
 		<-ctx.Done()

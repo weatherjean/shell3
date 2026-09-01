@@ -5,14 +5,6 @@ import (
 	"testing"
 )
 
-// TestSession_InterjectCloseRace exercises the documented contract that
-// Interject is callable from any goroutine while another goroutine calls
-// Close. wake() (reached from Interject on an idle session) reads s.runtime,
-// which doClose nils under s.mu — the read must take the same lock or
-// `go test -race` flags a data race on the s.runtime pointer.
-//
-// Many concurrent Interject goroutines overlap a single Close to force the
-// interleaving where wake() observes s.runtime mid-nil.
 func TestSession_InterjectCloseRace(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("hi"))
 	s, err := rt.Session(SessionOpts{})
@@ -29,8 +21,6 @@ func TestSession_InterjectCloseRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			// The session is idle, so Interject's !isBusy() branch calls
-			// wake(), which reads s.runtime concurrently with Close's nil.
 			for j := 0; j < 50; j++ {
 				s.Interject("steer")
 			}

@@ -111,10 +111,6 @@ func TestCronFollowUpReportsNoOutcome(t *testing.T) {
 	}
 }
 
-// A run cancelAll killed at shutdown reports a manufactured "context
-// canceled" failure. That failure belongs to the restart, not the job: its
-// outbox row is dropped for the same reason, and the boot-time dead-PID
-// marker is the honest report.
 func TestCronOutcomeSkipsShutdownCancelled(t *testing.T) {
 	rt, _, sink := newOutcomeRuntime(t)
 	ev := cronEvent()

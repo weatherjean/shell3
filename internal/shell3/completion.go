@@ -16,22 +16,12 @@ func (m *jobManager) isClosing() bool {
 	return m.closing
 }
 
-// Completion delivery is mail: every finished background task becomes a
-// CompletionEvent and routes deterministically — no triage turn, no judge:
+// Background completions route deterministically:
 //
-//   - failed: the ⚠️ floor post always reaches the user, and a live owner is
-//     additionally mailed so the agent can react. An ownerless failure (cron)
-//     starts NO fresh turn — a broken schedule must not burn a main-model
-//     turn per tick, and the floor post IS the delivery.
-//   - report:"raw": the raw result posts straight to the user, and the owner
-//     gets the notice queued WITHOUT a wake, so the next turn has it for free.
-//   - default (report:"auto"): mail TO THE AGENT — the owning session is woken
-//     with it, or a fresh main-agent session runs it when no owner is live.
-//     That turn's reply posts as ✉️ mail; NO_REPLY keeps it silent.
-//   - report:"always": the same mail, but the report turn is BOUND to answer.
-//     The mail carries the raw result as Mail.Fallback, and a front-end that
-//     ends the turn with nothing posted posts that instead — the spawner said
-//     the user is waiting, so silence is not an outcome the model may pick.
+//   - failures always post and also notify a live owner;
+//   - raw results post directly and queue an owner notice;
+//   - auto results wake the owner or a fresh main session;
+//   - always results do the same but require a reply, falling back to raw text.
 
 // CompletionKind discriminates what finished.
 type CompletionKind int

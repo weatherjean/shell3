@@ -7,7 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -34,19 +33,6 @@ type ToolReviewRequest struct {
 	Headless           bool
 	TrustedUserContext bool
 	Messages           []llm.Message
-}
-
-// funcHandler adapts a closure to ToolHandler; tests use it to stand up
-// ad-hoc handlers without a dedicated type per case.
-type funcHandler struct {
-	name string
-	fn   func(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)
-}
-
-func (h funcHandler) Name() string { return h.name }
-
-func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
-	return h.fn(ctx, id, args, cfg)
 }
 
 // ToolConfig is the state passed to ToolHandler.Execute. Embedded in
@@ -109,18 +95,18 @@ type TurnConfig struct {
 	ToolConfig
 	// LLM is the streaming client for this turn.
 	LLM LLMClient
-	// Personality supplies the system prompt and tool allow-list.
-	Personality persona.Persona
+	// Profile supplies the system prompt and tool allow-list.
+	Profile AgentProfile
 	// RefreshPrompt re-renders the system prompt at turn start, so a
 	// long-lived session sees current context files rather than a
-	// session-creation snapshot. Nil keeps Personality.SystemPrompt.
+	// session-creation snapshot. Nil keeps Profile.SystemPrompt.
 	RefreshPrompt func() string
 
 	// PromptSuffix appends per-session text to the system prompt (see
 	// Config.PromptSuffix). Nil appends nothing.
 	PromptSuffix func() string
-	// StatusLine is the provider/model/effort string, for reminder tracking.
-	StatusLine string
+	// ModelID identifies the provider model for reminders and persisted runs.
+	ModelID string
 	// ConfigDir is threaded into new store sessions — notably the compaction
 	// rollover, which starts one deep in the turn loop. '' if unknown.
 	ConfigDir string

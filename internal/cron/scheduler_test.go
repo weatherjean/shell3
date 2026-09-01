@@ -30,7 +30,7 @@ func (f *fakeDispatcher) count() int { f.mu.Lock(); defer f.mu.Unlock(); return 
 func TestScheduler_FireDispatches(t *testing.T) {
 	fd := &fakeDispatcher{}
 	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1s", Agent: "explorer", Prompt: "go", Report: notify.ReportRaw}}
-	s, err := New(fd, jobs)
+	s, err := NewWithStore(fd, nil, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,18 +66,13 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("waitFor: condition not met within 1s")
 }
 
-// TestScheduler_Run covers the manual-trigger path (e.g. the /run command):
-// Run fires exactly the named job and returns an error for an unknown name
-// without dispatching anything. Run returns before the fire completes (see
-// its doc comment — /run must not block the bot's update loop), so
-// assertions on its effect wait rather than checking immediately.
 func TestScheduler_Run(t *testing.T) {
 	fd := &fakeDispatcher{}
 	jobs := []shell3.CronJob{
 		{Name: "nightly", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"},
 		{Name: "weekly", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"},
 	}
-	s, err := New(fd, jobs)
+	s, err := NewWithStore(fd, nil, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +93,10 @@ func TestScheduler_Run(t *testing.T) {
 	}
 }
 
-// TestScheduler_RunIsAsync pins that Run returns before the job completes. A
-// caller on a single serialized loop (the bot's /run handler) must never be
-// blocked by a fire, and Dispatch can take a moment to accept a job when the
-// runtime's concurrency cap is contended.
 func TestScheduler_RunIsAsync(t *testing.T) {
 	release := make(chan struct{})
 	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1h", Agent: "worker", Prompt: "sync"}}
-	s, err := New(&blockingDispatcher{release: release}, jobs)
+	s, err := NewWithStore(&blockingDispatcher{release: release}, nil, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +139,7 @@ func (b *observedBlockingDispatcher) Dispatch(string, string, shell3.DispatchOpt
 
 func TestSchedulerStopWaitsForManualFire(t *testing.T) {
 	d := &observedBlockingDispatcher{entered: make(chan struct{}), release: make(chan struct{})}
-	s, err := New(d, []shell3.CronJob{{Name: "manual", Schedule: "@every 1h", Agent: "worker", Prompt: "sync"}})
+	s, err := NewWithStore(d, nil, []shell3.CronJob{{Name: "manual", Schedule: "@every 1h", Agent: "worker", Prompt: "sync"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,13 +169,13 @@ func TestSchedulerStopWaitsForManualFire(t *testing.T) {
 }
 
 func TestScheduler_BadScheduleRejected(t *testing.T) {
-	if _, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "x", Schedule: "not a cron", Agent: "a"}}); err == nil {
+	if _, err := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "x", Schedule: "not a cron", Agent: "a"}}); err == nil {
 		t.Fatal("expected error for malformed schedule")
 	}
 }
 
 func TestScheduler_StartStopClean(t *testing.T) {
-	s, _ := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	s, _ := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	s.Start()
 	time.Sleep(20 * time.Millisecond)
 	s.Stop()
@@ -199,7 +190,7 @@ func (e errDispatcher) Dispatch(agent, prompt string, opts shell3.DispatchOpts) 
 func TestScheduler_OutcomeDescribesTheRun(t *testing.T) {
 	fd := &fakeDispatcher{}
 	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"}}
-	s, err := New(fd, jobs)
+	s, err := NewWithStore(fd, nil, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +211,7 @@ func TestScheduler_OutcomeDescribesTheRun(t *testing.T) {
 }
 
 func TestScheduler_OutcomeClean(t *testing.T) {
-	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
+	s, err := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,12 +222,8 @@ func TestScheduler_OutcomeClean(t *testing.T) {
 	}
 }
 
-// Completion delivery is at-least-once — an outage redelivers the same event
-// every few minutes, and a leftover outbox row replays at boot — so the same
-// run reports repeatedly. Counting each pass would inflate exactly the number
-// RecordOutcome exists to make honest.
 func TestScheduler_OutcomeRecordedOnce(t *testing.T) {
-	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
+	s, err := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +238,7 @@ func TestScheduler_OutcomeRecordedOnce(t *testing.T) {
 }
 
 func TestScheduler_OutcomeStaleSubIDDropped(t *testing.T) {
-	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
+	s, err := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +249,8 @@ func TestScheduler_OutcomeStaleSubIDDropped(t *testing.T) {
 	}
 }
 
-// A name this scheduler does not declare — one a /reload removed — must never
-// grow a phantom row.
 func TestScheduler_OutcomeUnknownJobDropped(t *testing.T) {
-	s, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
+	s, err := NewWithStore(&fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,8 +261,7 @@ func TestScheduler_OutcomeUnknownJobDropped(t *testing.T) {
 }
 
 func TestScheduler_DispatchRejectionCountsImmediately(t *testing.T) {
-	s, err := New(errDispatcher{err: errors.New("no such agent")},
-		[]shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "gone", Prompt: "go"}})
+	s, err := NewWithStore(errDispatcher{err: errors.New("no such agent")}, nil, []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "gone", Prompt: "go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,8 +276,6 @@ func TestScheduler_DispatchRejectionCountsImmediately(t *testing.T) {
 	}
 }
 
-// The fire-time write must reach the store: the outcome matches on LastSubID,
-// so a fire whose row did not survive a restart has nothing to match against.
 func TestScheduler_FirePersistsSubID(t *testing.T) {
 	rs := &fakeRunStore{}
 	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1h", Agent: "a", Prompt: "go"}}

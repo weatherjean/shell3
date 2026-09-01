@@ -49,9 +49,6 @@ func findConvo(t *testing.T, evs []convoEvent, dir, kind string) convoEvent {
 	return convoEvent{}
 }
 
-// The whole point of the log: a HOST-answered reply — no model turn, no
-// message row, no app-log line — is on the wire record. Before this, the only
-// copy of `❌ reload failed: …` was in the operator's chat.
 func TestConvoLog_RecordsHostPostWithNoMessageRow(t *testing.T) {
 	var buf bytes.Buffer
 	fc := newFakeClient()
@@ -124,12 +121,6 @@ func TestConvoLog_DescribesMediaWithoutEmbeddingIt(t *testing.T) {
 	}
 }
 
-// Updates must be idempotent: the same channel, every call. Bot.Run calls it
-// once per loop iteration, so a wrapper that builds a fresh forwarder per call
-// leaves orphaned goroutines competing for the upstream — and the ones whose
-// channel nobody reads any more swallow the messages they win. Shipped for an
-// hour on 2026-08-25; roughly every other message reached the log and then
-// vanished before it could become a turn, with no error anywhere.
 func TestConvoLog_UpdatesIsIdempotent(t *testing.T) {
 	var buf bytes.Buffer
 	fc := newFakeClient()

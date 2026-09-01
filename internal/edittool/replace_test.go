@@ -88,7 +88,6 @@ func TestLineTrimmedReplacerLeadingWhitespace(t *testing.T) {
 
 func TestBlockAnchorReplacer(t *testing.T) {
 	content := "package x\n\nfunc Foo() {\n\tfmt.Println(\"hi\")\n\tfmt.Println(\"bye\")\n}\n\nfunc Bar() {}\n"
-	// middle line slightly different (extra arg) — block anchor should still match.
 	find := "func Foo() {\n\tfmt.Println(\"different\")\n}"
 	got, err := replace(content, find, "func Foo() {}", false)
 	if err != nil {

@@ -9,23 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/render"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// roombrief.go gives each room its own standing context, injected into that
-// room's system prompt and nowhere else. Three layers, by trust:
-//
-//  1. The chat TITLE — orientation; the agent should know where it is.
-//  2. The group DESCRIPTION. The useful one: edit it in the Telegram UI and
-//     that room's standing instructions change, with no config edit and no
-//     restart. Labelled as member-written, because a group ADMIN can edit it
-//     and need not be allowlisted — the operator's call when they hand out
-//     admin, not something this code can decide.
-//  3. Operator-declared context files: the trusted channel, resolved through
-//     the ordinary context: machinery, and the home for a real brief.
-//
-// All best-effort: a failed getChat keeps the last known values, and no brief
-// at all is a normal state.
+// Room context combines its title, member-written description, and trusted
+// operator context files. Metadata refresh is best-effort.
 
 // briefRefresh is how often a room's metadata is re-fetched. It changes at
 // human speed; the cache exists so the per-turn prompt renderer never waits
@@ -229,20 +218,10 @@ func (b *Bot) roomContext(paths []string) string {
 	return strings.TrimSpace(read(paths))
 }
 
-// RoomSnapshot is one live room in a status snapshot.
-type RoomSnapshot struct {
-	ChatID    int64
-	Title     string
-	Busy      bool
-	Jobs      int
-	Queued    int
-	SessionID string
-}
-
 // Rooms reports every live room, sorted by chat id: zero-token, deterministic,
 // and the honest answer to what conversations this bot is holding.
-func (b *Bot) Rooms() []RoomSnapshot {
-	var out []RoomSnapshot
+func (b *Bot) Rooms() []render.RoomInfo {
+	var out []render.RoomInfo
 	for _, c := range b.allConvs() {
 		sess := c.session()
 		if sess == nil {
@@ -253,7 +232,7 @@ func (b *Bot) Rooms() []RoomSnapshot {
 		busy := c.turnActive
 		c.mu.Unlock()
 		chatID := c.chatIDValue()
-		snap := RoomSnapshot{
+		snap := render.RoomInfo{
 			ChatID: chatID, Title: b.chatMetaFor(chatID).title,
 			Busy: busy, Queued: queued, SessionID: sess.ID(),
 		}

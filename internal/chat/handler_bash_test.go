@@ -10,13 +10,6 @@ import (
 	"time"
 )
 
-func TestBashHandler_Name(t *testing.T) {
-	h := BashHandler{}
-	if h.Name() != "bash" {
-		t.Fatalf("Name() = %q, want %q", h.Name(), "bash")
-	}
-}
-
 func TestBashHandler_Execute_echo(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command":"echo hello"}`)
@@ -50,8 +43,6 @@ func TestBashHandler_Execute_canceledContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The command must not have run: a pre-cancelled context kills it before
-	// exec, so the output carries the error marker, never the echo text.
 	if strings.Contains(out, "should not run") {
 		t.Fatalf("command ran despite cancelled context: %q", out)
 	}
@@ -77,9 +68,6 @@ func TestBashHandler_Execute_timeout(t *testing.T) {
 	}
 }
 
-// A foreground bash call blocks the whole turn, so the requested timeout must
-// clamp to maxBashTimeoutSeconds — the model cannot buy back the old 10-minute
-// wedge by passing a huge timeout_seconds.
 func TestParseBashArgsClampsTimeout(t *testing.T) {
 	_, timeout, err := parseBashArgsFull(`{"command":"sleep 1","timeout_seconds":600}`)
 	if err != nil {
@@ -90,9 +78,6 @@ func TestParseBashArgsClampsTimeout(t *testing.T) {
 	}
 }
 
-// Grandchild that inherits stdout would hang Run() forever without WaitDelay
-// because the bytes.Buffer copy goroutine waits on a pipe the dead bash
-// child no longer holds but the surviving grandchild still does.
 func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command":"bash -c 'sleep 30 & echo started; sleep 5'","timeout_seconds":1}`)

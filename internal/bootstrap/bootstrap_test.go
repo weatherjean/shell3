@@ -32,8 +32,6 @@ func TestEnsureGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gitignore missing: %v", err)
 	}
-	// Secrets and every log the runtime writes must be ignored so a dotfiles-
-	// tracked ~/.shell3 can never commit them.
 	for _, want := range []string{".env", "shell3.log", "proxy-*.log"} {
 		if !strings.Contains(string(gi), want) {
 			t.Fatalf("global .gitignore missing %q:\n%s", want, gi)

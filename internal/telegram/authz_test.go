@@ -24,9 +24,6 @@ func TestAllowlistDefaultsToChatOwner(t *testing.T) {
 	}
 }
 
-// An explicit list replaces the default entirely — including the ability to
-// authorize someone who is not the chat owner, which is the whole point in a
-// group where chat id and user id are different numbers.
 func TestAllowlistExplicitReplacesDefault(t *testing.T) {
 	a, err := newSenderAllowlist(-1001234567890, []string{"42", " 77 "})
 	if err != nil {
@@ -60,10 +57,6 @@ func TestAllowlistRejectsNonNumeric(t *testing.T) {
 	}
 }
 
-// The gate must sit BEFORE the command branch. Telegram's privacy mode
-// delivers /commands from every member of a group, so a check placed only on
-// the conversation path would still let an unauthorized member /stop a running
-// turn or /new the conversation away.
 func TestUnauthorizedSenderCannotRunCommands(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
@@ -81,7 +74,6 @@ func TestUnauthorizedSenderCannotRunCommands(t *testing.T) {
 	}
 }
 
-// The authorized owner is unaffected by the new gate.
 func TestAuthorizedSenderStillWorks(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi there"}}})
@@ -94,8 +86,6 @@ func TestAuthorizedSenderStillWorks(t *testing.T) {
 	}
 }
 
-// SetAllowFrom widens the allowlist to a second person without the chat id
-// changing — the group case.
 func TestSetAllowFromWidens(t *testing.T) {
 	fc := newFakeClient()
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "sure"}}})

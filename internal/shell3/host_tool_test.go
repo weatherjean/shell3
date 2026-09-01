@@ -46,14 +46,14 @@ func TestRegisterHostTool_NameRouting(t *testing.T) {
 			t.Errorf("HostToolNames missing %q", name)
 		}
 		found := false
-		for _, td := range s.cfg.Personality.Tools {
+		for _, td := range s.cfg.Profile.Tools {
 			if td.Name == name {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Personality.Tools missing %q", name)
+			t.Errorf("Profile.Tools missing %q", name)
 		}
 	}
 }

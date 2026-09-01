@@ -7,7 +7,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // assertNoOrphanToolResults fails if any tool message appears without a
@@ -40,10 +39,10 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})

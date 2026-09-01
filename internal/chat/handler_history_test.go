@@ -68,7 +68,6 @@ func TestHistoryToolDegradesGracefully(t *testing.T) {
 	if out := execHistory(t, st, `{"query": "zzzznothing"}`); out != "no matches" {
 		t.Fatalf("want no matches, got %q", out)
 	}
-	// Nil store (a session without persistence) answers, never errors.
 	out, err := HistoryHandler{}.Execute(context.Background(), "", json.RawMessage(`{"query":"x"}`), ToolConfig{})
 	if err != nil || !strings.Contains(out, "unavailable") {
 		t.Fatalf("nil-store path: %q %v", out, err)

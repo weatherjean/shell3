@@ -129,9 +129,8 @@ func writePrivateAtomic(path string, data []byte) (err error) {
 // been delivered.
 //
 // beforeDone runs at teardown immediately before that terminal event —
-// Session.Run persists history there. The ordering matters: front-ends treat
-// the terminal event as "safe to mutate session state", so a read of
-// sess.messages in beforeDone must finish first or it races SetMessages.
+// Session.Run persists history there, so terminal observers always see the
+// completed durable state.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
 	// Reset first: a turn returning via the early skip path below must not let
 	// saveHistory re-add a previous turn's usage to the cumulative ledger.
@@ -251,7 +250,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// A reminder due before the next round appends to the last tool
 		// message in allMsgs only; sess.messages stays clean. Counting bytes
 		// across all of allMsgs reflects pruning with no delta tracking.
-		injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)), true)
+		injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.ModelID, cfg.ContextWindow, estimatePromptTokens(allMsgs)), true)
 		// Mid-turn: steering is interactive and delivered now; notices wait for
 		// a turn boundary so a finished task never interrupts this turn.
 		steerTexts, _ := sess.drainInbox(true)
@@ -296,13 +295,13 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	allMsgs = append(allMsgs, msgs...)
 
 	// Standing reminders sit right after the system prompt every turn,
-	// regenerated on resume rather than persisted. Snapshot via the accessor:
-	// an agent switch may replace the slice mid-turn.
+	// regenerated on resume rather than persisted. Snapshot via the accessor
+	// because reload may replace the slice between turns.
 	for _, r := range sess.StandingReminders() {
 		allMsgs = injectReminder(allMsgs, r)
 	}
 
-	toolList = cfg.Personality.Tools
+	toolList = cfg.Profile.Tools
 	if cfg.Headless {
 		allMsgs = injectReminder(allMsgs, headlessReminder)
 	}
@@ -320,7 +319,7 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 		allMsgs = append(allMsgs, msg)
 		sess.append(msg)
 	}
-	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
+	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.ModelID, cfg.ContextWindow, sess.lastPromptTokens), false)
 	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
 	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
 	injectAndEmit(sess, &allMsgs, steerReminder, false)
@@ -445,8 +444,7 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 	return toolResult{}, false
 }
 
-// truncationNotice is appended to a reply the provider cut at the output token
-// cap. Raising the model's max_tokens is the fix, so the notice names it.
+// truncationNotice is appended when a reply hits the output token cap.
 const truncationNotice = "\n\n⚠️ [output cut off — hit the model's max_tokens limit]"
 
 // IsTruncatedReply reports the truncation notice in assistant text. A
@@ -583,12 +581,12 @@ func recordTurnPrompt(cfg TurnConfig, sess *Session, sysPrompt string, seq int) 
 }
 
 // renderSystemPrompt is the ONE place a turn's system prompt is assembled:
-// the persona's prompt, replaced by the refresher when one is wired (context
+// the agent profile's prompt, replaced by the refresher when one is wired (context
 // files re-read from disk, a fresh timestamp), then the session's own suffix.
 // Both are closures called per turn, so an edit to either source lands on the
 // next turn rather than at the next restart.
 func renderSystemPrompt(cfg TurnConfig) string {
-	sysPrompt := cfg.Personality.SystemPrompt
+	sysPrompt := cfg.Profile.SystemPrompt
 	if cfg.RefreshPrompt != nil {
 		if s := cfg.RefreshPrompt(); s != "" {
 			sysPrompt = s

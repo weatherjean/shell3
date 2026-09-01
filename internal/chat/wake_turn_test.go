@@ -7,20 +7,14 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage proves the wake-turn
-// history-hygiene defect: a turn initiated with an empty user message (the
-// RunQueued wake turn) seeded purely from the inbox must NOT persist an empty
-// user row. Such a row replays as openai.UserMessage("") on later turns,
-// which real providers reject with HTTP 400.
 func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("do the queued thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	for i, m := range sess.Messages() {
@@ -30,16 +24,12 @@ func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	}
 }
 
-// TestEmptyInboxSeededTurn_QueuedTextReachesWire guards the fix's correctness:
-// even without an empty carrier message persisted, the queued text must still
-// reach the model on the wire (via the inbox-drain reminder injection). If this
-// fails, the fix has silently dropped the wake turn's only input.
 func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("do the queued thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	calls := fake.CallsSnapshot()
@@ -57,18 +47,12 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 	}
 }
 
-// TestWhitespaceOnlyInboxSeededTurn_NoProviderCall proves FIX 2: a wake
-// (RunQueued-style, empty initiating message) turn whose entire inbox is
-// whitespace-only — interjectReminder returns "" —
-// must NOT send a system-only request to the provider. With no prior history,
-// allMsgs would be just [system], which a strict provider rejects. The turn is
-// skipped cleanly: no LLM call, and no empty user row persisted.
 func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("   \n\t  ")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	if calls := fake.CallsSnapshot(); len(calls) != 0 {
@@ -81,13 +65,11 @@ func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 	}
 }
 
-// TestNormalTurn_PersistsUserMessage guards against over-stripping: a normal
-// non-empty turn must still persist its initiating user message.
 func TestNormalTurn_PersistsUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
+	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hello"}, nil)
 
 	var found bool

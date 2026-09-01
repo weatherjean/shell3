@@ -37,8 +37,6 @@ func TestJobEventsNonNil(t *testing.T) {
 	}
 }
 
-// TestEmitJobNeverBlocks verifies that emitJob never blocks when the buffer is
-// full (buffer is 256; we fill 256+1 = 257 events).
 func TestEmitJobNeverBlocks(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	done := make(chan struct{})

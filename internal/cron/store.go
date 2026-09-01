@@ -9,24 +9,13 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// RunStore persists per-job run history so a restart does not erase it.
-// Without it @every re-arms from process start and a missed tick leaves no
-// trace anywhere — the failure mode that motivated this file: an @every 3h
-// job restarted mid-Saturday got 6 ticks instead of 8, and nothing anywhere
-// recorded the two misses.
+// RunStore persists per-job status across restarts.
 type RunStore interface {
 	LoadStatus() (map[string]JobStatus, error)
 	SaveStatus(JobStatus) error
 }
 
-// StoreRunStore is the runs-store-backed RunStore. Each job's JobStatus is
-// JSON-encoded into its own row in the dedicated cron_status table (see
-// runs.CronStatusSave/CronStatusLoadAll, and schemaVersion in
-// internal/runs/db.go for why this is NOT a row in the shared threads
-// table: threads.session_id is load-bearing for runs.Sweep's "does this
-// thread's session still exist" check, and a job name or JSON blob there
-// would be deleted by the very next startup's janitor pass, before cron
-// ever gets to read it back).
+// StoreRunStore stores each JobStatus as JSON in cron_status.
 type StoreRunStore struct {
 	Store *runs.Store
 }

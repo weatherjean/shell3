@@ -71,14 +71,9 @@ type SearchFilter struct {
 	Before   time.Time
 }
 
-// Search runs an FTS5 query over the indexed conversation text (user and
-// assistant messages), best matches first. query uses FTS5 syntax: bare words
-// AND together, quotes make phrases.
-func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
-	return s.SearchFiltered(query, SearchFilter{}, limit)
-}
-
-// SearchFiltered runs Search with optional session metadata and time bounds.
+// SearchFiltered runs an FTS5 query over indexed user and assistant text with
+// optional session metadata and time bounds. Bare words AND together; quotes
+// make phrases.
 // Filtering happens in SQLite before LIMIT, so selective queries do not lose
 // matches to newer sessions outside the requested scope.
 func (s *Store) SearchFiltered(query string, filter SearchFilter, limit int) ([]SearchHit, error) {

@@ -27,7 +27,7 @@ func TestSearchFindsConversationText(t *testing.T) {
 	must(st.AppendMessage(id2, llm.Message{Role: llm.RoleUser, Content: "unrelated grocery list"}))
 	must(st.AppendMessage(id2, llm.Message{Role: llm.RoleTool, Content: "certificate mentioned in tool output"}))
 
-	hits, err := st.Search("certificate", 10)
+	hits, err := st.SearchFiltered("certificate", SearchFilter{}, 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -93,7 +93,6 @@ func TestCurrentSessionRecordLookup(t *testing.T) {
 	}
 }
 
-// The store survives close/reopen with everything intact (persistence).
 func TestReopenPersists(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
@@ -119,7 +118,7 @@ func TestReopenPersists(t *testing.T) {
 	if got, ok := st2.CurrentSession("web"); !ok || got != id {
 		t.Fatalf("current-session marker lost across reopen: %q %v", got, ok)
 	}
-	if hits, _ := st2.Search("hello", 5); len(hits) != 1 {
+	if hits, _ := st2.SearchFiltered("hello", SearchFilter{}, 5); len(hits) != 1 {
 		t.Fatalf("fts lost across reopen: %d hits", len(hits))
 	}
 }
@@ -168,7 +167,7 @@ func TestSweep(t *testing.T) {
 	if _, ok := st2.CurrentSession("other"); !ok {
 		t.Fatal("live current-session marker was dropped")
 	}
-	hits, _ := st2.Search("searchable", 10)
+	hits, _ := st2.SearchFiltered("searchable", SearchFilter{}, 10)
 	if len(hits) != 1 || hits[0].SessionID != newID_ {
 		t.Fatalf("fts after sweep: %+v", hits)
 	}
@@ -228,9 +227,6 @@ func TestSweepSparesDispatchParents(t *testing.T) {
 	}
 }
 
-// Stale "live" rows are unclean-shutdown leftovers: Sweep runs at process
-// start, when nothing from a previous run can still be live. Rows past the
-// grace window flip to ended; recent ones (a concurrent `shell3 ask`) stay.
 func TestSweepEndsStaleLiveSessions(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
@@ -290,8 +286,6 @@ func TestAppendMessageStampsTime(t *testing.T) {
 	if got.Before(before) || got.After(time.Now().UTC().Add(time.Second)) {
 		t.Fatalf("ts %s is not around now", got)
 	}
-	// The row and the session's recency come from ONE clock reading, so a
-	// message can never look newer than the session holding it.
 	if err := st.db.QueryRow(`SELECT last_at FROM sessions WHERE id=?`, id).Scan(&lastAt); err != nil {
 		t.Fatal(err)
 	}

@@ -19,14 +19,8 @@ type ContextFile struct {
 	Size int64
 }
 
-// A context: file is re-read into the prompt at EVERY turn, so its size is a
-// tax paid many times per session — and one the agent silently raises itself,
-// being handed edit_file and invited to treat the file as its brain.
-// Unbounded, the loop ends badly: once the file alone pushes the prompt past
-// compact_at, compaction fires every turn, discards history, and reclaims
-// nothing, because the prompt is re-rendered fresh. The session deadlocks
-// rather than degrading. Observed live 2026-08-18: a memory.md at 90 KB,
-// growing 17k tokens/day, with no warning at any layer.
+// Context files are capped because they are re-read on every turn and cannot
+// be reduced by history compaction.
 const (
 	// WarnContextBytes is where the operator is told. Diagnostics only.
 	WarnContextBytes = 32 << 10

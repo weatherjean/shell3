@@ -135,7 +135,7 @@ func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 // since Store already keys off that relationship.
 func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
 
-// AgentRuntime assembles an agent's model client, persona and tool defs. ""
+// AgentRuntime assembles an agent's model client, profile and tool defs. ""
 // uses the kit's first agent; an undeclared name is an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	return p.KitAgentRuntime(name)
@@ -192,7 +192,7 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 
 // RefreshPromptFor re-renders an agent's system prompt, so a context: file
 // edited mid-conversation is current next turn. Names come pre-validated from
-// ModeLabel; an impossible miss returns "" and the turn keeps its prompt.
+// Agent; an impossible miss returns "" and the turn keeps its prompt.
 func (p *Parts) RefreshPromptFor(name string) string {
 	r, err := p.KitAgent(name)
 	if err != nil {
@@ -210,11 +210,11 @@ type SessionOptions struct {
 	PromptSuffix func() string
 }
 
-// BridgeVerdict maps a config gate verdict to the chat package's, field by
+// bridgeVerdict maps a config gate verdict to the chat package's, field by
 // field. The two Action enums are independent iota blocks, so an explicit
 // mapping keeps this security boundary correct if either is reordered, and an
-// unrecognized action fails closed. Exported so tests exercise the real bridge.
-func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
+// unrecognized action fails closed.
+func bridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	action := chat.ActionBlock // fail closed on any unmapped action
 	switch v.Action {
 	case config.ActionRun:
@@ -243,7 +243,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	}
 	// activeName is the session's agent, captured by the hook closures below.
 	// A session's agent is fixed for its lifetime.
-	activeName := rt.ModeLabel
+	activeName := rt.Agent
 	cfg := chat.Config{
 		Store:          p.st,
 		RunsDir:        p.runsDir,
@@ -294,7 +294,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	// The kit's gate:, run before every tool. Each agent has its own or none.
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
-			return BridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
+			return bridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
 		}
 		// Keyed by the active agent, so one runaway agent's denial-breaker
 		// tally never hard-stops another. A nil reviewer leaves
@@ -531,7 +531,7 @@ func (p *Parts) Reviewer() *review.Reviewer {
 }
 
 // buildClient constructs a streaming client plus its request params from a
-// configured model. Reused for the initial client and on each agent switch.
+// configured model.
 func buildClient(md config.Model) (chat.LLMClient, llm.RequestParams) {
 	rp := llm.RequestParams{
 		ReasoningEffort: md.Reasoning,

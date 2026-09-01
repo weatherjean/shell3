@@ -36,10 +36,6 @@ type errBoom struct{}
 
 func (errBoom) Error() string { return "boom" }
 
-// SetOnEvent repoints a live session's observer. The chat session outlives a
-// config reload (it IS the history), so without this the observer stays bound
-// to the generation that created it — and that generation's dispatcher is
-// closed by the reload's teardown, silently ending delivery.
 func TestSetOnEventRepointsObserver(t *testing.T) {
 	first := 0
 	s := NewSession(SessionOpts{OnEvent: func(Event) { first++ }})
@@ -57,7 +53,6 @@ func TestSetOnEventRepointsObserver(t *testing.T) {
 	}
 }
 
-// Clearing it is legal: a reloaded config may declare no event: block.
 func TestSetOnEventNilStopsDelivery(t *testing.T) {
 	n := 0
 	s := NewSession(SessionOpts{OnEvent: func(Event) { n++ }})

@@ -63,9 +63,6 @@ func TestRunCommandPassesArg(t *testing.T) {
 	}
 }
 
-// A failing command reports its stderr rather than posting a blank reply. A
-// command cannot block anything, so there is no fail-closed question here —
-// the error is the reply.
 func TestRunCommandFailureReportsStderr(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"broken": `echo "no repo here" >&2; exit 1`})
 	_, err := c.RunCommand(context.Background(), "broken", "")
@@ -81,15 +78,5 @@ func TestRunCommandUnknownReportsNotFound(t *testing.T) {
 	c := cmdCfg(t, map[string]string{"standup": "echo hi"})
 	if _, err := c.RunCommand(context.Background(), "nope", ""); err != ErrNoSuchCommand {
 		t.Fatalf("err = %v, want ErrNoSuchCommand", err)
-	}
-}
-
-func TestHasCommand(t *testing.T) {
-	c := cmdCfg(t, map[string]string{"standup": "echo hi"})
-	if !c.HasCommand("standup") {
-		t.Error("HasCommand(standup) = false")
-	}
-	if c.HasCommand("stop") {
-		t.Error("HasCommand(stop) = true, want false")
 	}
 }

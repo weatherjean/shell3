@@ -29,8 +29,6 @@ func TestShouldPrintHeaderInPreRun(t *testing.T) {
 			cmd:  sub,
 			want: true,
 		},
-		// No help-flag case: cobra short-circuits -h/--help to the help func
-		// before PersistentPreRun ever fires, so the guard never sees it.
 		{
 			name: "help command suppresses pre-run header",
 			cmd:  &cobra.Command{Use: "help"},

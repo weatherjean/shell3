@@ -52,16 +52,12 @@ func isClosed(ch <-chan struct{}) bool {
 	}
 }
 
-// TestReloadProceedsWhileJobRunning: a reload no longer refuses while a
-// background bash_bg job is live — it succeeds, the job completes on its own
-// generation, and its completion notice still wakes the parent.
 func TestReloadProceedsWhileJobRunning(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	// A slow job so it is definitely still running across the reload.
 	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
@@ -82,15 +78,12 @@ func TestReloadProceedsWhileJobRunning(t *testing.T) {
 	rt.jobs.wait()
 }
 
-// TestOldPartsCloseAfterDrain: a reload during a running bash_bg parks the old
-// generation's closer, which runs only once the job drains — never before.
 func TestOldPartsCloseAfterDrain(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	// Make the CURRENT (old) generation's teardown observable before reloading.
 	oldClosed := make(chan struct{})
 	rt.cleanup = func() { close(oldClosed) }
 
@@ -115,9 +108,6 @@ func TestOldPartsCloseAfterDrain(t *testing.T) {
 	}
 }
 
-// TestDoubleReloadWhileLingering: two reloads while a job lingers park two old
-// generations; both close once the job drains, and the newest generation stays
-// live throughout.
 func TestDoubleReloadWhileLingering(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	parent, err := rt.Session(SessionOpts{})
@@ -132,12 +122,10 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	// Reload 1: gen0 → gen1 (parks gen0's closer, job still running).
 	gen1 := make(chan struct{})
 	if _, err := rt.applyReload(fakeReloadState(rt, fakeCfg("x"), func() { close(gen1) })); err != nil {
 		t.Fatalf("reload 1: %v", err)
 	}
-	// Reload 2: gen1 → gen2 (parks gen1's closer too, job still running).
 	gen2 := make(chan struct{})
 	if _, err := rt.applyReload(fakeReloadState(rt, fakeCfg("x"), func() { close(gen2) })); err != nil {
 		t.Fatalf("reload 2: %v", err)

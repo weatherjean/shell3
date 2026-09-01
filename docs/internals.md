@@ -24,6 +24,9 @@ declared tool over another built-in.
 MCP clients, store, hooks, and agent factories. `shell3.Runtime` owns the live
 generation, sessions, jobs, and reload lifecycle. `chat.Session` owns one
 conversation's messages, inbox, reminders, and turn serialization.
+Resolved agent and model identities remain structured through assembly, turns,
+and stored metadata; human-readable labels are produced only at rendering
+boundaries.
 
 ## Kit and configuration
 
@@ -242,7 +245,6 @@ internal/mediadir/       media paths and cleanup
 internal/modelproxy/     local provider proxy lifecycle
 internal/notify/         completion notification types
 internal/paths/          global and local path resolution
-internal/persona/        prompt/tool/parameter carrier
 internal/render/         status and stored-record HTML renderers
 internal/review/         contextual gate reviewer
 internal/runs/           SQLite history, outbox, markers, janitors
@@ -259,6 +261,7 @@ make build
 make lint
 go test ./...
 go test -race ./...
+make coverage
 make deepcheck
 ```
 

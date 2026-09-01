@@ -157,8 +157,7 @@ needed.
 
 ## The gate is a speed bump, not a boundary
 
-Say this plainly, because the previous version of this page did not: **the
-agent can rewrite its own gate in two lines of Python.** The rules match shell
+**The agent can rewrite its own gate in two lines of Python.** The rules match shell
 text, and `python3 -c "open('shell3.sh','w').write('')"` contains no `rm`, no
 redirect, and no `sed -i`. It sails through.
 

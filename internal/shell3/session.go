@@ -46,8 +46,8 @@ type Session struct {
 	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
 	sawError   bool               // any turn emitted an error event; drives the audit "end" status
-	// busy spans Send until its turn goroutine finishes, turning an
-	// overlapping Send/Clear/Compact into ErrBusy instead of a data race.
+	// busy spans Send until its turn goroutine finishes, rejecting overlapping
+	// sends and between-turn configuration changes instead of racing them.
 	busy bool
 	// closed is set by doClose so a late Send — a Wake-driven drain racing
 	// teardown — is rejected rather than run against the ended store record.
@@ -81,13 +81,12 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		default:
 			// Best-effort: a failed NewSession leaves storeID "" and no
 			// persistence, logged so it is observable rather than silent.
-			_, metaModel := chat.SplitStatus(cfg.StatusLine)
 			if id, err := cfg.Store.NewSession(runs.Meta{
 				Workdir:   cfg.WorkDir,
 				ConfigDir: cfg.ConfigDir,
-				Model:     metaModel,
+				Model:     cfg.ModelID,
 				ParentID:  opts.ParentID,
-				Agent:     opts.Agent,
+				Agent:     cfg.Agent,
 				CronJob:   opts.CronJob,
 			}); err == nil {
 				storeID = id
@@ -99,7 +98,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	// Carry the dispatch identity into cfg so a compaction rollover, which
 	// runs mid-turn from cfg alone, stamps the rolled session with the same
 	// attribution instead of losing it at the boundary.
-	cfg.Agent = opts.Agent
 	cfg.ParentID = opts.ParentID
 	cfg.CronJob = opts.CronJob
 	s := &Session{
@@ -110,7 +108,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		StoreID:             storeID,
 		InitialMessages:     seed,
 		InitialPromptTokens: seedTokens,
-		ContextWindowFor:    func(string) int { return cfg.ContextWindow },
 		Sink:                s.route,
 		OnEvent:             cfg.OnEvent,
 		Store:               cfg.Store,
@@ -251,7 +248,7 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	// doClose nils it once `done` closes.
 	rt := s.runtime
 	// Snapshot the turn config still holding s.mu, so "busy set" and "cfg
-	// read" are atomic against the cfg mutators (Clear, RegisterHostTool):
+	// read" are atomic against RegisterHostTool and reload:
 	// one that slipped past its isBusy check lands wholly before or after.
 	tc := s.turnConfigLocked()
 	s.mu.Unlock()
@@ -314,19 +311,9 @@ func (s *Session) ID() string {
 	return s.sess.ID()
 }
 
-// Close cancels any in-flight turn and waits for it, so its deferred history
-// persist runs against the still-open store, then ends the store session and
-// releases the config. A sequential second Close is a safe no-op; concurrent
-// Closes are not supported.
-//
-// A Start-owned session also tears down the private Runtime Start created
-// (client, store, proxy spawner); a Runtime-hosted one only deregisters, and
-// the shared parts stay alive for the other sessions.
-//
-// An abandoned Send channel is fine: cancelling the turn ctx unblocks route's
-// send to it, so the join below cannot wedge. Draining is still the supported
-// pattern. Only EndSession's error is returned; the best-effort teardown
-// steps do not contribute to it.
+// Close cancels and joins any active turn before ending the stored session.
+// Start-owned sessions also close their private Runtime. Repeated sequential
+// calls are safe; concurrent calls are unsupported.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() { s.closeErr = s.doClose() })
 	return s.closeErr
@@ -430,7 +417,7 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 }
 
 // ActiveAgent returns the name of the currently active agent.
-func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
+func (s *Session) ActiveAgent() string { return s.cfg.Agent }
 
 // Name is the session's runtime key, which front-ends use as a label.
 func (s *Session) Name() string { return s.name }

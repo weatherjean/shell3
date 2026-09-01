@@ -195,11 +195,6 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 }
 
-// A first boot that defers the bot token writes `TELEGRAM_TOKEN=` — a key
-// that exists but holds nothing. A later `boot --force --tg-token …` must
-// FILL that line, not treat it as an existing credential worth keeping:
-// keeping it discards the typed token and then reports it as kept, leaving
-// the user with a config that refuses to start and a note saying otherwise.
 func TestMergeEnvFillsBlankValueInsteadOfKeepingIt(t *testing.T) {
 	existing := "MAIN_API_KEY=\n# Telegram bot token from @BotFather — fill in before `shell3 telegram`.\nTELEGRAM_TOKEN=\n"
 	out, kept := mergeEnv(existing, [][2]string{

@@ -40,8 +40,6 @@ func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 	if err := RunAskTurn(ctx, &buf, sess, "start a job"); err != nil {
 		t.Fatalf("turn: %v", err)
 	}
-	// The job should still be running right after the turn (sleep 0.4).
-	// FollowAskJobs must block until it completes and its wake turn renders.
 	done := make(chan error, 1)
 	go func() { done <- FollowAskJobs(ctx, &buf, rt, sess) }()
 	select {
@@ -63,8 +61,6 @@ func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 	}
 }
 
-// TestFollowAskJobs_NoJobsReturnsImmediately is the negative case: with no
-// running jobs and an empty inbox, FollowAskJobs returns without blocking.
 func TestFollowAskJobs_NoJobsReturnsImmediately(t *testing.T) {
 	rt := shell3test.NewRuntimeForTest(t, "ok")
 	sess, err := rt.Session(shell3.SessionOpts{})
@@ -83,9 +79,6 @@ func TestFollowAskJobs_NoJobsReturnsImmediately(t *testing.T) {
 	}
 }
 
-// TestFollowAskJobs_CtxCancelStopsWait verifies SIGINT semantics: a cancelled
-// ctx unblocks the wait (returning ctx.Err()) even while a background job is
-// still running, so the run can quit on demand.
 func TestFollowAskJobs_CtxCancelStopsWait(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{
@@ -105,7 +98,6 @@ func TestFollowAskJobs_CtxCancelStopsWait(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- FollowAskJobs(ctx, &buf, rt, sess) }()
-	// The job sleeps 5s; cancel well before it finishes.
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	select {
@@ -121,10 +113,7 @@ func TestFollowAskJobs_CtxCancelStopsWait(t *testing.T) {
 type contentRule struct {
 	contains []string
 	reply    string
-	// gate, when set, blocks the reply until it is closed (or ctx is done) —
-	// used to hold a turn open long enough for a test to observe state that
-	// exists only in the gap before the turn completes.
-	gate <-chan struct{}
+	gate     <-chan struct{}
 }
 
 // contentLLM is an llm.Streamer that picks its scripted response by
@@ -176,20 +165,6 @@ func (c *contentLLM) Stream(ctx context.Context, msgs []llm.Message, _ []llm.Too
 	return nil
 }
 
-// TestFollowAskJobs_LingeringSubagentFollowUp is the race regression from the
-// FollowAskJobs review: a subagent job reports Done=true at MAIN-turn end
-// (jobs.go markDoneLocked) even while its child session lingers to run a
-// follow-up turn for a bash_bg job that outlived the turn. The bug: once that
-// bash_bg job's own JobProgress{Done:true} wakes waitForJobChange, a running
-// count built from `!j.Done` alone sees the subagent as done too and returns
-// early — dropping the follow-up's narration. JobInfo.ChildOpen fixes this:
-// FollowAskJobs must keep waiting while a subagent job is Done but ChildOpen.
-//
-// The child's follow-up turn (triggered by the bash_bg completion) is gated:
-// held open so the test can assert FollowAskJobs is STILL waiting at exactly
-// the moment the old code would have returned, then released to let the
-// follow-up complete and its agent_update notice reach — and be narrated by —
-// the root session.
 func TestFollowAskJobs_LingeringSubagentFollowUp(t *testing.T) {
 	followupGate := make(chan struct{})
 	fake := &contentLLM{rules: []contentRule{

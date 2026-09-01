@@ -77,7 +77,6 @@ func TestPollHealthQuietRecoveryThenNewOutage(t *testing.T) {
 	if recovered, _, _ := h.sweep(); !recovered {
 		t.Fatal("quiet recovery did not fire")
 	}
-	// The next error starts a FRESH outage — count restarts at 1 and logs.
 	if logNow, fails := h.fail(); !logNow || fails != 1 {
 		t.Fatalf("error after recovery: logNow=%v fails=%d, want true/1", logNow, fails)
 	}

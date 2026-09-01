@@ -162,8 +162,6 @@ func TestListToolsPagination(t *testing.T) {
 	}
 }
 
-// TestCallStructuredContentOnly covers a spec-legal result that carries only
-// structuredContent (mirroring into a text block is a SHOULD, not a MUST).
 func TestCallStructuredContentOnly(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"stats": func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		return &sdk.CallToolResult{StructuredContent: map[string]any{"count": 42}}, nil

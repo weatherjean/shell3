@@ -75,8 +75,6 @@ func TestRunEventUngovernedAgentIsNoop(t *testing.T) {
 	}
 }
 
-// A failing subscriber is reported, never fatal: an observer cannot refuse
-// anything, so there is nothing to fail closed on.
 func TestRunEventFailureIsReportedNotFatal(t *testing.T) {
 	c, _ := evCfg(t, []string{"error"}, `echo boom >&2; exit 3`)
 	err := c.RunEvent(context.Background(), "main", "error", []byte(`{}`))

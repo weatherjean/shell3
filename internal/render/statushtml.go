@@ -55,7 +55,6 @@ func StatusPageHTML(sess *shell3.Session, rt *shell3.Runtime, version string,
 			gate = "armed"
 		}
 		kv(&b, "command gate", gate)
-		kv(&b, "status line", snap.StatusLine)
 		b.WriteString("</dl>\n")
 		writeNames(&b, "tools", toolNames(snap.Tools))
 		writeNames(&b, "employees", snap.Subagents)

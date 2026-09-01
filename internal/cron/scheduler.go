@@ -57,17 +57,7 @@ type Scheduler struct {
 	now      func() time.Time     // injectable clock for tests
 }
 
-// New validates every schedule and arms an entry per job, failing fast on a
-// malformed one. Every job is an agent dispatch whose result routes as mail
-// through the job runtime, which is also what reports the run's outcome back
-// here (RecordOutcome).
-//
-// New is NewWithStore with a nil store: in-memory only, no run history.
-func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
-	return NewWithStore(disp, nil, jobs)
-}
-
-// NewWithStore is New plus a RunStore, restoring each job's counters and last
+// NewWithStore validates and arms every job, restoring each job's counters and last
 // run from it. A job the store has never seen — or a nil store — starts from a
 // zero JobStatus, so a test never needs a runs store to build a scheduler.
 func NewWithStore(disp Dispatcher, store RunStore, jobs []shell3.CronJob) (*Scheduler, error) {
@@ -184,25 +174,8 @@ func (s *Scheduler) recordDispatch(j shell3.CronJob, subID string, err error) {
 	s.persist(j.Name, st)
 }
 
-// RecordOutcome records what a dispatched run actually DID, reported by the
-// completion router (shell3.Runtime's cron-outcome hook) once the subagent's
-// turn ends — clean, failed, killed, or lost to a restart.
-//
-// Two guards, both load-bearing. Completion delivery is at-least-once: a post
-// the transport rejected is re-dispatched every redeliverEvery until it lands,
-// and a leftover outbox row replays at the next boot, so the SAME run reaches
-// here repeatedly — counting each pass would inflate exactly the number this
-// exists to make honest. And an outcome whose sub id is not the current run's
-// is a straggler from a fire a later one has superseded; the table keeps the
-// latest run only, so it is dropped rather than backdating the row.
-//
-// A job this scheduler does not declare is dropped too: never invent a row for
-// a name a /reload removed.
-//
-// Accepted race: a run that finished before its own fire took s.mu records
-// against the previous LastSubID and is then re-armed by recordDispatch, so a
-// later redelivery could count it twice. The window is one mutex write against
-// a whole LLM turn; restructuring for it costs more than it saves.
+// RecordOutcome records the latest declared job's result. It ignores duplicate
+// at-least-once deliveries, superseded run IDs, and jobs removed by reload.
 func (s *Scheduler) RecordOutcome(o shell3.CronOutcome) {
 	s.mu.Lock()
 	st, known := s.last[o.Job]

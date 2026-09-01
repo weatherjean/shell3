@@ -19,7 +19,7 @@ func TestReminderPersistAndRestore(t *testing.T) {
 	if err := s2.RestoreReminders(); err != nil {
 		t.Fatalf("RestoreReminders: %v", err)
 	}
-	rems := s2.Reminders()
+	rems := reminderSnapshot(s2)
 	if len(rems) != 1 || rems[0].Text != "<system-reminder>subagent x finished</system-reminder>" {
 		t.Fatalf("want 1 restored reminder, got %+v", rems)
 	}

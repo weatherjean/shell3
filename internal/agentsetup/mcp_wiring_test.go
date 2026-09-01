@@ -75,7 +75,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var found bool
-	for _, d := range rt.Personality.Tools {
+	for _, d := range rt.Profile.Tools {
 		if d.Name == "mcp_fake_echo" {
 			found = true
 			if d.Description != "echo back" {
@@ -84,7 +84,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("mcp_fake_echo missing from agent tools: %+v", rt.ActiveTools)
+		t.Fatalf("mcp_fake_echo missing from agent tools: %+v", rt.Profile.Tools)
 	}
 	if !rt.HostToolNames["mcp_fake_echo"] {
 		t.Error("mcp_fake_echo not routed to host-tool dispatch")
@@ -94,7 +94,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range srt.Personality.Tools {
+	for _, d := range srt.Profile.Tools {
 		if strings.HasPrefix(d.Name, "mcp_") {
 			t.Errorf("employee must not get MCP tools, has %q", d.Name)
 		}
@@ -153,7 +153,7 @@ func TestMCPWiringDownServer(t *testing.T) {
 		t.Errorf("down server missing from ConfigWarnings: %v", cfg.ConfigWarnings)
 	}
 	rt, _ := p.AgentRuntime("")
-	for _, d := range rt.Personality.Tools {
+	for _, d := range rt.Profile.Tools {
 		if strings.HasPrefix(d.Name, "mcp_") {
 			t.Errorf("down server must contribute no tools, got %q", d.Name)
 		}
@@ -178,8 +178,6 @@ func TestMCPWiringAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The kit's own tool dispatcher always owns HostTool; with no MCP block
-	// and no declared tools, every name falls through to ErrHostToolNotFound.
 	if cfg.HostTool == nil {
 		t.Fatal("cfg.HostTool should be the kit dispatcher")
 	}

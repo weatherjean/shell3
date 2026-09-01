@@ -8,22 +8,15 @@ import (
 )
 
 const (
-	statusSonnet = "openai │ claude-sonnet-4-6"
-	statusOpus   = "openai │ claude-opus-4-7"
-	statusGPT4o  = "openai │ gpt-4o"
+	modelSonnet = "claude-sonnet-4-6"
+	modelOpus   = "claude-opus-4-7"
 )
 
-var testContextWindowFor = func(m string) int {
-	return map[string]int{
-		"claude-sonnet-4-6": 1_000_000,
-		"claude-opus-4-7":   1_000_000,
-		"gpt-4o":            128_000,
-	}[m]
-}
+const sonnetContextWindow = 1_000_000
 
 func TestReminderTracker_NoEmitOnFirstTurn(t *testing.T) {
 	var r reminderTracker
-	got := r.check(statusSonnet, 0)
+	got := r.check(modelSonnet, sonnetContextWindow, 0)
 	if got != "" {
 		t.Errorf("expected empty on first turn, got %q", got)
 	}
@@ -31,12 +24,11 @@ func TestReminderTracker_NoEmitOnFirstTurn(t *testing.T) {
 
 func TestReminderTracker_ContextBucket(t *testing.T) {
 	var r reminderTracker
-	r.contextWindowFor = testContextWindowFor
-	r.lastModel = "claude-sonnet-4-6"
+	r.lastModel = modelSonnet
 	r.lastContextPct = 0
 	r.lastTokens = 1000
 
-	got := r.check(statusSonnet, 110_000)
+	got := r.check(modelSonnet, sonnetContextWindow, 110_000)
 	if got == "" {
 		t.Fatal("expected reminder at 10% bucket, got empty")
 	}
@@ -50,12 +42,11 @@ func TestReminderTracker_ContextBucket(t *testing.T) {
 
 func TestReminderTracker_NoRepeatSameBucket(t *testing.T) {
 	var r reminderTracker
-	r.contextWindowFor = testContextWindowFor
-	r.lastModel = "claude-sonnet-4-6"
+	r.lastModel = modelSonnet
 	r.lastContextPct = 10
 	r.lastTokens = 110_000
 
-	got := r.check(statusSonnet, 125_000)
+	got := r.check(modelSonnet, sonnetContextWindow, 125_000)
 	if got != "" {
 		t.Errorf("expected no reminder in same bucket, got %q", got)
 	}
@@ -63,9 +54,9 @@ func TestReminderTracker_NoRepeatSameBucket(t *testing.T) {
 
 func TestReminderTracker_ModelChange(t *testing.T) {
 	var r reminderTracker
-	r.lastModel = "claude-opus-4-7"
+	r.lastModel = modelOpus
 
-	got := r.check(statusSonnet, 0)
+	got := r.check(modelSonnet, sonnetContextWindow, 0)
 	if got == "" {
 		t.Fatal("expected reminder on model change, got empty")
 	}
@@ -84,12 +75,11 @@ func TestReminderTracker_30kDeltaThreshold(t *testing.T) {
 	r.lastTokens = 100
 
 	r2 := reminderTracker{
-		contextWindowFor: testContextWindowFor,
-		lastModel:        "claude-sonnet-4-6",
-		lastContextPct:   10,
-		lastTokens:       100_000,
+		lastModel:      modelSonnet,
+		lastContextPct: 10,
+		lastTokens:     100_000,
 	}
-	got := r2.check(statusSonnet, 130_001)
+	got := r2.check(modelSonnet, sonnetContextWindow, 130_001)
 	if got == "" {
 		t.Fatal("expected reminder on 30k token delta, got empty")
 	}

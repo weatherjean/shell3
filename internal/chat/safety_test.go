@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// Non-bash tools fire the tool-call hook too, under their real name with a nil command,
-// and a block verdict stops them.
 func TestGateNonBashToolBlocks(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, name, command, _ string, _ bool) ToolCallVerdict {
 		if name != "edit_file" {
@@ -85,10 +83,6 @@ func TestGateNonBashToolPasses(t *testing.T) {
 	}
 }
 
-// A {command=""} rewrite produces the same empty argv as a pass, but it is a
-// command verdict, not a pass — so a non-bash tool must fail closed. This is the
-// case a byte-shape check on the argv would wrongly let through; Passthrough
-// (false here) is what distinguishes it.
 func TestGateNonBashToolEmptyRewriteFailsClosed(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", ""}, Passthrough: false}

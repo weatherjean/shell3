@@ -20,7 +20,7 @@ type Session struct {
 	msgMu    sync.RWMutex
 	messages []llm.Message
 	// standingReminders (the host Environment block) are injected into every
-	// turn's allMsgs and exposed via Reminders(), but never persisted — they
+	// turn's allMsgs, but never persisted — they
 	// regenerate on resume. Guarded by msgMu.
 	standingReminders []string
 	// nextToolCallID drives the sequential ids that replace provider-emitted
@@ -30,7 +30,7 @@ type Session struct {
 	// reminderLog anchors each emitted <system-reminder> to the message index
 	// it precedes, so a reader can interleave them into History(). In-memory
 	// only. Guarded by msgMu.
-	reminderLog      []ReminderRecord
+	reminderLog      []runs.ReminderLine
 	lastPromptTokens int // accurate token count from most recent streamOnce response
 
 	// warnedFixedOverhead throttles warnFixedOverhead to one line per session:
@@ -190,13 +190,11 @@ func reminderBlock(header string, items []string) string {
 }
 
 // SessionOpts configures a new Session. All fields are optional: StoreID is
-// the runs session id (empty = no store), ContextWindowFor resolves a model to
-// its window for context-usage reminders, and Sink receives every event inline
+// the runs session id (empty = no store), and Sink receives every event inline
 // on the turn goroutine (nil discards).
 type SessionOpts struct {
-	StoreID          string
-	ContextWindowFor func(string) int
-	Sink             func(Event)
+	StoreID string
+	Sink    func(Event)
 	// OnEvent is a second observer beside Sink: Sink renders, OnEvent is the
 	// kit event: seam. It runs inline, so real work must hand off to its own
 	// worker (agentsetup.eventDispatcher). Nil is the normal case.
@@ -217,7 +215,6 @@ type SessionOpts struct {
 // installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
 	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink, onEvent: opts.OnEvent}
-	s.reminders.contextWindowFor = opts.ContextWindowFor
 	if s.sink == nil {
 		s.sink = func(Event) {}
 	}
@@ -237,21 +234,12 @@ func NewSession(opts SessionOpts) *Session {
 	return s
 }
 
-// ID is the runs session id, "" with no store. Guarded by msgMu to pair with
-// the writes in SetID and compactInto: a torn read against a concurrent
-// session roll would mis-pair id and messages.
+// ID is the runs session id, "" with no store. Guarded by msgMu because
+// compaction can roll the session id while another goroutine reads it.
 func (s *Session) ID() string {
 	s.msgMu.RLock()
 	defer s.msgMu.RUnlock()
 	return s.id
-}
-
-// SetID swaps the runs session id, so later turns persist under a different
-// conversation. Guarded by msgMu — a reader pairs id with the message slice.
-func (s *Session) SetID(id string) {
-	s.msgMu.Lock()
-	defer s.msgMu.Unlock()
-	s.id = id
 }
 
 // SetStandingReminders replaces the host standing reminders. They are
@@ -268,13 +256,6 @@ func (s *Session) append(m llm.Message) {
 	s.messages = append(s.messages, m)
 }
 
-// ReminderRecord is one emitted system-reminder, anchored by Seq to the
-// message index it precedes, so a reader can interleave it into the history.
-type ReminderRecord struct {
-	Seq  int
-	Text string
-}
-
 // recordReminder logs a system-reminder anchored before the next message to
 // be appended. Turn goroutine only. The sidecar write happens AFTER releasing
 // msgMu, so an fsync stall cannot block concurrent readers behind the write
@@ -282,7 +263,7 @@ type ReminderRecord struct {
 func (s *Session) recordReminder(text string) {
 	s.msgMu.Lock()
 	seq := len(s.messages)
-	s.reminderLog = append(s.reminderLog, ReminderRecord{Seq: seq, Text: text})
+	s.reminderLog = append(s.reminderLog, runs.ReminderLine{Seq: seq, Text: text})
 	store, id := s.store, s.id
 	s.msgMu.Unlock()
 	if store != nil && id != "" {
@@ -322,40 +303,8 @@ func (s *Session) RestoreReminders() error {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.reminderLog = s.reminderLog[:0]
-	for _, l := range lines {
-		s.reminderLog = append(s.reminderLog, ReminderRecord{Seq: l.Seq, Text: l.Text})
-	}
+	s.reminderLog = append(s.reminderLog, lines...)
 	return nil
-}
-
-// Reminders snapshots every system-reminder, standing ones first at Seq 0 so
-// a replay shows them at the top. Safe during a running turn.
-func (s *Session) Reminders() []ReminderRecord {
-	s.msgMu.RLock()
-	defer s.msgMu.RUnlock()
-	return s.remindersLocked()
-}
-
-// remindersLocked builds the standing-first reminder snapshot. Callers hold
-// msgMu (read or write).
-func (s *Session) remindersLocked() []ReminderRecord {
-	out := make([]ReminderRecord, 0, len(s.standingReminders)+len(s.reminderLog))
-	for _, t := range s.standingReminders {
-		out = append(out, ReminderRecord{Seq: 0, Text: t})
-	}
-	return append(out, slices.Clone(s.reminderLog)...)
-}
-
-// HistorySnapshot copies messages and reminders under a SINGLE msgMu read
-// lock. compactInto swaps the slice and clears the log atomically under that
-// same lock, so one acquisition is what stops a reader pairing a
-// post-compaction slice with pre-compaction anchors.
-func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
-	s.msgMu.RLock()
-	defer s.msgMu.RUnlock()
-	msgs := make([]llm.Message, len(s.messages))
-	copy(msgs, s.messages)
-	return msgs, s.remindersLocked()
 }
 
 // StandingReminders copies the host standing reminders for prompt inspection.
@@ -374,10 +323,9 @@ func (s *Session) allocToolCallID() string {
 // reminderTracker decides when to emit a <system-reminder>, remembering what
 // it last sent so unchanged state is not repeated.
 type reminderTracker struct {
-	lastContextPct   int    // last 10%-bucket emitted (0 = never emitted)
-	lastModel        string // model name present in last emitted reminder
-	lastTokens       int    // prompt tokens at last emission (persists across turns)
-	contextWindowFor func(string) int
+	lastContextPct int    // last 10%-bucket emitted (0 = never emitted)
+	lastModel      string // model name present in last emitted reminder
+	lastTokens     int    // prompt tokens at last emission (persists across turns)
 }
 
 // resetContextGauge re-baselines after a compaction drops the token count;
@@ -390,13 +338,7 @@ func (r *reminderTracker) resetContextGauge() {
 
 // check returns a <system-reminder> block when something warrants one and
 // updates the tracker, "" otherwise. promptTokens 0 = unknown.
-func (r *reminderTracker) check(statusLine string, promptTokens int) string {
-	_, model := SplitStatus(statusLine)
-	contextWindow := 0
-	if r.contextWindowFor != nil {
-		contextWindow = r.contextWindowFor(model)
-	}
-
+func (r *reminderTracker) check(model string, contextWindow, promptTokens int) string {
 	var lines []string
 
 	// Model change reminder.

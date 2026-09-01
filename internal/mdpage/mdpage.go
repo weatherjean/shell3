@@ -1,18 +1,4 @@
-// Package mdpage renders markdown to ONE self-contained HTML page, for
-// content too long to belong in a chat bubble.
-//
-// Telegram is a poor reader for long answers. Its formatting is a short list
-// (bold, italic, code, links, lists) and `internal/telegram/mdhtml` renders
-// only that list — tables are not even parsed, so a comparison arrives as
-// literal pipe characters. The escape hatch already existed: a reply over two
-// bubbles posts as an attachment instead. It attached raw markdown, which
-// moved the wall of unformatted text into a file rather than fixing it.
-//
-// A page from here is a real document: headings are headings, tables are
-// tables, code is highlighted by monospace and a background. Telegram opens it
-// in its own webview, so everything must be INLINE — no stylesheet link, no
-// font URL, no script. It also has to read on a phone, at night, without the
-// user having chosen a theme, which is what the two colour blocks are for.
+// Package mdpage renders Markdown as self-contained HTML.
 package mdpage
 
 import (

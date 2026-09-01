@@ -56,8 +56,6 @@ func TestRemindersSidecar(t *testing.T) {
 	}
 }
 
-// TestNewSession_RecordsCronJob proves CronJob survives a round trip through
-// SQLite: NewSession persists it, SessionMeta reads it back.
 func TestNewSession_RecordsCronJob(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -90,9 +88,6 @@ func findMeta(t *testing.T, st *Store, id string) (Meta, bool) {
 	return Meta{}, false
 }
 
-// Session IDs arrive from user-controlled surfaces (shell3 ask --resume, the
-// bot's views); a path-traversal id must never leak anything or escape onto
-// the filesystem via job-log paths.
 func TestSessionIDPathTraversalRejected(t *testing.T) {
 	root := t.TempDir()
 	st, err := Open(root)
@@ -112,10 +107,6 @@ func TestSessionIDPathTraversalRejected(t *testing.T) {
 	}
 }
 
-// A session that never stored a message leaves no trace: ending it deletes
-// its row instead of writing an "ended" record for an empty shell — the
-// pinned cron dispatch parent and console startups would otherwise litter
-// the store with one row per process start.
 func TestEndSessionRemovesEmptySession(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

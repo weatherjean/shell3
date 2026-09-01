@@ -18,7 +18,7 @@ func dummyTool(name string) HostTool {
 func hasTool(s *Session, name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, td := range s.cfg.Personality.Tools {
+	for _, td := range s.cfg.Profile.Tools {
 		if td.Name == name {
 			return true
 		}
@@ -44,7 +44,7 @@ func TestSessionDecorator_AppliesToNewSessions(t *testing.T) {
 	}
 	n := 0
 	again.mu.Lock()
-	for _, td := range again.cfg.Personality.Tools {
+	for _, td := range again.cfg.Profile.Tools {
 		if td.Name == "image_generate" {
 			n++
 		}

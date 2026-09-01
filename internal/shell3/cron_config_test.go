@@ -32,4 +32,8 @@ EOF2
 	if len(jobs) != 1 || jobs[0].Name != "n" || jobs[0].Agent != "explorer" {
 		t.Fatalf("bad cron config: %+v", jobs)
 	}
+	jobs[0].Name = "mutated"
+	if got := rt.Cron()[0].Name; got != "n" {
+		t.Fatalf("Cron returned mutable runtime state: %q", got)
+	}
 }

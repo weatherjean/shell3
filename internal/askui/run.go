@@ -35,7 +35,7 @@ func Run(ctx context.Context, rt *shell3.Runtime, sess *shell3.Session, resumed 
 			turnCtx, cancel := context.WithCancel(ctx)
 			return sess.Send(turnCtx, prompt), cancel
 		},
-		sess, snap.Agent, snap.StatusLine,
+		sess, snap.Agent, snap.Model,
 	)
 	m.contextWindow = snap.ContextWindow
 	m.sessionID = sess.ID()

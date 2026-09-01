@@ -12,9 +12,6 @@ func TestLoadFullTree(t *testing.T) {
 	if m, ok := c.Model("m1"); !ok || m.ModelID != "test-model" {
 		t.Fatalf("model = %+v ok=%v", m, ok)
 	}
-	if c.Secrets["KEY"] != "val" {
-		t.Fatalf("secrets = %v", c.Secrets)
-	}
 	if len(c.Warnings()) != 0 {
 		t.Fatalf("warnings = %v", c.Warnings())
 	}

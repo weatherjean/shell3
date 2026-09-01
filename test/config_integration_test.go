@@ -15,7 +15,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 func writeConfigTree(t *testing.T, dir string, files map[string]string) {
@@ -65,10 +64,24 @@ func loadKitConfig(t *testing.T, dir, body string, gates, notes map[string]strin
 	return lc
 }
 
-// TestConfigIntegration_ToolCallHooks loads a config tree with a tool-call +
-// tool-result hook and drives full chat turns through the turn loop using
-// fakellm, asserting the hook scripts fire on the real dispatch path (block,
-// redact, non-bash gating).
+func assembledConfig(t *testing.T, dir string) chat.Config {
+	t.Helper()
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigDir: dir,
+		CWD:       dir,
+		HomeDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	t.Cleanup(cleanup)
+	cfg, err := parts.SessionConfig(agentsetup.SessionOptions{Agent: "main", WorkDir: dir})
+	if err != nil {
+		t.Fatalf("SessionConfig: %v", err)
+	}
+	return cfg
+}
+
 func TestConfigIntegration_ToolCallHooks(t *testing.T) {
 	dir := t.TempDir()
 	lc := loadKitConfig(t, dir, integWiring+integAgent+`
@@ -96,10 +109,10 @@ main_note() {
   fi
 }
 `, map[string]string{"main": "main_gate"}, map[string]string{"main": "main_note"})
+	assembled := assembledConfig(t, dir)
 
 	ctx := context.Background()
 
-	// Hook sanity outside the turn loop: rm -rf / blocked, echo allowed.
 	if !lc.HasToolCall() {
 		t.Fatal("expected a tool-call hook to be discovered")
 	}
@@ -114,21 +127,16 @@ main_note() {
 		t.Errorf("tool-call hook should allow 'echo hello', got action=%v", v2.Action)
 	}
 
-	// --- Turn 1: the hook blocks the dangerous bash call via the dispatch loop ---
 	t.Run("tool_call_blocks_via_turn", func(t *testing.T) {
-		events := runToolCallTurn(t, lc, dir, "run dangerous command",
+		events := runToolCallTurn(t, assembled, dir, "run dangerous command",
 			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"rm -rf /"}`}, nil)
 		assertToolResultContains(t, events, "blocked by tool-call hook")
 	})
 
 	t.Run("tool_result_redacts_via_turn", func(t *testing.T) {
-		events := runToolCallTurn(t, lc, dir, "echo a secret",
+		events := runToolCallTurn(t, assembled, dir, "echo a secret",
 			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"echo SECRET-TOKEN"}`},
-			func(tc *chat.TurnConfig) {
-				tc.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
-					return lc.RunToolResult(ctx, "main", name, argsJSON, output)
-				}
-			})
+			nil)
 
 		var resultOut string
 		var found bool
@@ -148,17 +156,14 @@ main_note() {
 		}
 	})
 
-	// --- Turn 3: the hook gates a NON-bash tool (read) via the dispatch loop ---
-	// Proves the hook fires for every tool with its real name (here a read of
-	// .env, blocked by name+args), not just the bash family.
 	t.Run("non_bash_read_gated_via_turn", func(t *testing.T) {
-		events := runToolCallTurn(t, lc, dir, "read the env file",
+		events := runToolCallTurn(t, assembled, dir, "read the env file",
 			llm.ToolCall{ID: "1", Name: "read", RawArgs: `{"path":".env"}`}, nil)
 		assertToolResultContains(t, events, "no reading .env")
 	})
 }
 
-func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, tc llm.ToolCall, tweak func(*chat.TurnConfig)) []chat.Event {
+func runToolCallTurn(t *testing.T, assembled chat.Config, dir, prompt string, tc llm.ToolCall, tweak func(*chat.TurnConfig)) []chat.Event {
 	t.Helper()
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &tc}}},
@@ -171,19 +176,12 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
-	turnCfg := chat.TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
-		StatusLine:  "test │ x",
-		ToolConfig: chat.ToolConfig{
-			Log:     applog.Noop{},
-			WorkDir: dir,
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
-				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, "main", name, command, argsJSON, headless))
-			},
-		},
-		Handlers: chat.NewHandlers(),
-	}
+	assembled.LLM = fake
+	assembled.Profile = chat.AgentProfile{SystemPrompt: "you are a test", Tools: toolDefs}
+	assembled.ModelID = "x"
+	assembled.Log = applog.Noop{}
+	assembled.WorkDir = dir
+	turnCfg := chat.NewTurnConfig(assembled, chat.NewHandlers())
 	if tweak != nil {
 		tweak(&turnCfg)
 	}
@@ -209,16 +207,9 @@ func assertToolResultContains(t *testing.T, events []chat.Event, want string) {
 	t.Errorf("expected a tool result containing %q; events: %v", want, texts)
 }
 
-// TestConfigIntegration_EmptyRewriteOnNonBashFailsClosed drives the exact
-// footgun the Passthrough signal exists to catch: a bash-oriented rewrite hook
-// written WITHOUT a name guard, emitting {"command": ""} for a non-bash tool
-// (its payload command is null). The resulting argv (["bash","-c",""]) is
-// byte-identical to a pure pass; it must fail closed (the non-bash tool is
-// blocked), not run, honoring the "command/argv verdicts are bash-only"
-// invariant end-to-end through the real dispatch loop.
 func TestConfigIntegration_EmptyRewriteOnNonBashFailsClosed(t *testing.T) {
 	dir := t.TempDir()
-	lc := loadKitConfig(t, dir, integWiring+integAgent+`
+	loadKitConfig(t, dir, integWiring+integAgent+`
 #---
 # gate: [main]
 #---
@@ -229,7 +220,7 @@ main_gate() {
 }
 `, map[string]string{"main": "main_gate"}, nil)
 
-	events := runToolCallTurn(t, lc, dir, "read the readme",
+	events := runToolCallTurn(t, assembledConfig(t, dir), dir, "read the readme",
 		llm.ToolCall{ID: "1", Name: "read", RawArgs: `{"path":"README.md"}`}, nil)
 
 	var blocked bool
@@ -247,9 +238,6 @@ main_gate() {
 	}
 }
 
-// TestConfigIntegration_PerAgentHooks proves the per-agent split end-to-end:
-// the explorer subagent's own hook governs its calls, and a subagent with no
-// hook file runs ungated even when the main hook would block.
 func TestConfigIntegration_PerAgentHooks(t *testing.T) {
 	dir := t.TempDir()
 	lc := loadKitConfig(t, dir, integWiring+integAgent+`
@@ -294,18 +282,15 @@ explorer_gate() {
 
 	ctx := context.Background()
 
-	// Main agent: blocked by its own gate.
 	if v := lc.RunToolCall(ctx, "main", "bash", "ls", "{}", false); v.Action != config.ActionBlock || v.Reason != "main-gate" {
 		t.Errorf("main agent verdict = %+v", v)
 	}
-	// Explorer: its own allowlist governs — rg passes, git push blocked.
 	if v := lc.RunToolCall(ctx, "explorer", "bash", "rg foo", "{}", true); v.Action != config.ActionRun {
 		t.Errorf("explorer rg verdict = %+v", v)
 	}
 	if v := lc.RunToolCall(ctx, "explorer", "bash", "git push", "{}", true); v.Action != config.ActionBlock {
 		t.Errorf("explorer git push verdict = %+v", v)
 	}
-	// free is named by no gate: ungated, even though the main gate blocks all.
 	if v := lc.RunToolCall(ctx, "free", "bash", "git push", "{}", true); v.Action != config.ActionRun || !v.Passthrough {
 		t.Errorf("free verdict = %+v", v)
 	}

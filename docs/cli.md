@@ -35,26 +35,14 @@ chat, so you can see there that the bot came up.
 is the token and the `chat_id` — see
 [Security](security.md#the-telegram-boundary).
 
-**One conversation.** Every message you send continues the **same**
-long-lived conversation — just type; no replying, no threading rules. A
-Telegram reply adds the quoted text as context for the agent but never
-switches conversations. `/new` starts a fresh one (the old conversation
-stays in the dash's runs listing and the agent's searchable history); a restart resumes
-where you left off, and automatic compaction keeps the context bounded
-however long it runs. One main-agent turn runs at a time, but sending
-always succeeds — and a **text message sent mid-turn steers the running
-turn**: the agent sees it at its next step, so "stop, wrong file" redirects
-work in flight (messages with attachments queue and run after). While the
-agent works you immediately see a **progress bubble**; it starts as
-`⚙️ working…`, lists tools as they run, and updates in place. It deletes itself once the answer
-arrives (it stays behind only when the turn failed, as a breadcrumb). If the
-agent writes user-facing text both before and after using a tool, the final
-reply keeps those text segments in order instead of discarding the earlier
-one.
-At 50% and 75% context usage, Telegram posts a silent `🧠` milestone. An
-automatic compaction posts another with the new context size; these are host
-notices and spend no model turn.
-`/stop` cancels the running turn (the dash shows what's queued).
+Each chat has one long-lived conversation. Replies add quoted context; `/new`
+starts another conversation, restart resumes it, and compaction keeps it
+bounded. One turn runs per room. Text sent mid-turn steers at the next round;
+attachments queue for the next turn.
+
+A progress bubble lists tools and disappears after a successful answer. Silent
+notices mark 50% and 75% context use and compaction. `/stop` cancels the turn;
+`/status` shows queued work.
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [task reports](configuration.md#task-reports): a failure or a
 `report: raw` result posts to the chat (🔔, or ⏰ for a cron origin); everything
@@ -307,8 +295,8 @@ plain `ask` starts a fresh session; `--resume` follows ask's own thread marker
 (the `ask` surface in the runs store's `threads` table), never "the newest
 session in this workdir" — which, with the bot running, would be whatever chat
 it last answered in. Run the bot and `ask` at the same time and neither
-inherits the other's context; both still share the runs store, so each sees
-the other's history through the `history` tool and the dash.
+inherits the other's context; both still share the runs store and `history`
+tool.
 
 **Background jobs and `-p`.** When a turn spawns a subagent or `bash_bg` job,
 `ask` stays alive after the turn ends and waits for those in-process jobs to

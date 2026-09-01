@@ -4,8 +4,8 @@
 # errcheck, bodyclose) is the fast per-commit gate; this is the slower
 # whole-program pass worth running before a release:
 #
-#   deadcode    unreachable functions via call-graph analysis (-test keeps
-#               test-only helpers out of the report)
+#   deadcode    unreachable functions via call-graph analysis, both with tests
+#               and from production entry points only
 #   dupl        token-based clone detection (report-only: duplication is a
 #               judgment call, not a build-breaker)
 #   govulncheck known vulnerabilities actually REACHABLE from this code
@@ -27,6 +27,16 @@ echo
 echo "== deadcode (unreachable functions) =="
 if have deadcode golang.org/x/tools/cmd/deadcode; then
   out=$(deadcode -test ./... 2>&1)
+  if [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
+
+  echo "-- production entry points --"
+  # These packages/files are explicit cross-package test fixtures. Everything
+  # else must be reachable without tests; otherwise tests are propping up dead
+  # production surface and `deadcode -test` alone would hide it.
+  out=$(deadcode ./... 2>&1 | sed \
+    -e '/internal\/llm\/fakellm\//d' \
+    -e '/internal\/shell3\/shell3test\//d' \
+    -e '/internal\/shell3\/testsupport.go:/d')
   if [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
 fi
 

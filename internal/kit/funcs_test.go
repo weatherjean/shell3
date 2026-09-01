@@ -38,9 +38,6 @@ func TestScanFuncsRejectsTopLevelStatement(t *testing.T) {
 }
 
 func TestScanFuncsQuotedBracesCannotHideTopLevelStatement(t *testing.T) {
-	// Raw brace counting sees the quoted "{" in f and quoted "}" in g as
-	// structural. That used to keep the apparent function body open across
-	// the top-level touch command even though bash executes it while sourcing.
 	src := []byte("f() { printf '%s\\n' \"{\"; }\n" +
 		"touch /tmp/must-not-run\n" +
 		"g() { printf '%s\\n' \"}\"; }\n")
@@ -128,9 +125,6 @@ func TestScanFuncsAllowsShebangAndBlankLines(t *testing.T) {
 	}
 }
 
-// Heredocs are how kits carry prose, and prose contains unbalanced braces — a
-// skill quoting JSON, a prompt with a stray `}`. Naive brace counting ends the
-// function early and reports the next prose line as a top-level statement.
 func TestScanFuncsHeredocWithBraces(t *testing.T) {
 	src := []byte("skill_x() { cat <<'EOF'\n" +
 		"use {\"a\": 1} in your reply\n" +

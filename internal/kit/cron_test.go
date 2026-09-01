@@ -197,9 +197,6 @@ EOF
 	}
 }
 
-// A cron: block names itself the way tool:/command: do, so it must not open,
-// close, or otherwise disturb the scope a tool: block files into — a cron
-// declared mid-agent would otherwise orphan every tool below it.
 func TestParseCron_DoesNotDisturbScope(t *testing.T) {
 	k, err := Parse(cronKit(`#---
 # cron: mid
@@ -231,8 +228,6 @@ after_impl() { echo ok; }
 	}
 }
 
-// A cron block treats agent: as payload and recognizes the removed tool:
-// payload for a directed error, but command:/gate: remain declaration kinds.
 func TestParseCron_SecondKindIsAnError(t *testing.T) {
 	_, err := Parse(cronKit(`#---
 # cron: x
@@ -248,11 +243,6 @@ greet_impl() { echo hi; }
 	}
 }
 
-// Cron runs agent turns only. A cron: block naming a tool: is refused at load
-// with a message naming the replacement — the same shape as the direct:
-// removal, and for the same reason: json/yaml silently drops what it cannot
-// place, so a kit still carrying the old spelling must fail loudly rather than
-// arm a job that never runs.
 func TestParseCron_ToolJobIsRefused(t *testing.T) {
 	_, err := Parse(cronKit(`#---
 # cron: sync-job

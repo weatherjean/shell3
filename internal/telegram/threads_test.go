@@ -45,7 +45,6 @@ func TestThreadIndexPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A second index over the same store (as after a restart) sees the marker.
 	idx2 := NewThreadIndex(st, "telegram")
 	got, ok := idx2.Current()
 	if !ok || got != "s1" {
@@ -72,7 +71,6 @@ func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
 	if got, ok := idx.Current(); ok {
 		t.Fatalf("Current() after clear = %q, true; want _, false", got)
 	}
-	// And across a restart, from the store.
 	if got, ok := NewThreadIndex(st, "telegram").Current(); ok {
 		t.Fatalf("Current() after clear + restart = %q, true; want _, false", got)
 	}
@@ -110,7 +108,7 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 			scripts[i] = fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}}
 		}
 		return chat.Config{
-			LLM: fakellm.New(scripts...), ModeLabel: "code",
+			LLM: fakellm.New(scripts...), Agent: "code",
 			Store: st, Headless: o.Headless,
 		}, nil
 	})
@@ -122,29 +120,6 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 	return b, st
 }
 
-// TestMainSession_MarkerConsistentAfterRestartResume reproduces the observed
-// live state: threads.current-session pointed at a session that had ended
-// days earlier while a different, newer session was the actually-live
-// conversation. mainSession resumes the marker's id and then SetCurrents the
-// result, so the two should never be able to diverge from this path alone —
-// this test checks whether they can.
-//
-// The task brief that seeded this test (and its original name,
-// …AdvancesCurrentMarker) assumed ResumeID always mints a fresh session id on
-// resume (so the test asserted second.ID() != firstID after an EndSession).
-// That assumption does not hold: shell3.Session.ID() returns the StoreID it
-// was resumed with unchanged (internal/shell3/session.go's newSession sets
-// storeID = resumeID on the resume path; chat.NewSession takes that id
-// as-is) — "a restart resumes the same conversation" per CLAUDE.md is the
-// intended behaviour, not a bug. The marker therefore never "advances" here;
-// this test checks what actually matters: after mainSession recreates the
-// resumed session, the PERSISTED marker (re-read via a fresh ThreadIndex over
-// the same store, the way a real restart would) still names that session.
-// This test PASSES against the current code — the divergence is not
-// reproducible from mainSession's own resume path. See
-// TestMainSession_MarkerConsistentAfterMainHandleCleared below and
-// TestMainSession_MarkerSurvivesCompaction for the actual repro (host-managed
-// compaction rolling the session id without re-recording the marker).
 func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 	b, st := newResumeTestBot(t)
 
@@ -157,14 +132,10 @@ func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 		t.Fatalf("marker after first session = %q, want %q", got, firstID)
 	}
 
-	// A real conversation has messages by the time it ends; an empty session
-	// leaves no trace (EndSession deletes rather than marks ended). Append one
-	// so EndSession exercises the same path a real restart would find.
 	if err := st.AppendMessage(firstID, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Simulate a restart: drop the in-memory handle, end the stored session.
 	if err := st.EndSession(firstID); err != nil {
 		t.Fatal(err)
 	}
@@ -177,33 +148,13 @@ func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// mainSession resumes the SAME store id (shell3.Session.ID() returns
-	// StoreID unchanged — resuming does not mint a new row); the marker must
-	// therefore still agree with it. tconv(b).index's in-memory map already agrees
-	// by construction (mainSession just wrote it in this process) — that alone
-	// wouldn't catch a lost STORE write, which is the failure this task's fix
-	// targets. Re-read through a fresh ThreadIndex over the same store, the
-	// way a restarting process actually would.
-	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
+	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("persisted marker = %q, want the resumed session %q (stale marker forks the conversation)", got, second.ID())
 	}
 }
 
-// TestMainSession_MarkerConsistentAfterMainHandleCleared covers the brief's
-// Step 3b path: a /reload swapping the runtime's Parts generation. It is
-// included per the task's Step 1/3b instructions even though Step 2 above
-// already passed (this repro attempt is not the divergence's actual
-// mechanism — see the task-1 report). shell3.RuntimeForTest builds a Runtime
-// with no Parts (no config dir, no store-generation machinery), so Reload
-// here is expected to be a no-op/error, and this fixture's ThreadIndex closes
-// over a fixed store regardless — it CANNOT exercise the production
-// store-handle swap (cmd/shell3/hostwiring.go's openThreads re-resolves via
-// rt.Parts().Store() on every call), despite the name this test used to
-// carry. What it actually verifies is narrower: clearing the in-memory
-// tconv(b).main handle and calling mainSession() again still leaves the persisted
-// marker naming the (re-resumed) live session under this fixture.
 func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	b, st := newResumeTestBot(t)
 	first, err := tconv(b).mainSession()
@@ -219,7 +170,7 @@ func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
+	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("marker %q != live session %q after reload", got, second.ID())
@@ -227,18 +178,6 @@ func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	_ = first
 }
 
-// TestMainSession_MarkerSurvivesCompaction is the task-7 repro: the live
-// install's marker pointed at a session that had ended three days before the
-// conversation actually in progress. internal/chat's compactInto (called
-// from inside a normal turn, once auto-compaction's prompt-token threshold
-// trips) rolls the session onto a NEW runs-store row mid-conversation — and
-// nothing on that path knows about telegram's current-session marker
-// (internal/chat and internal/shell3 must never import internal/telegram),
-// so the marker is left naming the pre-compaction id. This test drives real
-// turns through the bot (the only place compaction actually fires in
-// production — there is no manual /compact command) until auto-compaction
-// trips inside one of them, then rereads the PERSISTED marker through a
-// fresh ThreadIndex over the same store, the way a restarting process would.
 func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -266,7 +205,7 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: fakellm.New(scripts...), ModeLabel: "code",
+			LLM: fakellm.New(scripts...), Agent: "code",
 			Store: st, Headless: o.Headless,
 			AgentKnobs: chat.AgentKnobs{CompactAt: 100, KeepRecent: 50},
 		}, nil
@@ -302,15 +241,13 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 		t.Fatal("compaction did not roll the store id; this test proves nothing — fix the setup")
 	}
 
-	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
+	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != after {
 		t.Fatalf("marker = %q, want the post-compaction session %q — a restart would resume the stale one and orphan the conversation", got, after)
 	}
 }
 
-// Concurrent SetCurrent calls are race-free and leave one of the written ids
-// as the marker (last write wins).
 func TestThreadIndexConcurrentSetCurrent(t *testing.T) {
 	idx := NewThreadIndex(testStore(t), "telegram")
 	var wg sync.WaitGroup

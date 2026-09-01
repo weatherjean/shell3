@@ -96,6 +96,10 @@ func newAskCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Only the long-lived ask conversation owns ask's resume marker.
+			// A scripted --agent run uses an empty parent session solely to dispatch
+			// its child and must leave the marker untouched.
+			rememberAskSession(rt.Parts().Store(), sess.ID(), agentFlag)
 			// --agent dispatches the named subagent and prints only its reply,
 			// returning before the chat below. It claims no resume marker: a
 			// batch script looping over it must not leave the next --resume
@@ -104,10 +108,6 @@ func newAskCommand() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "config=%s\n", resolved)
 				return runAskAgent(ctx, os.Stdout, os.Stderr, sess, agentFlag, prompt)
 			}
-
-			// Record this session so the NEXT --resume finds it. Written for a
-			// fresh one too, or the first --resume has no marker to follow.
-			rememberAskSession(rt.Parts().Store(), sess.ID())
 
 			// The chat UI owns input, rendering and the wake loop from here. It
 			// draws on the alternate screen, so the banner above is hidden
@@ -193,10 +193,11 @@ func askResumeID(st *runs.Store) string {
 	return id
 }
 
-// rememberAskSession records sess for the next --resume. A failed write costs
-// the next run its resume, never this run its turn.
-func rememberAskSession(st *runs.Store, id string) {
-	if st == nil || id == "" {
+// rememberAskSession records sess for the next --resume. Agent is non-empty
+// for a one-shot --agent dispatch, which deliberately owns no conversation.
+// A failed write costs the next run its resume, never this run its turn.
+func rememberAskSession(st *runs.Store, id, agent string) {
+	if st == nil || id == "" || agent != "" {
 		return
 	}
 	if err := st.SetCurrentSession(askSurface, id); err != nil {

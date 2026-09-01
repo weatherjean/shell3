@@ -11,7 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/kit"
-	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // errNoSuchKitAgent marks "this kit does not declare that agent".
@@ -74,10 +73,6 @@ func KitHooksOf(k *kit.Kit) config.KitHooks {
 // Kit returns the loaded kit, or nil when none was loaded.
 func (p *Parts) Kit() *kit.Kit { return p.kit }
 
-// KitPath is where the loaded kit was read from, "" when none is; kit.Runner
-// sources it before running a tool's function.
-func (p *Parts) KitPath() string { return p.kitPath }
-
 // KitAgent resolves one declared agent into its capability set. The first
 // declared agent gets every built-in; everyone else gets what they declare.
 func (p *Parts) KitAgent(name string) (kit.Resolved, error) {
@@ -92,7 +87,7 @@ func (p *Parts) KitAgent(name string) (kit.Resolved, error) {
 	return kit.Resolved{}, fmt.Errorf("%w: kit %s declares no agent %q", errNoSuchKitAgent, p.kitPath, name)
 }
 
-// KitAgentRuntime assembles a kit agent's runtime: model client, persona, and
+// KitAgentRuntime assembles a kit agent's runtime: model client, profile, and
 // the built-ins it asked for plus every declared tool it can call.
 func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	r, err := p.KitAgent(name)
@@ -146,11 +141,6 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		}
 	}
 
-	names := make([]string, 0, len(defs))
-	for _, d := range defs {
-		names = append(names, d.Name)
-	}
-
 	// Skills are FILES, indexed by name, description and path — never
 	// inlined, which cost thousands of tokens per turn and removed the
 	// agent's choice of which to read. The prompt comes from kitPrompt,
@@ -162,13 +152,11 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	}
 
 	return chat.ActiveAgent{
-		Personality: persona.Persona{
-			Name:         r.Agent.Name,
+		Profile: chat.AgentProfile{
 			SystemPrompt: p.kitPrompt(r),
 			Tools:        defs,
 		},
-		ModeLabel:    r.Agent.Name,
-		ActiveTools:  names,
+		Agent:        r.Agent.Name,
 		ActiveSkills: skillNames,
 		LLM:          client,
 		Params:       rp,
@@ -176,7 +164,6 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		AgentKnobs: chat.AgentKnobs{
 			HostToolNames: hostNames,
 			Subagents:     employees,
-			Environment:   true,
 			ContextWindow: md.ContextWindow,
 			CompactAt:     md.CompactAt,
 			KeepRecent:    md.KeepRecent,

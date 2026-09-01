@@ -100,9 +100,8 @@ type Runtime struct {
 
 	// jobs owns the in-process background jobs, cancelled at Close.
 	jobs *jobManager
-	// telegram and cron mirror the parsed config blocks, re-derived on Reload.
-	telegram TelegramConfig
-	cron     []CronJob
+	// cron mirrors the parsed jobs, re-derived on Reload.
+	cron []CronJob
 
 	// parts is the config assembly this Runtime was built from, swapped at
 	// Reload, for host code needing resources Runtime does not expose.
@@ -177,7 +176,6 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		ctx:           ctx,
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
-		telegram:      parts.Telegram(),
 		cron:          parts.Cron(),
 		parts:         parts,
 	}

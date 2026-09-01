@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestEventPayloadCarriesIdentity(t *testing.T) {
@@ -42,7 +43,7 @@ func TestEventPayloadCarriesToolFields(t *testing.T) {
 func TestEventPayloadCarriesUsage(t *testing.T) {
 	b := eventPayload("main", chat.Event{
 		Kind:  chat.EventTurnDone,
-		Usage: &chat.EventUsageData{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
+		Usage: &llm.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
 	})
 	var got struct {
 		Usage *struct {

@@ -8,12 +8,6 @@ import (
 	"testing"
 )
 
-// TestOpen_UnreadableFilePreservedOnError pins the same invariant as
-// TestOpen_CorruptFilePreservedOnError for a different failure shape: a file
-// this process cannot even read (chmod 000). Open must propagate the error,
-// leave the file exactly as it was, and never create an aside/backup copy —
-// a permission error happens before openDB can form any opinion about the
-// schema, let alone decide to recreate.
 func TestOpen_UnreadableFilePreservedOnError(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: chmod 000 does not block reads")
@@ -48,9 +42,6 @@ func TestOpen_UnreadableFilePreservedOnError(t *testing.T) {
 	}
 }
 
-// TestOpen_CorruptFilePreservedOnError pins the core invariant: a file Open
-// cannot make sense of is left alone, never deleted. Garbage bytes fail the
-// very first schema-check query, well before the recreate path.
 func TestOpen_CorruptFilePreservedOnError(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)

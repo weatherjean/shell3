@@ -26,8 +26,6 @@ func outboxRows(t *testing.T, rt *Runtime) []struct{ Kind, JSON string } {
 	return out
 }
 
-// A completion handed to the host leaves no outbox row behind: delivery
-// completed, nothing to redeliver at the next boot.
 func TestDispatchDeletesEventRowAfterHandoff(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -45,8 +43,6 @@ func TestDispatchDeletesEventRowAfterHandoff(t *testing.T) {
 	}
 }
 
-// A completion arriving during shutdown is NOT dropped: the event row stays
-// in the outbox so the next boot can redeliver what this process could not.
 func TestDispatchDuringShutdownKeepsEventRow(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -73,9 +69,6 @@ func TestDispatchDuringShutdownKeepsEventRow(t *testing.T) {
 	}
 }
 
-// A job the shutdown itself cancelled must NOT leave an event row: its
-// "failed: context canceled" completion is noise manufactured by the restart,
-// and the running marker (not the event) is what reports it at boot.
 func TestDispatchDuringShutdownDropsCancelledJobsEvent(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}
@@ -143,8 +136,6 @@ func TestRecoverCompletionsReportsDeadRunningMarker(t *testing.T) {
 	}
 }
 
-// A running marker whose PID is alive belongs to a concurrent process (an
-// ask alongside the bot): left untouched, nothing delivered.
 func TestRecoverCompletionsSkipsLiveRunningMarker(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{}
@@ -197,7 +188,6 @@ func TestRedeliverUndelivered(t *testing.T) {
 		t.Fatalf("outbox = %+v, want the row still kept while down", rows)
 	}
 
-	// Transport heals: the retry posts and drains the outbox.
 	host.mu.Lock()
 	host.postErr = nil
 	host.mu.Unlock()
@@ -255,8 +245,6 @@ func TestCommandJobMarkerLifecycle(t *testing.T) {
 	waitOutboxEmpty(t, rt)
 }
 
-// cancelAll (runtime shutdown) leaves the running marker in place: it is the
-// record the next boot turns into "was still running when shell3 stopped".
 func TestShutdownLeavesRunningMarker(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
 	host := &fakeHost{wakeOK: true}

@@ -8,10 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// A resumed session seeds InitialMessages that are ALREADY on disk. The first
-// post-resume saveHistory must flush only the messages appended since, not
-// re-write the seeded history (which would double the stored transcript on every
-// restart, compounding across restarts).
 func TestSaveHistory_AfterResume_DoesNotReflushSeed(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -45,85 +41,5 @@ func TestSaveHistory_AfterResume_DoesNotReflushSeed(t *testing.T) {
 	}
 	if len(got) != 4 {
 		t.Fatalf("messages on disk after resumed turn: got %d, want 4 (seed must not be re-flushed)", len(got))
-	}
-}
-
-// /clear replaces history via SetMessages(nil) + SetID(fresh). SetMessages must
-// resync the persisted high-water mark, or saveHistory's persistedLen >
-// len(messages) guard silently skips every flush and the fresh session never
-// persists anything.
-func TestSaveHistory_AfterClear_PersistsNewSession(t *testing.T) {
-	st, err := runs.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("open runs store: %v", err)
-	}
-	oldID, err := st.NewSession(runs.Meta{})
-	if err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	sess := NewSession(SessionOpts{StoreID: oldID, Store: st})
-	sess.messages = append(sess.messages,
-		llm.Message{Role: llm.RoleUser, Content: "before clear"},
-		llm.Message{Role: llm.RoleAssistant, Content: "reply"},
-	)
-	saveHistory(st, applog.Noop{}, sess, oldID)
-
-	newID, err := st.NewSession(runs.Meta{})
-	if err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	sess.SetMessages(nil)
-	sess.SetID(newID)
-
-	sess.messages = append(sess.messages,
-		llm.Message{Role: llm.RoleUser, Content: "after clear"},
-		llm.Message{Role: llm.RoleAssistant, Content: "fresh reply"},
-	)
-	saveHistory(st, applog.Noop{}, sess, newID)
-
-	got, err := st.LoadMessages(newID)
-	if err != nil {
-		t.Fatalf("LoadMessages: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("messages persisted after /clear: got %d, want 2", len(got))
-	}
-}
-
-func TestSaveHistory_AfterRollback_FlushesNewMessages(t *testing.T) {
-	st, err := runs.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("open runs store: %v", err)
-	}
-	id, err := st.NewSession(runs.Meta{})
-	if err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	sess := NewSession(SessionOpts{StoreID: id, Store: st})
-	msgs := []llm.Message{
-		{Role: llm.RoleUser, Content: "q1"},
-		{Role: llm.RoleAssistant, Content: "a1"},
-		{Role: llm.RoleUser, Content: "q2"},
-		{Role: llm.RoleAssistant, Content: "a2"},
-	}
-	sess.messages = append(sess.messages, msgs...)
-	saveHistory(st, applog.Noop{}, sess, id)
-
-	sess.SetMessages(msgs[:2])
-	sess.messages = append(sess.messages,
-		llm.Message{Role: llm.RoleUser, Content: "q2 retry"},
-		llm.Message{Role: llm.RoleAssistant, Content: "a2 retry"},
-	)
-	before, err := st.LoadMessages(id)
-	if err != nil {
-		t.Fatalf("LoadMessages: %v", err)
-	}
-	saveHistory(st, applog.Noop{}, sess, id)
-	after, err := st.LoadMessages(id)
-	if err != nil {
-		t.Fatalf("LoadMessages: %v", err)
-	}
-	if len(after)-len(before) != 2 {
-		t.Fatalf("rollback turn flushed %d messages, want 2", len(after)-len(before))
 	}
 }

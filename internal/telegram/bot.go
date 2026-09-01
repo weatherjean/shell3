@@ -16,21 +16,8 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// Bot routes several Telegram chats to the runtime, one long-lived
-// conversation PER CHAT: every message continues that room's session (a reply
-// adds quoted context, it never forks), /new resets only the room it was typed
-// in, and each room's id persists under its own surface key so a restart
-// resumes all of them.
-//
-// Authorization is per SENDER, never per room: an allowlisted user drives the
-// agent wherever they speak, nobody else anywhere. Groups default to requiring
-// an addressed message (trigger.go); group_messages: all accepts every message
-// from those same allowlisted senders.
-//
-// Rooms run turns concurrently, one slot each, under a global cap; sending
-// always succeeds, since mid-turn mail queues and drains as one batch turn.
-// Completions return to the room that spawned them; cron results and orphans
-// land in the home chat.
+// Bot maintains one persistent conversation per Telegram chat. Authorization
+// is per sender; rooms run concurrently under a global turn cap.
 type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime

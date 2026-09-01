@@ -6,17 +6,9 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn is the Q3
-// regression: a session resumed from the store must restore the provider-
-// reported prompt-token count (not re-derive the chars/4 estimate), so the
-// FIRST resumed turn's maybeCompact fires when the persisted count is already
-// over compact_at. Token-dense histories (digits, code, CJK) estimate far below
-// their real token cost, so without the persisted count a resumed thread grows
-// unbounded past the model window without ever compacting.
 func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -27,11 +19,6 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 		t.Fatalf("new session: %v", err)
 	}
 
-	// A token-dense history: messages whose chars/4 estimate stays well under
-	// CompactAt (so an estimate-driven resume would NOT compact), but which the
-	// provider reported at 5000 prompt tokens — the count we persist and must
-	// restore. Sized so there is still a real head to summarize (≥ compactionFloor
-	// messages once the KeepRecent tail is carved off).
 	seed := make([]llm.Message, 0, 24)
 	for range 24 {
 		seed = append(seed, llm.Message{Role: llm.RoleAssistant, Content: "12345678"})
@@ -46,14 +33,10 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 		t.Fatalf("set tokens: %v", err)
 	}
 
-	// Sanity: the estimate is far below the persisted count and below CompactAt,
-	// so a resume that fell back to the estimate would NOT compact.
 	if est := estimatePromptTokens(seed); est >= 100 {
 		t.Fatalf("estimate %d ≥ CompactAt; test would not distinguish estimate from persisted count", est)
 	}
 
-	// Resume exactly as the front-end wiring does: seed messages + the persisted
-	// count read back from the store.
 	loaded, err := st.LoadMessages(id)
 	if err != nil {
 		t.Fatalf("load messages: %v", err)
@@ -76,10 +59,10 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 		}},
 	)
 	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 10},
-		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
+		LLM:        fake,
+		Profile:    AgentProfile{SystemPrompt: "test"},
+		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 10},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	c := &collector{}
@@ -92,9 +75,6 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 	}
 }
 
-// TestResume_NoPersistedTokens_FallsBackToEstimate verifies the old-session
-// fallback: when no prompt-token count was persisted (0), resume seeds the gauge
-// with the chars/4 estimate over the loaded history rather than leaving it at 0.
 func TestResume_NoPersistedTokens_FallsBackToEstimate(t *testing.T) {
 	seed := []llm.Message{
 		{Role: llm.RoleUser, Content: "some earlier user message"},

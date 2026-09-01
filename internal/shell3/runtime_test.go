@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -57,7 +56,7 @@ func fakeCfg(text string) func() chat.Config {
 				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: text}}},
 				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: text}}},
 			),
-			ModeLabel: "code",
+			Agent: "code",
 		}
 	}
 }
@@ -139,8 +138,8 @@ func TestRuntime_PerSessionWorkdir(t *testing.T) {
 				}},
 				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
 			),
-			ModeLabel: "code",
-			Personality: persona.Persona{Tools: []llm.ToolDefinition{{
+			Agent: "code",
+			Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{
 				Name: "bash", Parameters: map[string]any{"type": "object"},
 			}}},
 		}
@@ -157,7 +156,6 @@ func TestRuntime_PerSessionWorkdir(t *testing.T) {
 			}
 		}
 	}
-	// macOS tempdirs may resolve through /private; compare with EvalSymlinks.
 	wantA, _ := filepath.EvalSymlinks(dirA)
 	wantB, _ := filepath.EvalSymlinks(dirB)
 	gotA, _ := filepath.EvalSymlinks(got[a])

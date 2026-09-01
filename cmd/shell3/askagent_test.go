@@ -79,8 +79,6 @@ func TestWaitForDispatchWakesOnEvent(t *testing.T) {
 	}
 }
 
-// A cancelled context (SIGINT) unblocks the wait instead of hanging until the
-// job finishes on its own.
 func TestWaitForDispatchCancels(t *testing.T) {
 	jobs := func() []shell3.JobInfo { return []shell3.JobInfo{{ID: "sub1"}} }
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,8 +88,6 @@ func TestWaitForDispatchCancels(t *testing.T) {
 	}
 }
 
-// --agent is a scripted single shot: without a message there is no interactive
-// form to fall back to, so it must refuse rather than block on a huh prompt.
 func TestAskAgentRequiresMessage(t *testing.T) {
 	cmd := newAskCommand()
 	cmd.SetArgs([]string{"--agent", "drafter"})

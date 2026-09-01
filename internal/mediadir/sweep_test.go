@@ -53,11 +53,6 @@ func TestSweepZeroKeepsForever(t *testing.T) {
 	}
 }
 
-// TestSweepSkipsSymlinks pins the containment property that a symlinked
-// entry inside the media dir is never removed by Sweep, even when it's old
-// enough to qualify, and that its target survives untouched. Sweep only
-// considers e.Type().IsRegular() entries; a symlink's DirEntry type is
-// ModeSymlink, not a regular file, so it must be skipped outright.
 func TestSweepSkipsSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := t.TempDir()
@@ -70,10 +65,6 @@ func TestSweepSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	// Backdate the symlink itself (Lchtimes-equivalent isn't in the stdlib
-	// on all platforms; os.Chtimes on a symlink path follows the link on
-	// some systems and not others, so backdate the target instead — either
-	// way Sweep must never touch the link).
 	if err := os.Chtimes(target, now.Add(-9000*time.Hour), now.Add(-9000*time.Hour)); err != nil {
 		t.Fatal(err)
 	}

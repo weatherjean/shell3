@@ -9,24 +9,15 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// The completion outbox makes background-work delivery restart-durable
-// (runs.Store's outbox table). Two row kinds:
+// The completion outbox makes background delivery restart-durable. Two row kinds:
 //
 //   - "event": a finished job's CompletionEvent, written by dispatchCompletion
-//     before routing and deleted after the front-end hand-off returns.
-//     Delivery is at-least-once: a crash between hand-off and delete
-//     duplicates the report at the next boot — never loses it. Do not "fix"
-//     the ordering to delete first.
+//     before routing and deleted after hand-off. This ordering provides
+//     at-least-once delivery.
 //   - "running": a started job's marker, written at start and deleted when the
 //     job finishes. A marker still present at boot (from a dead process) is a
-//     job whose result was lost in flight; recovery reports it as such.
-//
-// RecoverCompletions is the boot-time pass, run by the long-lived front-ends
-// after their CompletionHost is installed, never by ask. A concurrent
-// process's rows are protected by the marker's PID: a live PID is skipped, and
-// ask deletes its own rows as jobs finish. An ask killed mid-job does leave
-// rows a later bot start reports — deliberate, since a completion is never
-// silently lost whoever spawned it.
+//     job whose result was lost in flight. Live marker PIDs are skipped during
+//     boot recovery so concurrent processes keep ownership of their rows.
 
 // runningMarker is the JSON body of a "running" outbox row.
 type runningMarker struct {

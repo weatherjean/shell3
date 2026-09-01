@@ -5,7 +5,7 @@ BIN := shell3
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build run install test lint fmt clean
+.PHONY: build run install test coverage lint fmt clean deepcheck
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
@@ -20,6 +20,12 @@ test:
 	go test -race -coverprofile=cover.out -covermode=atomic ./...
 	@go tool cover -func=cover.out | tail -1
 
+# Instruments every package for every test binary, so integration tests count
+# code they exercise across package boundaries rather than only their own package.
+coverage:
+	go test -coverpkg=./... -coverprofile=cover-all.out ./...
+	@go tool cover -func=cover-all.out | tail -1
+
 # Mirrors CI: formatting drift fails the build, then static analysis
 # (go vet first, then the deeper golangci-lint suite).
 lint:
@@ -31,7 +37,7 @@ fmt:
 	gofmt -w .
 
 clean:
-	rm -f $(BIN) cover.out
+	rm -f $(BIN) cover.out cover-all.out
 
 deepcheck:
 	./scripts/deepcheck.sh

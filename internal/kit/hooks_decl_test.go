@@ -7,9 +7,6 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// A command: block binds the function under it and carries a description.
-// Commands are install-wide, not scoped to an agent, so one declared before
-// any agent block is legal.
 func TestParseCommand(t *testing.T) {
 	src := `#---
 # command: standup
@@ -93,8 +90,6 @@ SHELL3_EOF
 	}
 }
 
-// An event: block is NAMED like gate:/note: — one function observes several
-// agents — and carries a mandatory kind filter.
 func TestParseEvent(t *testing.T) {
 	src := `#---
 # agent: main

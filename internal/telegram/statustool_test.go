@@ -28,9 +28,6 @@ func TestStatusTool_ReportsAgentAndConfig(t *testing.T) {
 	}
 }
 
-// The rooms section is the agent's only view of what other rooms are doing —
-// they share one working directory, so a concurrent turn there can collide
-// with the work about to happen here.
 func TestStatusListsLiveRooms(t *testing.T) {
 	fc := newFakeClient()
 	fc.chatTitle = "backend-infra"
@@ -41,9 +38,6 @@ func TestStatusListsLiveRooms(t *testing.T) {
 	}
 	ctx := context.Background()
 	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot hi"})
-	// Wait for the room to be IDLE, not merely to exist: the turn this message
-	// started reports "BUSY (mid-turn)" until it ends, and asserting on "idle"
-	// while it runs is a race the -race build loses reliably.
 	waitFor(t, func() bool { return b.conv(-100).session() != nil && !b.conv(-100).busy() })
 
 	sess := decoratedSession(t, b, rt)

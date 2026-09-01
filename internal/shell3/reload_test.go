@@ -16,8 +16,6 @@ func writeReloadCfg(t *testing.T, path, content string) {
 	}
 }
 
-// Reload re-reads the config file and applies it in place: new agents appear,
-// live sessions keep running, and the telegram/cron mirrors refresh.
 func TestReloadPicksUpConfigChange(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, nil)
@@ -44,15 +42,13 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 		t.Fatalf("expected 2 agents after reload, got %d (notes: %v)", res.Agents, res.Notes)
 	}
 	if rt.Telegram().ChatID != "123456789" {
-		t.Fatalf("telegram config mirror not refreshed: %+v", rt.Telegram())
+		t.Fatalf("telegram config not refreshed: %+v", rt.Telegram())
 	}
 	if sess.Snapshot().Agent == "" {
 		t.Fatal("live session unusable after reload")
 	}
 }
 
-// A broken config must be rejected wholesale: Reload errors and the running
-// runtime (and its sessions) keep the previous config.
 func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, nil)
@@ -75,10 +71,6 @@ func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 	}
 }
 
-// Reload must re-apply the session decorator: it rebuilds every live
-// session's cfg (dropping decorator-registered host tools like
-// image_generate), so without re-application the tool would vanish after
-// every /reload.
 func TestReloadReappliesSessionDecorator(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, nil)

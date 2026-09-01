@@ -54,9 +54,7 @@ apart.
 command is answered by the front-end, not by a model, and a cron job names
 its own target agent, so there is nothing for either to be scoped to.
 
-`cron:` is also the one block where `agent:` is payload rather than a
-declaration kind — it names what the job runs. The removed direct `tool:` job
-form is recognized only to produce a clear load error.
+Inside `cron:`, `agent:` names the target rather than opening a scope.
 
 The file is **definitions only** at the top level. That is what makes two things
 true at once: loading a kit never executes it, and running one tool is just
@@ -245,15 +243,7 @@ that ends with a summary unconditionally buys a main-agent turn on every
 tick, and the sentinel has to come from the JOB: the main agent answering
 `NO_REPLY` after reading the report has already spent the turn.
 
-A block names exactly one target, and it is always an `agent:`. Cron runs
-agent turns only. `tool:` was a second job kind — the tool's shell function,
-called directly on schedule with no model turn at all — and it was removed:
-a scheduled shell call has no model in the loop to judge its result, which is
-exactly where judgment leaks out of a turn and into a script nobody reviews.
-It also bypassed the job runtime, so tool jobs were the one piece of
-scheduled work with no concurrency cap. A kit still carrying `tool:` on a
-cron block is a LOAD error naming the replacement, rather than arming
-nothing.
+A cron block names exactly one `agent:` and always runs an agent turn.
 
 Mechanical, idempotent work is still a job — it just keeps a model in the
 loop. Declare the agent, hand it the tool, and let it read the output:
@@ -272,18 +262,13 @@ EOF
 }
 ```
 
-That prompt is the whole difference. The tool still does the work; the turn
-decides what its output means, and the `NO_REPLY` sentinel keeps a quiet tick
-down to one cheap employee turn with no main-agent turn behind it. If a job
-has no judgment in it whatsoever, it does not belong on the schedule: call
-the tool from inside a tick that is already running, or give it a system
-timer.
+The tool does the work; the turn decides what its output means. Use a system
+timer instead when no model judgment is needed.
 
 `report:` is the one axis for what the tick's finish does to the chat:
 `auto` (the default) spends a main-agent turn to judge the result, `raw`
 posts it straight to the chat instead and spends no turn, `always` spends the
-turn and requires it to answer. The pre-`report:` spelling `direct: true` is
-a load error naming its replacement, rather than a silently ignored key.
+turn and requires it to answer.
 
 Every target resolves at load, next to the check that a `gate:` names a real
 agent — an unknown agent, a duplicate job name, a malformed schedule. All of
@@ -292,7 +277,7 @@ them are load errors rather than a failed dispatch on the first tick, and
 
 A job's recorded history describes the RUN, not its dispatch. The scheduler
 fires and learns only that the subagent was accepted, so the outcome comes
-back later from the completion router: the dash's Cron table shows a job that
+back later from the completion router: `/status` shows a job that
 dispatches cleanly and fails its work as a failure. Between a firing and its
 result the row still carries the previous run's verdict beside the new
 timestamp — inventing one for work still in flight would be the same lie in

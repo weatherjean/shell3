@@ -146,19 +146,7 @@ func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendO
 	}
 }
 
-// postReply posts a turn's reply, chunked and threaded onto replyTo when there
-// is one, recording every sent id so the anchor advances and later wakes reply
-// to the newest message. An empty replyTo posts plain.
-//
-// replyMaxChunks caps the bubbles one reply may occupy; a longer one posts its
-// first chunk plus the whole text as a rendered HTML document, so the chat
-// stays readable and the phone gets one ping rather than twenty-five.
-//
-// The document is HTML, not the raw markdown it used to be. Attaching source
-// only moved the wall of unformatted text into a file: Telegram renders none
-// of the structure (mdhtml does not even parse a table, so a comparison
-// arrives as literal pipes), and neither did a .md attachment. A rendered page
-// is the thing the chat could not be.
+// Replies beyond replyMaxChunks send one preview chunk and an HTML document.
 const replyMaxChunks = 2
 
 // overflowDocName is what the attachment is called in the chat. Fixed, so a

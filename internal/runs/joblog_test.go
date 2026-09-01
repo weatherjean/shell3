@@ -33,8 +33,6 @@ func TestJobLogPathInvalidSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A path-traversal session id must not escape the runs dir (sessDir already
-	// guards; JobLogPath must ride that guard).
 	p := st.JobLogPath("../../etc", "bg1")
 	if p != "" && !strings.Contains(p, "invalid-session-id") {
 		t.Fatalf("traversal not neutralized: %q", p)

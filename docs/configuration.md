@@ -105,9 +105,8 @@ Both thresholds live on the model; there is no per-agent override.
 Compaction is host-managed and there are no model-driven prune/compact tools.
 The Telegram front-end runs one long-lived conversation PER CHAT, so each
 room's history grows steadily; when a room crosses `compact_at` it compacts on
-its own, keeping that conversation viable indefinitely. It happens silently — the dash shows the current
-context usage, and `shell3 ask`'s verbose output narrates each compaction as
-it runs.
+its own. `/status` shows current usage; verbose `shell3 ask` output reports
+compaction.
 
 ### Provider-specific knobs — `extra`
 
@@ -131,17 +130,9 @@ wrapped in `<think>…</think>`. shell3 strips a leading block of that shape, bu
 setting the knob is better — it keeps the reasoning out of the reply at the
 source, instead of the provider billing you for the same text twice.
 
-A related provider failure is a tool call that arrives as **text**: the
-endpoint failed to parse its own chat template, so the reply carries raw
-`<tool_call>` markup instead of a real call (seen on MiniMax; the same wrapper
-is used by Qwen and GLM templates). No legitimate reply contains it, so shell3
-treats such a reply as corrupt rather than an answer — a reply to you is
-replaced by `⚠️ the model produced malformed output (raw tool-call markup) —
-reply suppressed; the runs dash has the transcript`, and a
-[task report](#task-reports) turn posts nothing at all. The transcript keeps
-the raw text either way, so the run replay still shows what the model actually
-emitted. It is a symptom of the endpoint, not of your config: if it recurs,
-try the provider's other route for the model.
+Raw `<tool_call>` text means the endpoint failed to parse its chat template.
+shell3 suppresses it as malformed output but keeps it in the stored transcript.
+Try another provider route if it recurs.
 
 ### Local proxies — `run_proxy`
 
@@ -400,8 +391,8 @@ own timeout; their tools join the opted-in agents' tool lists as
 `mcp_<server>_<tool>` (`mcp_github_search_issues`). A server that is down
 loads as a **warning** — shell3 still starts, that server's tools are just
 absent until the next reload — while `shell3 health` treats it as a failure
-and reports each server's state. The dash index lists every server (up/down,
-tool count, last error). At call time a dead server gets one
+and reports each server's state. `/status` lists every server with its tool
+count and last error. At call time a dead server gets one
 automatic reconnect; if that fails too the model sees the error as tool
 output and adapts — a broken server never kills a turn.
 
@@ -436,8 +427,7 @@ one function usually governs several agents, and a copy per agent is how two
 rule sets drift apart. An agent no block names runs **ungated**; there is no
 fallback or chaining, and each agent is governed by exactly one function per
 kind. A `gate:` naming an agent the kit does not declare is a load error.
-The dash index states which of the two it is, in as many words: **command
-gate armed**, or **command gate off** when the main agent has none.
+`/status` reports **command gate armed** or **command gate off**.
 
 Every tool call — `bash`, `bash_bg`, `edit_file`, host tools
 like `send_media_telegram`, and `mcp_*` — sources the kit and calls the
@@ -716,16 +706,8 @@ description, and any files you point at. The description is the zero-config
 half — edit it in Telegram and that room's standing context changes on the
 next turn, no config edit and no restart.
 
-> **The bot must be able to see group info to read the description.** Telegram
-> serves the field only to a bot with that access; a default-restricted bot
-> ("has no access to messages") receives the title and an empty description,
-> with no error. Promote the bot to admin in that group and it arrives. This
-> is not in the Bot API docs — the `description` field row mentions no rights
-> requirement — but it is reproducible: the same basic group returned
-> `description_bytes=0` before a promotion and `66` after, same code, same
-> chat. `shell3.log` records `chat metadata … description_bytes=N` on every
-> lookup, which is how you tell "the bot cannot see it" from "the chat has
-> none".
+The bot needs group-info access to read the description; otherwise Telegram
+returns an empty value. Promote it to admin or use a trusted `context:` file.
 
 **`chats:`** tunes rooms that need something other than the defaults.
 Declaring a chat neither authorizes nor enrols it. Each entry takes `id`,
@@ -765,11 +747,8 @@ reproducible after the fact: it carries your `memory.md`, the agent's
 `context:` files, the skills index and (in Telegram) the room's brief, all of
 which can change under a live conversation.
 
-Only CHANGES are recorded, content-addressed, so an untouched conversation
-costs one stored body however many turns it runs. Prompts are excluded from
-history search on purpose — the `history` tool searches what was said, and a
-20 KB prompt in that index would bury every query. The dash's run replay
-shows each version, collapsed, at the message it took effect from.
+Only changed prompts are recorded, content-addressed. Prompts are excluded
+from history search; stored run replays show each version where it took effect.
 
 Deleting a session (the `runs_keep_days` janitor) drops its prompt references
 and collects any body nothing points at any more.
@@ -862,12 +841,8 @@ spends an agent turn.
 a ⏰ message, costing no agent turn — for jobs whose output should be
 reported verbatim, not judged. `report: always` goes the other way and binds
 the agent's turn to answer, for a job that must be heard from every tick.
-`workdir` sets the job's working directory; the
-default is the dispatched agent's own — a project manager runs in its
-project's `workdir`, everything else in the config dir — and setting it
-overrides even a manager's. The pre-`report:`
-spelling `direct: true` is a load error naming its replacement. A reload
-arms changed jobs.
+`workdir` sets the job's working directory; the default is the dispatched
+agent's own. A reload arms changed jobs.
 
 The `/status` snapshot lists every job with its schedule, agent, last run and
 outcome, and its rolling 7-day dispatched-run token cost where known. The outcome
@@ -921,19 +896,9 @@ arrive without a notification ping — an update is not a page; `/quiet on`
 extends that to ⏰/🔔 posts. Replies to your own messages and ⚠️ failures
 always ring.
 
-A report is delivered at the **end** of the agent's context, and leaves a
-one-line trace in the conversation: `[task report delivered to you — the user
-did NOT send this and has not seen it]` followed by the report's summary line.
-The report body itself is not stored. Both details matter for the agent's
-behaviour rather than yours. Delivering at the end keeps the report — and the
-instruction to stay silent when nothing is needed — from being filed above the
-agent's own previous reply, where it reads as already-answered history. The
-trace keeps the *cause* of an ✉️ update in the conversation: without it the
-update survives with nothing explaining it, and an agent asked later why it
-sent something has no way to answer except to guess.
-
-Report-handling turns are ordinary stored runs, so the runs dash shows exactly
-what the agent did with each report.
+A report is appended to the agent's context and leaves a one-line summary in
+the conversation. Its full body is not stored. Report turns are ordinary
+stored runs.
 
 ## The runs store — `shell3.db`
 

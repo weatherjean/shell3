@@ -31,7 +31,7 @@ func load(dir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Secrets: secrets, dir: dir, kit: k}
+	c := &LoadedConfig{dir: dir, kit: k}
 	if err := c.parseYAML(data, secrets); err != nil {
 		return nil, err
 	}

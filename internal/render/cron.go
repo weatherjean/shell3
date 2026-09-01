@@ -10,34 +10,12 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// CronRollupWindow is how far back the status document's cron cost column looks —
-// the window Store.CronRollup is called with at the render call site, and the
-// "7d" label cronCost prints. Kept as one named constant, not two
-// numbers in two packages, so the call site and the label can never drift apart.
+// CronRollupWindow controls both the cron query window and its label.
 const CronRollupWindow = 7 * 24 * time.Hour
 
-// cronCost renders "<tok> tok/<N>d run" for a job with cost data, or
-// "" when none is available and unknowable (no store wired, the rollup
-// errored, or an AGENT job that hasn't run in the window) — a missing cost
-// must never look like a zero cost. The day count is derived from
-// CronRollupWindow, not hardcoded, so the label can never drift out of sync
-// with the window the caller actually queried.
-//
-// A TOOL job is the one exception: it dispatches no subagent and so creates
-// no session, meaning it NEVER has a CronRollup row — that absence is not
-// missing data, it is a knowably-zero cost, so it renders "0 tok/Nd run"
-// rather than vanishing like a genuinely unknown figure would.
-//
-// For a job with cost data, the figure is the job's DISPATCHED-RUN spend
-// only — Store.CronRollup groups on sessions.cron_job, which is set on the
-// dispatched child session but NOT on the main-agent session that later
-// reads the task report and answers it (a wake turn can drain reports from
-// several jobs plus user backlog in one turn, so there is no honest way to
-// split that turn's cost back across the jobs that fed it). That report turn
-// is commonly the majority of a job's real cost. Do not drop the "run"
-// qualifier or fold report-turn cost into this number without also giving
-// the rollup a real per-job split — see TestCronRollup_ReportTurnExcluded in
-// internal/runs.
+// cronCost reports dispatched-run tokens only. Report-turn cost cannot be
+// attributed when one wake turn handles several jobs, so the "run" qualifier
+// is intentional. Missing rollup data is unknown, not zero.
 func cronCost(st cron.JobStatus, costs map[string]runs.JobCost) string {
 	days := int(CronRollupWindow.Hours() / 24)
 	c, ok := costs[st.Name]

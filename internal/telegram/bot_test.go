@@ -25,7 +25,7 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	}
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, ModeLabel: "code",
+			LLM: client, Agent: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
@@ -47,18 +47,15 @@ func splitRuntime(t *testing.T, reply string) (*shell3.Runtime, *fakellm.Blockin
 	blk := fakellm.NewBlocking()
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		if o.Headless {
-			return chat.Config{LLM: blk, ModeLabel: "code", Headless: true}, nil
+			return chat.Config{LLM: blk, Agent: "code", Headless: true}, nil
 		}
 		scripts := []fakellm.Script{{Events: []llm.StreamEvent{{TextDelta: reply}}}}
-		return chat.Config{LLM: fakellm.New(scripts...), ModeLabel: "code"}, nil
+		return chat.Config{LLM: fakellm.New(scripts...), Agent: "code"}, nil
 	})
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt, blk
 }
 
-// Contract 1: a message on an idle bot creates THE conversation, runs the
-// turn, posts the reply threaded to the inbound message, and persists the
-// session id as the current-conversation marker.
 func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "fresh reply")
@@ -186,8 +183,6 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
-// Contract 4b: a mid-turn message CARRYING MEDIA queues (its preflight needs a
-// turn goroutine) and drains after the turn.
 func TestContract4_MidTurnMediaQueues(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -240,8 +235,6 @@ func TestContract4_SteerCatchupPostsReply(t *testing.T) {
 	}
 }
 
-// Contract 5: /stop mid-turn cancels the active turn but never kills
-// background jobs; the reply says so.
 func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -264,8 +257,6 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	}
 }
 
-// Contract 5b: /stop cancels the main turn but must NOT cancel a background
-// job.
 func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, blk := splitRuntime(t, "done")
@@ -277,7 +268,6 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	}
 	b.AdoptSession(sess)
 
-	// Start a background subagent job that stays running (headless → blocking).
 	if _, err := sess.Dispatch("", "bg work", shell3.DispatchOpts{Report: notify.ReportRaw}); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -413,8 +403,6 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	}
 }
 
-// Contract 9: a restart resumes the SAME conversation — a second Bot over the
-// same store picks up the persisted current marker.
 func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	st, err := runs.Open(t.TempDir())
@@ -427,7 +415,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	)
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, ModeLabel: "code",
+			LLM: client, Agent: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
@@ -445,7 +433,6 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	first := c.main.ID()
 	c.mu.Unlock()
 
-	// "Restart": a fresh Bot over the same store and marker.
 	b2 := NewBot(fc, rt, 42, threads)
 	b2.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "still there?"})
 	if !waitForReply(t, fc, "two") {
@@ -516,8 +503,6 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	c.mu.Unlock()
 }
 
-// Contract 12: a Wake that finds queued USER steering runs a POSTED turn —
-// the steer that raced a turn's end still gets its answer delivered.
 func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "steered answer")
