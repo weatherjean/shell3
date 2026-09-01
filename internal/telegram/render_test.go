@@ -11,7 +11,7 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-func TestDrainTurnKeepsOnlyFinalSegment(t *testing.T) {
+func TestDrainTurnKeepsAllPostedSegments(t *testing.T) {
 	ch := make(chan shell3.Event, 8)
 	ch <- shell3.Event{Kind: shell3.Token, Text: "Let me check what completed."}
 	ch <- shell3.Event{Kind: shell3.ToolCall, ToolName: "task_list"}
@@ -24,12 +24,13 @@ func TestDrainTurnKeepsOnlyFinalSegment(t *testing.T) {
 
 	b := &Bot{}
 	got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, true)
-	if got != "That notice means a job finished." {
-		t.Fatalf("want only the final segment, got %q", got)
+	want := "Let me check what completed.\n\nNo tasks running. Checking history.\n\nThat notice means a job finished."
+	if got != want {
+		t.Fatalf("posted turn lost an assistant segment:\n got %q\nwant %q", got, want)
 	}
 }
 
-func TestDrainTurnFallsBackToLastNonEmpty(t *testing.T) {
+func TestDrainTurnKeepsPreToolSegmentWhenNoFinalMessage(t *testing.T) {
 	ch := make(chan shell3.Event, 4)
 	ch <- shell3.Event{Kind: shell3.Token, Text: "Done — files updated."}
 	ch <- shell3.Event{Kind: shell3.ToolCall, ToolName: "bash"}
@@ -39,6 +40,20 @@ func TestDrainTurnFallsBackToLastNonEmpty(t *testing.T) {
 	b := &Bot{}
 	if got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, true); got != "Done — files updated." {
 		t.Fatalf("want fallback to last non-empty segment, got %q", got)
+	}
+}
+
+func TestDrainWakeTurnKeepsOnlyFinalSegment(t *testing.T) {
+	ch := make(chan shell3.Event, 6)
+	ch <- shell3.Event{Kind: shell3.Token, Text: "Checking the job."}
+	ch <- shell3.Event{Kind: shell3.ToolCall, ToolName: "bash"}
+	ch <- shell3.Event{Kind: shell3.ToolResult, ToolName: "bash"}
+	ch <- shell3.Event{Kind: shell3.Token, Text: "The job needs attention."}
+	close(ch)
+
+	b := &Bot{}
+	if got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, false); got != "The job needs attention." {
+		t.Fatalf("quiet wake turn should keep only its final message, got %q", got)
 	}
 }
 

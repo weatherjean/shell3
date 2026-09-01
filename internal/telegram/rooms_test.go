@@ -57,6 +57,27 @@ func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
 	}
 }
 
+func TestGroupMessagesAllSkipsTriggerButKeepsSenderGate(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, mustRuntime(t))
+	if err := b.SetAllowFrom([]string{"7"}); err != nil {
+		t.Fatal(err)
+	}
+	b.SetAnswerAllGroupMessages(true)
+	ctx := context.Background()
+
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 9, ID: "1", Text: "not allowed"})
+	if len(b.allConvs()) != 0 {
+		t.Fatal("group_messages: all must not bypass sender authorization")
+	}
+
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "2", Text: "plain message"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
+	if b.conv(-100).session() == nil {
+		t.Fatal("an allowlisted plain group message must open the room in all mode")
+	}
+}
+
 func TestTwoRoomsHoldSeparateSessions(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))

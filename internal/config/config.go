@@ -7,6 +7,14 @@ package config
 
 import "github.com/weatherjean/shell3/internal/kit"
 
+const (
+	// GroupMessagesAddressed accepts only /commands, @mentions, and replies to
+	// the bot in groups. It is the default.
+	GroupMessagesAddressed = "addressed"
+	// GroupMessagesAll accepts every group message from an allowlisted sender.
+	GroupMessagesAll = "all"
+)
+
 // Model is one declared model under the kit wiring's `models:`.
 type Model struct {
 	Name, BaseURL, APIKey, ModelID string
@@ -51,6 +59,9 @@ type TelegramConfig struct {
 	// Empty means the chat_id owner only (in a DM the chat id is the user id).
 	AllowFrom []string
 	WorkDir   string
+	// GroupMessages is "addressed" (default) or "all". Sender authorization
+	// applies before either mode, so "all" never means all group members.
+	GroupMessages string
 	// MaxConcurrentTurns bounds turns across all chats; 0 = the default.
 	MaxConcurrentTurns int
 	// Chats is per-room tuning. Not an allowlist and not an enrolment list —

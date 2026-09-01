@@ -68,6 +68,10 @@ The system prompt is rendered per turn. Context files, room briefs, reminders,
 available tools, and active configuration can therefore refresh between turns.
 Messages and tool calls are persisted in provider-valid order. Tool results
 always retain their matching call, including cancellation and error paths.
+Telegram direct replies preserve every non-empty assistant text segment across
+tool rounds in order; a late tool call must not hide an answer already emitted.
+Quiet wake turns expose only their final segment so background narration stays
+silent.
 
 Prompt usage is provider-reported when available and estimated otherwise.
 Pruning removes old tool output before `prune_at`; compaction summarizes the
@@ -176,16 +180,25 @@ Turns run concurrently across rooms under a global cap and serialize within a
 room. Busy-room messages queue; text may steer the active turn. Releasing any
 global slot must rescan all rooms, because a queued room has no other wakeup.
 
-Each room persists its marker under `<transport>:<chat-id>`. Group-to-supergroup
+Each room persists its marker under `<transport>:<chat-id>`. Groups require an
+addressed message by default; `telegram.group_messages: all` bypasses that
+trigger only after sender authorization. Group-to-supergroup
 migration moves the same conversation, swaps identity under the room-then-bot
 lock order, persists the new marker, clears the old one, and invalidates cached
 metadata. Room descriptions are untrusted contextual text, capped and refreshed
 without blocking normal turns.
 
 Completions return to the room owning their session; orphans and cron output
-fall back to the home chat. Progress edits are best-effort. Long replies become
+fall back to the home chat. Posted turns create their best-effort progress
+bubble at turn start and add tool calls as they occur; quiet wake turns create
+none. Long replies become
 a short message plus a self-contained HTML document. Attachment paths are
 durable media files; perception remains a declared tool decision.
+
+Provider prompt usage drives silent Telegram context milestones at 50% and
+75% once per growth cycle. The compaction event posts the new fullness and
+re-baselines the cycle; `/new` clears it. These notices are host-rendered and
+never become model input.
 
 `telegram --console` uses the same bot loop over stdin/stdout with a synthetic
 local room. It needs no Telegram credentials or `allow_from` authorization and

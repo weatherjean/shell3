@@ -23,9 +23,9 @@ import (
 // resumes all of them.
 //
 // Authorization is per SENDER, never per room: an allowlisted user drives the
-// agent wherever they speak, nobody else anywhere. In a group the message must
-// also be ADDRESSED to the bot (trigger.go); everything else is dropped on the
-// update loop, before attachments are saved and before any session exists.
+// agent wherever they speak, nobody else anywhere. Groups default to requiring
+// an addressed message (trigger.go); group_messages: all accepts every message
+// from those same allowlisted senders.
 //
 // Rooms run turns concurrently, one slot each, under a global cap; sending
 // always succeeds, since mid-turn mail queues and drains as one batch turn.
@@ -85,6 +85,9 @@ type Bot struct {
 
 	// chatSettings is the wiring's per-room chats: block. Replaced by /reload.
 	chatSettings map[int64]roomSettings
+	// answerAllGroups disables the mention/reply trigger for allowlisted
+	// senders. Authorization still runs first.
+	answerAllGroups bool
 	// readContext reads a room's context: files through config's reader (cap,
 	// elision, warnings). nil = that brief layer is off.
 	readContext func(paths []string) string
@@ -180,6 +183,21 @@ func (b *Bot) SetAllowFrom(ids []string) error {
 	b.allow = allow
 	b.mu.Unlock()
 	return nil
+}
+
+// SetAnswerAllGroupMessages controls whether an allowlisted sender must
+// address the bot in a group. It is replaced on /reload with the current
+// telegram.group_messages setting.
+func (b *Bot) SetAnswerAllGroupMessages(on bool) {
+	b.mu.Lock()
+	b.answerAllGroups = on
+	b.mu.Unlock()
+}
+
+func (b *Bot) answersAllGroupMessages() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.answerAllGroups
 }
 
 // allowlist reads the sender allowlist under b.mu: /reload can replace it
@@ -300,8 +318,8 @@ type inMail struct {
 //     token, and before the command branch, since Telegram delivers /commands
 //     from every group member and a turn-path gate would still let a stranger
 //     /stop a turn or /new the conversation away.
-//  2. In a GROUP the message must be ADDRESSED to the bot. A room of people
-//     talking to each other is not a prompt. A no-op in a private chat.
+//  2. In a GROUP the message must be ADDRESSED to the bot unless
+//     telegram.group_messages is all. A no-op in a private chat.
 func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// A group becoming a supergroup changes its chat id, announced once as a
 	// service message with no sender — so this runs BEFORE the sender gate,
@@ -336,7 +354,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		// An unknown verb in a group is almost always someone talking to
 		// another bot; answering "unknown command" would spam the room. In a
 		// DM it is a typo worth reporting.
-		if isGroup && !b.knowsCommand(verb) {
+		if isGroup && !b.answersAllGroupMessages() && !b.knowsCommand(verb) {
 			return
 		}
 		cmdRoom := b.conv(m.ChatID)
@@ -344,7 +362,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		cmdRoom.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
-	if isGroup && !roomAddressed(c, m, b.username(ctx)) {
+	if isGroup && !b.answersAllGroupMessages() && !roomAddressed(c, m, b.username(ctx)) {
 		return // group chatter not aimed at the bot: drop before anything is saved
 	}
 	c = b.conv(m.ChatID)

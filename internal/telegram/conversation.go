@@ -39,6 +39,9 @@ type conversation struct {
 	// lastAgentMail is the previous ✉️ post, so an identical repeat is
 	// dropped host-side. Cleared by /new.
 	lastAgentMail string
+	// contextMilestone is the highest fullness threshold announced in this
+	// growth cycle. Compaction and /new reset it.
+	contextMilestone int
 	// pendingRequired holds the fallback post for every report:"always" job
 	// whose mail is queued here but whose turn has not run yet, and
 	// turnRequired the ones the RUNNING turn is answering for. They are two

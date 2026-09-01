@@ -33,11 +33,17 @@ func TestProgressBubbleLifecycle(t *testing.T) {
 		t.Fatalf("reply=%q sawErr=%v", reply, sawErr)
 	}
 	sent := fc.sentTexts()
-	if len(sent) == 0 || !strings.Contains(sent[0], "⚙️ bash — cd /x && python3") {
-		t.Fatalf("bubble not posted or unreadable: %v", sent)
+	if len(sent) == 0 || sent[0] != "⚙️ working…" {
+		t.Fatalf("working marker was not posted immediately: %v", sent)
 	}
-	if strings.Contains(sent[0], "\nimport json") {
-		t.Fatalf("bubble leaked a multi-line command body: %q", sent[0])
+	fc.mu.Lock()
+	edits := append([]sentEdit{}, fc.edits...)
+	fc.mu.Unlock()
+	if len(edits) == 0 || !strings.Contains(edits[0].text, "⚙️ bash — cd /x && python3") {
+		t.Fatalf("first tool was not added immediately: %+v", edits)
+	}
+	if strings.Contains(edits[0].text, "\nimport json") {
+		t.Fatalf("bubble leaked a multi-line command body: %q", edits[0].text)
 	}
 	if !fc.lastSilent() {
 		t.Fatal("the bubble must post silently")
@@ -63,7 +69,7 @@ func TestProgressBubbleKeptOnError(t *testing.T) {
 	}
 }
 
-func TestProgressBubbleAbsentForPlainReplies(t *testing.T) {
+func TestProgressBubbleCoversPlainPostedTurns(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))
 
@@ -71,7 +77,10 @@ func TestProgressBubbleAbsentForPlainReplies(t *testing.T) {
 	if reply != "hi" {
 		t.Fatalf("reply=%q", reply)
 	}
-	if len(fc.sentTexts()) != 0 || len(fc.deletedSnapshot()) != 0 {
-		t.Fatal("no-tool turn must not post or delete anything")
+	if got := fc.sentTexts(); len(got) != 1 || got[0] != "⚙️ working…" {
+		t.Fatalf("plain turn did not show the initial working marker: %v", got)
+	}
+	if len(fc.deletedSnapshot()) != 1 {
+		t.Fatal("plain turn must delete its working marker when the reply lands")
 	}
 }

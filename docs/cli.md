@@ -45,9 +45,15 @@ however long it runs. One main-agent turn runs at a time, but sending
 always succeeds — and a **text message sent mid-turn steers the running
 turn**: the agent sees it at its next step, so "stop, wrong file" redirects
 work in flight (messages with attachments queue and run after). While the
-agent works you see a **progress bubble** — one message listing the tools
-it's running, updating in place — which deletes itself once the answer
-arrives (it stays behind only when the turn failed, as a breadcrumb).
+agent works you immediately see a **progress bubble**; it starts as
+`⚙️ working…`, lists tools as they run, and updates in place. It deletes itself once the answer
+arrives (it stays behind only when the turn failed, as a breadcrumb). If the
+agent writes user-facing text both before and after using a tool, the final
+reply keeps those text segments in order instead of discarding the earlier
+one.
+At 50% and 75% context usage, Telegram posts a silent `🧠` milestone. An
+automatic compaction posts another with the new context size; these are host
+notices and spend no model turn.
 `/stop` cancels the running turn (the dash shows what's queued).
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [task reports](configuration.md#task-reports): a failure or a

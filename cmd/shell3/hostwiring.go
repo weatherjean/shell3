@@ -273,6 +273,7 @@ func installKitCommands(b *telegram.Bot, rt *shell3.Runtime) {
 // telegram: block per call so new rooms take effect without a restart.
 func installRoomConfig(b *telegram.Bot, rt *shell3.Runtime) {
 	tg := rt.Telegram()
+	b.SetAnswerAllGroupMessages(tg.GroupMessages == config.GroupMessagesAll)
 	settings := make([]telegram.ChatSetting, 0, len(tg.Chats))
 	for _, ch := range tg.Chats {
 		id, err := parseChatID(ch.ID)

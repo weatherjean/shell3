@@ -5,7 +5,7 @@ import "testing"
 // The telegram token is a secret like every other: it lives in .env and
 // reaches the YAML as an env: reference.
 func TestParseYAMLTelegram(t *testing.T) {
-	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  token: env:TELEGRAM_TOKEN\n  chat_id: \"123456789\"\n",
+	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  token: env:TELEGRAM_TOKEN\n  chat_id: \"123456789\"\n  group_messages: all\n",
 		map[string]string{"TELEGRAM_TOKEN": "123:abc"})
 	if err != nil {
 		t.Fatal(err)
@@ -16,6 +16,24 @@ func TestParseYAMLTelegram(t *testing.T) {
 	}
 	if tg.ChatID != "123456789" {
 		t.Errorf("Telegram().ChatID = %q, want 123456789", tg.ChatID)
+	}
+	if tg.GroupMessages != GroupMessagesAll {
+		t.Errorf("Telegram().GroupMessages = %q, want %q", tg.GroupMessages, GroupMessagesAll)
+	}
+}
+
+func TestParseYAMLTelegramGroupMessagesDefaultAndValidation(t *testing.T) {
+	base := "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n"
+	c, err := parseY(t, base+"  chat_id: \"1\"\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Telegram().GroupMessages; got != GroupMessagesAddressed {
+		t.Fatalf("default group_messages = %q, want %q", got, GroupMessagesAddressed)
+	}
+	_, err = parseY(t, base+"  group_messages: sometimes\n", nil)
+	if err == nil {
+		t.Fatal("invalid telegram.group_messages was accepted")
 	}
 }
 

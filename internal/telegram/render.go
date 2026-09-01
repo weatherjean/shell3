@@ -15,28 +15,31 @@ import (
 // counts. Its cap is 4096; 4000 leaves headroom for mdhtml's entities.
 const tgMaxMessage = 4000
 
-// drainTurn consumes a turn's events and returns the assistant text. Only the
-// FINAL assistant message is the reply — text before a tool call is progress
-// narration, so each ToolCall resets the segment. narrationFallback keeps the
-// last pre-tool segment for turns that end on a tool call: posted turns want
-// it, wake turns pass false, where an empty final segment means silence and a
-// stale fragment must not post as mail. Errors return separately so the caller
-// decides whether they surface — otherwise every flaky cron wake posts noise.
+// drainTurn consumes a turn's events and returns the assistant text. ToolCall
+// separates provider assistant messages. Posted turns keep every non-empty
+// message in order: a model can put the actual answer before a late tool call,
+// and dropping that text makes a later aside look like the whole reply.
+// Quiet wake turns pass keepSegments=false and retain only the final message,
+// where an empty final segment means silence and stale narration must not post
+// as mail. Errors return separately so the caller decides whether they surface
+// — otherwise every flaky cron wake posts noise.
 // Channel close is the authoritative end-of-turn signal.
 //
 // A non-nil p is driven as the progress bubble and resolved at the end, kept
 // as a breadcrumb only if the turn errored; nil drains with no bubble.
-func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p *progressBubble, narrationFallback bool) (reply, errText string, sawError bool) {
-	var seg strings.Builder // current assistant segment
-	var last string         // last non-empty completed segment
+func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p *progressBubble, keepSegments bool) (reply, errText string, sawError bool) {
+	var seg strings.Builder // current assistant message
+	var completed []string  // non-empty messages before tool calls
 	var errs strings.Builder
 	for ev := range ch {
 		switch ev.Kind {
 		case shell3.Token:
 			seg.WriteString(ev.Text)
 		case shell3.ToolCall:
-			if s := strings.TrimSpace(seg.String()); s != "" {
-				last = s
+			if keepSegments {
+				if s := strings.TrimSpace(seg.String()); s != "" {
+					completed = append(completed, s)
+				}
 			}
 			seg.Reset()
 			if p != nil {
@@ -55,14 +58,21 @@ func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p 
 					errs.WriteString("\n💡 " + h)
 				}
 			}
+		case shell3.Usage, shell3.Done:
+			c.observeContextUsage(ctx, ev.PromptTokens)
+		case shell3.Compacted:
+			c.observeCompaction(ctx, ev.PromptTokens)
 		}
 	}
 	if p != nil {
 		p.finish(ctx, sawError)
 	}
 	reply = strings.TrimSpace(seg.String())
-	if reply == "" && narrationFallback {
-		reply = last
+	if keepSegments {
+		if reply != "" {
+			completed = append(completed, reply)
+		}
+		reply = strings.Join(completed, "\n\n")
 	}
 	return reply, strings.TrimSpace(errs.String()), sawError
 }

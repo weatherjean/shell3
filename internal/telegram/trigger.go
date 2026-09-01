@@ -7,11 +7,9 @@ import "strings"
 // trigger.go decides whether a message is ADDRESSED to the bot.
 //
 // In a private chat the answer is always yes: there is nobody else in the
-// room. In a group it is yes only for an @mention of this bot or a reply to
-// one of the bot's own messages — a group is a room full of people talking to
-// each other, and treating that as prompt input would both burn tokens on
-// other people's conversation and put words the bot was never shown into its
-// context.
+// room. A group defaults to requiring an @mention of this bot or a reply to
+// one of the bot's own messages. telegram.group_messages: all bypasses this
+// trigger in Bot.handleMsg, after sender authorization.
 //
 // This is enforcement, not convenience. Telegram's own privacy mode cannot do
 // it: a privacy-mode bot is never delivered a plain "@bot do X" text message

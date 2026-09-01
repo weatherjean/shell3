@@ -45,10 +45,11 @@ type yamlModel struct {
 // yamlTelegram is the telegram: block — bot credentials and where the shell
 // runs. Token resolves from .env through an env:KEY reference.
 type yamlTelegram struct {
-	Token     string   `yaml:"token"`
-	ChatID    string   `yaml:"chat_id"`
-	WorkDir   string   `yaml:"workdir"`
-	AllowFrom []string `yaml:"allow_from"`
+	Token         string   `yaml:"token"`
+	ChatID        string   `yaml:"chat_id"`
+	WorkDir       string   `yaml:"workdir"`
+	AllowFrom     []string `yaml:"allow_from"`
+	GroupMessages string   `yaml:"group_messages"`
 	// MaxConcurrentTurns caps concurrent chats: rooms are independent, so
 	// without it N rooms speaking fan out N agents on one provider account.
 	MaxConcurrentTurns int `yaml:"max_concurrent_turns"`
@@ -184,6 +185,14 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		if tc.MaxConcurrentTurns < 0 {
 			return fmt.Errorf(wiringLabel+": telegram.max_concurrent_turns must not be negative; got %d", tc.MaxConcurrentTurns)
 		}
+		groupMessages := strings.TrimSpace(tc.GroupMessages)
+		if groupMessages == "" {
+			groupMessages = GroupMessagesAddressed
+		}
+		if groupMessages != GroupMessagesAddressed && groupMessages != GroupMessagesAll {
+			return fmt.Errorf(wiringLabel+": telegram.group_messages must be %q or %q; got %q",
+				GroupMessagesAddressed, GroupMessagesAll, tc.GroupMessages)
+		}
 		chats := make([]ChatConfig, 0, len(tc.Chats))
 		seenChat := map[string]bool{}
 		for _, ch := range tc.Chats {
@@ -203,7 +212,8 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			chats = append(chats, ChatConfig{ID: id, UseDescription: ch.UseDescription, Context: ch.Context})
 		}
 		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir,
-			AllowFrom: tc.AllowFrom, MaxConcurrentTurns: tc.MaxConcurrentTurns, Chats: chats}
+			AllowFrom: tc.AllowFrom, GroupMessages: groupMessages,
+			MaxConcurrentTurns: tc.MaxConcurrentTurns, Chats: chats}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.MCP)) {
 		s := f.MCP[name]

@@ -653,6 +653,7 @@ telegram:
   token: env:TELEGRAM_TOKEN         # TELEGRAM_TOKEN in .env, from @BotFather
   chat_id: "123456789"              # the HOME chat: cron results and orphans land here
   allow_from: ["123456789", "987654321"]  # who may drive the agent, anywhere
+  group_messages: addressed         # addressed (default) or all
   workdir: /home/me/.shell3/workdir # optional; default = the config dir
   max_concurrent_turns: 4           # optional; global cap on simultaneous turns
   chats:                            # optional; per-room tuning, not an allowlist
@@ -686,6 +687,13 @@ to nobody, and the bot would run looking healthy while ignoring everyone.
 **In a group the bot answers only what is addressed to it**: `/ask <message>`,
 an `@mention` of the bot, or a reply to one of its own messages. Everything
 else is dropped before it enters any conversation.
+
+Set `group_messages: all` to accept every message from an `allow_from` sender
+in every group, with no `/ask`, mention, or reply needed. This does not admit
+other group members: the sender allowlist still runs first. Telegram must also
+deliver ordinary group messages, so promote the bot to admin or disable Group
+Privacy in @BotFather and re-add it. Removing the setting, or setting it to
+`addressed`, restores the trigger gate; `/reload` applies the change.
 
 `/ask` exists because Telegram's privacy mode never delivers a plain
 `@yourbot do X` to a bot — only `/cmd@thisbot` and replies to the bot's own

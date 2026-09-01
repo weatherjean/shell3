@@ -1,9 +1,9 @@
 //go:build unix
 
-// progress.go renders a turn's tool activity as ONE self-editing chat bubble:
-// posted (silently) when the first tool fires, edited in place as tools run
+// progress.go renders a posted turn's activity as ONE self-editing chat bubble:
+// posted (silently) as soon as the turn starts, edited in place as tools run
 // (throttled for Telegram's flood limits), and deleted once the turn's real
-// reply is delivered — mid-turn you see what the agent is doing, afterwards
+// reply is delivered — mid-turn you see that the agent is working, afterwards
 // the chat history stays clean. A turn that ends in an error keeps the bubble
 // as a breadcrumb. Wake (quiet) turns show no bubble.
 package telegram
@@ -37,6 +37,14 @@ type progressBubble struct {
 	dirty    bool
 }
 
+// start posts the initial working marker before the first model event. A
+// reasoning-heavy round may take minutes before its first tool call; waiting
+// for that call made the progress bubble flash only as the final answer landed.
+func (p *progressBubble) start(ctx context.Context) {
+	p.dirty = true
+	p.flush(ctx, true)
+}
+
 // add records one tool line and posts/edits the bubble, throttled.
 func (p *progressBubble) add(ctx context.Context, line string) {
 	p.total++
@@ -45,7 +53,9 @@ func (p *progressBubble) add(ctx context.Context, line string) {
 		p.lines = p.lines[len(p.lines)-progressMaxLines:]
 	}
 	p.dirty = true
-	p.flush(ctx, false)
+	// Show the first actual tool immediately even when start just posted the
+	// marker; later rapid calls use the ordinary edit throttle.
+	p.flush(ctx, p.total == 1)
 }
 
 // markError flags the last line as failed.
@@ -129,10 +139,13 @@ func toolLine(name, rawArgs string) string {
 }
 
 // drainTurnProgress drains a POSTED turn: the shared drain with a progress
-// bubble, the narration fallback on, and any turn error appended to the reply
-// (a posted turn always answers, so the user learns what went wrong).
+// bubble, every assistant text segment retained, and any turn error appended
+// to the reply (a posted turn always answers, so the user learns what went
+// wrong).
 func (c *conversation) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (reply string, sawError bool) {
-	reply, errText, sawError := c.drainTurn(ctx, ch, &progressBubble{c: c}, true)
+	p := &progressBubble{c: c}
+	p.start(ctx)
+	reply, errText, sawError := c.drainTurn(ctx, ch, p, true)
 	if errText != "" {
 		reply = strings.TrimSpace(reply + "\n" + errText)
 	}

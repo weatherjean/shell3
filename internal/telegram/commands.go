@@ -235,6 +235,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.mainAnchor = ""
 	c.steerAnchor = ""
 	c.lastAgentMail = ""
+	c.contextMilestone = 0
 	c.wakePending = false
 	c.mu.Unlock()
 	// Close only a fully-idle session: running jobs keep it open, and undrained
@@ -318,22 +319,30 @@ func (c *conversation) helpText() string {
 	group := c.isGroup
 	c.mu.Unlock()
 	if group {
-		sb.WriteString("**Talking to me here**\n" +
-			"Start with `/ask <message>`, then just REPLY to my answers to keep going — " +
-			"no prefix needed after the first one. An @mention works too, if my operator " +
-			"has enabled it (see below).\n\n" +
-			"Everything else said in this group is dropped: not stored, not read, never " +
-			"sent to a model. Being in this group is not permission either — only the " +
-			"accounts my operator listed can drive me.\n\n" +
-			"**If an @mention seems ignored**, that is Telegram, not me: a bot with privacy " +
-			"mode ON is never delivered plain @mentions, so I never saw it. `/ask` and " +
-			"replies always reach me. To enable @mentions, my operator can promote me to " +
-			"admin here, or turn Group Privacy off in @BotFather and re-add me.\n\n" +
+		sb.WriteString("**Talking to me here**\n")
+		if c.b.answersAllGroupMessages() {
+			sb.WriteString("Every message from an account my operator listed continues this " +
+				"conversation; no `/ask`, @mention, or reply is needed. Messages from everyone " +
+				"else are still ignored. Telegram must deliver the messages, so I need to be an " +
+				"admin here or Group Privacy must be off in @BotFather.\n\n")
+		} else {
+			sb.WriteString("Start with `/ask <message>`, then just REPLY to my answers to keep going — " +
+				"no prefix needed after the first one. An @mention works too, if my operator " +
+				"has enabled it (see below).\n\n" +
+				"Everything else said in this group is dropped: not stored, not read, never " +
+				"sent to a model. Being in this group is not permission either — only the " +
+				"accounts my operator listed can drive me.\n\n" +
+				"**If an @mention seems ignored**, that is Telegram, not me: a bot with privacy " +
+				"mode ON is never delivered plain @mentions, so I never saw it. `/ask` and " +
+				"replies always reach me. To enable @mentions, my operator can promote me to " +
+				"admin here, or turn Group Privacy off in @BotFather and re-add me.\n\n")
+		}
+		sb.WriteString(
 			"**This group's description** becomes standing context for this room — edit " +
-			"it in Telegram and my instructions here change, no config edit needed. " +
-			"Telegram only shares it with a bot that can see group info, so if I seem " +
-			"unaware of it, promote me to admin here and it arrives within a few minutes " +
-			"(or right away after `/reload`).\n\n")
+				"it in Telegram and my instructions here change, no config edit needed. " +
+				"Telegram only shares it with a bot that can see group info, so if I seem " +
+				"unaware of it, promote me to admin here and it arrives within a few minutes " +
+				"(or right away after `/reload`).\n\n")
 	} else {
 		sb.WriteString("**In this chat**\nJust type — every message continues our conversation here.\n\n" +
 			"**In a group**, start with `/ask <message>` and then reply to my answers to " +
