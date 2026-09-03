@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+func (c *conversation) busy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.turnActive
+}
+
 func TestRoomsRunTurnsConcurrently(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, mustRuntime(t))
@@ -95,33 +101,6 @@ func TestStopScopesToItsRoom(t *testing.T) {
 		t.Fatal("/stop in one room cancelled another room's turn")
 	case <-time.After(50 * time.Millisecond):
 	}
-}
-
-func TestReloadRefusedWhileAnotherRoomIsBusy(t *testing.T) {
-	b := newBot(t, newFakeClient(), mustRuntime(t))
-	ctx := context.Background()
-
-	busyRoom := b.conv(-100)
-	busyRoom.mu.Lock()
-	_, cancel, _ := busyRoom.takeSlotLocked(ctx)
-	busyRoom.mu.Unlock()
-	defer cancel()
-
-	if b.beginReload() {
-		t.Fatal("a reload must not start while a room is mid-turn")
-	}
-	busyRoom.releaseSlot(cancel)
-	if !b.beginReload() {
-		t.Fatal("with every room idle the reload must proceed")
-	}
-	other := b.conv(-200)
-	other.mu.Lock()
-	_, _, ok := other.takeSlotLocked(ctx)
-	other.mu.Unlock()
-	if ok {
-		t.Fatal("a room started a turn during a reload")
-	}
-	b.endReload()
 }
 
 func TestCommandForAnotherBotIsIgnored(t *testing.T) {

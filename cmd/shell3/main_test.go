@@ -20,9 +20,9 @@ func TestShouldPrintHeaderInPreRun(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "root command does not print",
+			name: "root command prints",
 			cmd:  root,
-			want: false,
+			want: true,
 		},
 		{
 			name: "normal subcommand prints",
@@ -41,10 +41,19 @@ func TestShouldPrintHeaderInPreRun(t *testing.T) {
 			if tt.prep != nil {
 				tt.prep(tt.cmd)
 			}
-			got := shouldPrintHeaderInPreRun(root, tt.cmd)
+			got := shouldPrintHeaderInPreRun(tt.cmd)
 			if got != tt.want {
 				t.Fatalf("shouldPrintHeaderInPreRun() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWantsHelp(t *testing.T) {
+	if wantsHelp(nil) {
+		t.Fatal("bare shell3 runs the console; it must not be classified as help")
+	}
+	if !wantsHelp([]string{"--help"}) || !wantsHelp([]string{"help", "wrk"}) {
+		t.Fatal("explicit help invocation was not classified as help")
 	}
 }

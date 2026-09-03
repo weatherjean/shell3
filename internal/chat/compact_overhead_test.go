@@ -69,16 +69,15 @@ func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 	}
 }
 
-func TestWarnFixedOverhead_MeasuresRefreshedPrompt(t *testing.T) {
+func TestWarnFixedOverhead_MeasuresConfiguredPrompt(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
-		Profile:       AgentProfile{SystemPrompt: "small at build time"},
-		RefreshPrompt: func() string { return strings.Repeat("grown ", 8000) },
-		AgentKnobs:    AgentKnobs{CompactAt: 1000},
-		ToolConfig:    ToolConfig{Log: log},
+		Profile:    AgentProfile{SystemPrompt: strings.Repeat("grown ", 8000)},
+		AgentKnobs: AgentKnobs{CompactAt: 1000},
+		ToolConfig: ToolConfig{Log: log},
 	}
 	warnFixedOverhead(cfg, &Session{})
 	if got := log.matching(overheadWarnSub); got != 1 {
-		t.Errorf("warned %d times, want 1 — the refreshed prompt is what reaches the model", got)
+		t.Errorf("warned %d times, want 1", got)
 	}
 }

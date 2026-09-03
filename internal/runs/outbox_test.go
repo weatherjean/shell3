@@ -1,9 +1,6 @@
 package runs
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestOutboxPutLoadDelete(t *testing.T) {
 	st, err := Open(t.TempDir())
@@ -74,36 +71,5 @@ func TestOutboxSurvivesReopen(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].JSON != `{"job":"bg1"}` {
 		t.Fatalf("want the row back after reopen, got %+v", rows)
-	}
-}
-
-func TestSweepLeavesOutboxAlone(t *testing.T) {
-	dir := t.TempDir()
-	st, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.OutboxPut("running", `{"job":"bg1"}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, _, err := Sweep(dir, 24*time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-
-	st2, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st2.Close()
-	rows, err := st2.OutboxLoadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("sweep must not touch outbox rows, got %+v", rows)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
@@ -57,7 +56,7 @@ func cleanEvent() CompletionEvent {
 	return CompletionEvent{
 		Kind: EvBashBg, JobID: "bg1", Title: "echo hi", Exit: &zero,
 		Tail:   "hi",
-		notice: notifyBg("bg1", "echo hi", &zero, "hi"),
+		notice: notifyBg("bg1", "echo hi", &zero, "hi", ""),
 	}
 }
 
@@ -65,7 +64,7 @@ func failedEvent() CompletionEvent {
 	one := 1
 	return CompletionEvent{
 		Kind: EvBashBg, JobID: "bg2", Title: "false", Exit: &one,
-		notice: notifyBg("bg2", "false", &one, ""),
+		notice: notifyBg("bg2", "false", &one, "", ""),
 	}
 }
 
@@ -245,19 +244,6 @@ func TestDirectTextTruncationDirection(t *testing.T) {
 	}
 }
 
-func TestDirectTextThroughCaptureKeepsLeadAndMarksCut(t *testing.T) {
-	long := "LEAD sentence first." + strings.Repeat(" filler", 600)
-	j := &bgJob{id: "sub1", title: "research", agent: "assistant", report: notify.ReportRaw, startedAt: time.Now()}
-	ev := subagentEvent(j, long, "")
-	out := directText(ev)
-	if !strings.Contains(out, "LEAD sentence first.") {
-		t.Fatalf("lost the lead: %q", out[:80])
-	}
-	if !strings.HasSuffix(out, "…") {
-		t.Fatalf("truncated capture posts with no marker: %q", out[len(out)-40:])
-	}
-}
-
 func TestRoute_CleanNoReplyIsNotMailed(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("hi"))
 	host := &fakeHost{wakeOK: true}
@@ -330,7 +316,7 @@ func TestRoute_CleanEmptyTailStillMailsOwner(t *testing.T) {
 	rt.SetCompletionHost(host)
 	ev := cleanEvent()
 	ev.Tail = ""
-	ev.notice = notifyBg("bg1", "echo hi", ev.Exit, "")
+	ev.notice = notifyBg("bg1", "echo hi", ev.Exit, "", "")
 	ev.OwnerID = "sess-1"
 	rt.jobs.dispatchCompletion(ev)
 	_, wakes, _ := host.snapshot()

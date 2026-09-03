@@ -14,7 +14,7 @@ const probeReport = "TASK REPORT — cron nightly (clean)\nstatus: clean\noutput
 func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakellm.Client, TurnConfig) {
 	t.Helper()
 	fake := fakellm.New(append([]fakellm.Script{
-		{Events: []llm.StreamEvent{{TextDelta: "Done — moved."}, {Done: true}}},
+		{Events: []llm.StreamEvent{{TextDelta: "Done — moved."}}},
 	}, scripts...)...)
 	sess, _ := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
@@ -24,7 +24,7 @@ func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakel
 
 func TestReportLandsAtEndOfWakeContext(t *testing.T) {
 	sess, fake, cfg := newReportSession(t,
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "NO_REPLY"}, {Done: true}}})
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "NO_REPLY"}}})
 
 	sess.InterjectNotice(probeReport)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser}, nil)
@@ -46,7 +46,7 @@ func TestReportLandsAtEndOfWakeContext(t *testing.T) {
 
 func TestReportLeavesPersistedTrace(t *testing.T) {
 	sess, _, cfg := newReportSession(t,
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}})
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}}})
 
 	sess.InterjectNotice(probeReport)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser}, nil)
@@ -70,7 +70,7 @@ func TestReportLeavesPersistedTrace(t *testing.T) {
 
 func TestReportTraceKeepsTranscriptAlternating(t *testing.T) {
 	sess, _, cfg := newReportSession(t,
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}})
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}}})
 
 	sess.InterjectNotice(probeReport)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser}, nil)
@@ -84,8 +84,8 @@ func TestReportTraceKeepsTranscriptAlternating(t *testing.T) {
 
 func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 	sess, fake, cfg := newReportSession(t,
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}, {Done: true}}},
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a cron report came in."}, {Done: true}}})
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Got it — standing by."}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a cron report came in."}}})
 
 	sess.InterjectNotice(probeReport)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser}, nil)
@@ -101,7 +101,7 @@ func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 }
 
 func TestReminderStillRidesCurrentUserMessage(t *testing.T) {
-	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}, {Done: true}}})
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.Interject("also check the logs")

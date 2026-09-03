@@ -22,14 +22,10 @@ import (
 // runningMarker is the JSON body of a "running" outbox row.
 type runningMarker struct {
 	PID       int       `json:"pid"`
-	Kind      string    `json:"kind"` // "command" | "subagent"
 	JobID     string    `json:"job_id"`
 	Title     string    `json:"title"`
-	Agent     string    `json:"agent,omitempty"`
-	CronJob   string    `json:"cron_job,omitempty"`
 	OwnerID   string    `json:"owner_id,omitempty"`
 	LogPath   string    `json:"log_path,omitempty"`
-	ChildID   string    `json:"child_id,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 }
 
@@ -71,10 +67,12 @@ func (m *jobManager) persistEvent(ev CompletionEvent) int64 {
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {
+		m.rt.Logger().Warn("completion event encoding failed", "job", ev.JobID, "error", err)
 		return 0
 	}
 	id, err := m.rt.outboxPut("event", string(b))
 	if err != nil {
+		m.rt.Logger().Warn("completion event persistence failed", "job", ev.JobID, "error", err)
 		return 0
 	}
 	return id
@@ -85,7 +83,9 @@ func (m *jobManager) deleteOutboxRow(id int64) {
 	if id == 0 || m.rt == nil {
 		return
 	}
-	_ = m.rt.outboxDelete(id)
+	if err := m.rt.outboxDelete(id); err != nil {
+		m.rt.Logger().Warn("completion outbox delete failed", "row", id, "error", err)
+	}
 }
 
 // shutdownCancelled distinguishes a job cancelAll killed from one that
@@ -104,16 +104,21 @@ func (m *jobManager) putRunningMarker(j *bgJob, ownerID string) {
 		return
 	}
 	mk := runningMarker{
-		PID: os.Getpid(), Kind: j.kind.String(), JobID: j.id, Title: j.title,
-		Agent: j.agent, CronJob: j.cronJob, OwnerID: ownerID,
-		LogPath: j.logPath, ChildID: j.childID, StartedAt: j.startedAt,
+		PID: os.Getpid(), JobID: j.id, Title: j.title, OwnerID: ownerID,
+		LogPath: j.logPath, StartedAt: j.startedAt,
 	}
 	b, err := json.Marshal(mk)
 	if err != nil {
+		if m.rt != nil {
+			m.rt.Logger().Warn("running marker encoding failed", "job", j.id, "error", err)
+		}
 		return
 	}
 	id, err := j.store.OutboxPut("running", string(b))
 	if err != nil {
+		if m.rt != nil {
+			m.rt.Logger().Warn("running marker persistence failed", "job", j.id, "error", err)
+		}
 		return
 	}
 	m.mu.Lock()
@@ -133,7 +138,9 @@ func (m *jobManager) clearRunningMarker(j *bgJob) {
 		return
 	}
 	if id != 0 && j.store != nil {
-		_ = j.store.OutboxDelete(id)
+		if err := j.store.OutboxDelete(id); err != nil && m.rt != nil {
+			m.rt.Logger().Warn("running marker delete failed", "job", j.id, "row", id, "error", err)
+		}
 	}
 }
 
@@ -173,6 +180,7 @@ func (rt *Runtime) RedeliverUndelivered() int {
 	}
 	rows, err := rt.outboxLoadAll()
 	if err != nil {
+		rt.Logger().Warn("completion retry load failed", "error", err)
 		// Store hiccup: put the ids back so a later tick retries.
 		for id := range ids {
 			rt.jobs.rememberUndelivered(id)
@@ -186,11 +194,16 @@ func (rt *Runtime) RedeliverUndelivered() int {
 		}
 		var ev CompletionEvent
 		if err := json.Unmarshal([]byte(r.JSON), &ev); err != nil {
-			_ = rt.outboxDelete(r.ID)
+			rt.Logger().Warn("invalid completion outbox event discarded", "row", r.ID, "error", err)
+			if err := rt.outboxDelete(r.ID); err != nil {
+				rt.Logger().Warn("invalid completion outbox delete failed", "row", r.ID, "error", err)
+			}
 			continue
 		}
 		rt.jobs.dispatchCompletion(ev)
-		_ = rt.outboxDelete(r.ID)
+		if err := rt.outboxDelete(r.ID); err != nil {
+			rt.Logger().Warn("redelivered completion delete failed", "row", r.ID, "error", err)
+		}
 		redelivered++
 	}
 	return redelivered
@@ -216,6 +229,7 @@ func pidAlive(pid int) bool {
 func (rt *Runtime) RecoverCompletions() int {
 	rows, err := rt.outboxLoadAll()
 	if err != nil {
+		rt.Logger().Warn("completion recovery load failed", "error", err)
 		return 0
 	}
 	recovered := 0
@@ -224,7 +238,10 @@ func (rt *Runtime) RecoverCompletions() int {
 		case "event":
 			var ev CompletionEvent
 			if err := json.Unmarshal([]byte(r.JSON), &ev); err != nil {
-				_ = rt.outboxDelete(r.ID)
+				rt.Logger().Warn("invalid recovered completion discarded", "row", r.ID, "error", err)
+				if err := rt.outboxDelete(r.ID); err != nil {
+					rt.Logger().Warn("invalid recovered completion delete failed", "row", r.ID, "error", err)
+				}
 				continue
 			}
 			// Redeliver FIRST, delete after: dispatchCompletion persists its
@@ -232,12 +249,17 @@ func (rt *Runtime) RecoverCompletions() int {
 			// the next boot. Deleting first opens a loss window.
 			ev.Note = joinNote(ev.Note, "recovered after a shell3 restart — this completion was never delivered")
 			rt.jobs.dispatchCompletion(ev)
-			_ = rt.outboxDelete(r.ID)
+			if err := rt.outboxDelete(r.ID); err != nil {
+				rt.Logger().Warn("recovered completion delete failed", "row", r.ID, "error", err)
+			}
 			recovered++
 		case "running":
 			var mk runningMarker
 			if err := json.Unmarshal([]byte(r.JSON), &mk); err != nil {
-				_ = rt.outboxDelete(r.ID)
+				rt.Logger().Warn("invalid recovered running marker discarded", "row", r.ID, "error", err)
+				if err := rt.outboxDelete(r.ID); err != nil {
+					rt.Logger().Warn("invalid recovered marker delete failed", "row", r.ID, "error", err)
+				}
 				continue
 			}
 			if pidAlive(mk.PID) {
@@ -245,20 +267,15 @@ func (rt *Runtime) RecoverCompletions() int {
 			}
 			ev := CompletionEvent{
 				Kind: EvBashBg, JobID: mk.JobID, Title: mk.Title,
-				Agent: mk.Agent, CronJob: mk.CronJob,
 				ErrText: "was still running when shell3 stopped; its result was lost",
-				Detail:  mk.LogPath, RunID: mk.ChildID, OwnerID: mk.OwnerID,
-			}
-			if mk.Kind == "subagent" {
-				ev.Kind = EvSubagent
-				if mk.CronJob != "" {
-					ev.Kind = EvCron
-				}
+				Detail:  mk.LogPath, OwnerID: mk.OwnerID,
 			}
 			// Same ordering: a crash mid-recovery re-reports rather than
 			// losing the loss.
 			rt.jobs.dispatchCompletion(ev)
-			_ = rt.outboxDelete(r.ID)
+			if err := rt.outboxDelete(r.ID); err != nil {
+				rt.Logger().Warn("recovered running marker delete failed", "row", r.ID, "error", err)
+			}
 			recovered++
 		}
 	}

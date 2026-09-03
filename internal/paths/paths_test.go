@@ -6,17 +6,6 @@ import (
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
-func TestGlobal(t *testing.T) {
-	g := paths.NewGlobal("/home/user")
-	if g.Root != "/home/user/.shell3" {
-		t.Fatalf("Root: got %q", g.Root)
-	}
-	if g.LogFile != "/home/user/.shell3/shell3.log" {
-		t.Fatalf("LogFile: got %q", g.LogFile)
-	}
-	_ = g
-}
-
 func TestLocal(t *testing.T) {
 	l := paths.NewLocal("/work/project")
 	if l.Root != "/work/project/.shell3_project" {
@@ -24,5 +13,19 @@ func TestLocal(t *testing.T) {
 	}
 	if l.Runs != "/work/project/.shell3_project/runs" {
 		t.Fatalf("Runs: got %q", l.Runs)
+	}
+	if l.Errors != "/work/project/.shell3_project/errors.jsonl" {
+		t.Fatalf("Errors: got %q", l.Errors)
+	}
+}
+
+func TestLastErrorPathIsSessionLocal(t *testing.T) {
+	if got := paths.LastErrorPath("/work/project", "session-1"); got != "/work/project/.shell3_project/runs/session-1/last_error.json" {
+		t.Fatalf("path = %q", got)
+	}
+	for _, sessionID := range []string{"unsafe/session", ".", ".."} {
+		if got := paths.LastErrorPath("/work/project", sessionID); got != "/work/project/.shell3_project/last_error.json" {
+			t.Fatalf("unsafe fallback for %q = %q", sessionID, got)
+		}
 	}
 }

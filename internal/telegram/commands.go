@@ -11,46 +11,15 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// KitCommand is a verb the bot answers by running a shell function, with no
-// model turn.
-type KitCommand struct {
-	Name, Desc string
-}
-
-// SetKitCommands installs the kit's commands. A nil run advertises them
-// without making them answerable, for health checks and menu tests.
-func (b *Bot) SetKitCommands(cmds []KitCommand, run func(ctx context.Context, name, arg string) (string, error)) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.kitCommands, b.kitCommandRun = cmds, run
-}
-
-// BotCommands is the built-ins plus the kit's, in that order — what is
-// registered as Telegram's "/" autocomplete menu.
+// BotCommands is shell3's complete Telegram command menu.
 func (b *Bot) BotCommands() []Command {
-	out := BotCommands()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, c := range b.kitCommands {
-		out = append(out, Command{c.Name, c.Desc})
-	}
-	return out
-}
-
-// BotCommands is the canonical BUILT-IN list, next to handleCommand so the
-// two stay in sync.
-func BotCommands() []Command {
 	return []Command{
-		{"ask", "Talk to the agent in a group: /ask <message>"},
-		{"help", "How this bot works — chats, groups, commands"},
-		{"status", "Send a current status snapshot"},
+		{"ask", "Talk to shell3 in a group: /ask <message>"},
+		{"help", "How this remote control works"},
 		{"stop", "Stop the current turn"},
-		{"superstop", "Stop the turn AND every background job"},
-		{"new", "Start a fresh conversation (the old one stays searchable)"},
-		{"run", "Run a scheduled job now: /run <name>"},
-		{"btw", "Ask something outside this conversation: /btw <question>"},
-		{"reload", "Reload the config without restarting"},
-		{"quiet", "Hush background posts: /quiet on|off"},
+		{"superstop", "Stop the turn and background commands"},
+		{"new", "Start a fresh conversation"},
+		{"reload", "Validate and reload shell3.lisp"},
 	}
 }
 
@@ -93,61 +62,21 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		}
 	case "/superstop":
 		c.handleSuperstop(ctx)
-	case "/status":
-		c.handleStatusCommand(ctx)
-	case "/run":
-		run := c.b.jobRunner()
-		if run == nil {
-			c.sendReply(ctx, "no scheduled jobs configured")
-			return
-		}
-		name := strings.TrimSpace(arg)
-		if name == "" {
-			c.sendReply(ctx, "usage: /run `<job>`")
-			return
-		}
-		if err := run(name); err != nil {
-			c.sendReply(ctx, "run failed: "+err.Error())
-			return
-		}
-		c.sendReply(ctx, "▶️ fired job "+name)
-	case "/btw":
-		// An aside: a one-off turn in its own child session. It touches
-		// neither the transcript nor the queue, so "what's the syntax for X"
-		// mid-project is not carried forward forever — and being a background
-		// dispatch it bypasses the turn slot, answering while a long turn runs.
-		q := strings.TrimSpace(arg)
-		if q == "" {
-			c.sendReply(ctx, "usage: /btw `<question>` — answered outside the conversation")
-			return
-		}
-		sess, err := c.mainSession()
-		if err != nil {
-			c.sendReply(ctx, "⚠️ "+err.Error())
-			return
-		}
-		if _, err := sess.Dispatch("", q, shell3.DispatchOpts{
-			Description: "btw: " + strutil.Truncate(q, 40),
-			Detached:    true,
-		}); err != nil {
-			c.sendReply(ctx, "⚠️ "+err.Error())
-			return
-		}
-		c.sendReply(ctx, "💬 asked on the side — the answer won't enter this conversation")
-	case "/reload":
-		// runReload takes the turn slot, so a /reload during a live turn is
-		// refused rather than raced.
-		c.runReload(ctx)
-	case "/quiet":
-		c.handleQuietCommand(ctx, arg)
 	case "/new":
 		c.handleNewCommand(ctx)
-	default:
-		// Built-ins matched above always win; a kit command named after one is
-		// rejected at load rather than shadowing here.
-		if c.runKitCommand(ctx, strings.TrimPrefix(cmd, "/"), arg) {
-			return
+	case "/reload":
+		c.b.mu.Lock()
+		reload := c.b.reload
+		c.b.mu.Unlock()
+		if reload == nil {
+			c.sendReply(ctx, "reload is unavailable")
+		} else if err := reload(); err != nil {
+			c.b.log.Warn("config reload failed", "error", err)
+			c.sendReply(ctx, "reload failed: "+err.Error())
+		} else {
+			c.sendReply(ctx, "config reloaded")
 		}
+	default:
 		c.sendReply(ctx, "unknown command: "+cmd)
 	}
 }
@@ -190,28 +119,6 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 	}
 }
 
-func (c *conversation) handleStatusCommand(ctx context.Context) {
-	c.b.mu.Lock()
-	render := c.b.statusDocument
-	c.b.mu.Unlock()
-	if render == nil {
-		c.sendReply(ctx, "⚠️ status snapshot is unavailable")
-		return
-	}
-	name, data, err := render(c.session())
-	if err != nil {
-		c.sendReply(ctx, "⚠️ status snapshot failed: "+err.Error())
-		return
-	}
-	if len(data) > maxSendBytes {
-		c.sendReply(ctx, "⚠️ status snapshot is too large to send")
-		return
-	}
-	if _, err := c.b.client.SendDocument(ctx, c.chatIDValue(), name, data, "shell3 status — point-in-time snapshot"); err != nil {
-		c.sendReply(ctx, "⚠️ status snapshot failed to send: "+err.Error())
-	}
-}
-
 // handleNewCommand starts a fresh conversation: detach the current session,
 // closing it when no jobs are running (they keep going and re-route to the new
 // one), clear the marker, and let the next message create the replacement.
@@ -250,64 +157,6 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.sendReply(ctx, "🧵 fresh conversation — the old one stays searchable in history")
 }
 
-// handleQuietCommand reports or sets /quiet: on, agent-initiated posts arrive
-// without a ping. Replies to the user and ⚠️ failures always ring.
-func (c *conversation) handleQuietCommand(ctx context.Context, arg string) {
-	state := func() string {
-		if c.b.isQuiet() {
-			return "🔕 quiet is on — background posts arrive without a ping."
-		}
-		return "🔔 quiet is off — every post rings."
-	}
-	switch arg {
-	case "":
-		c.sendReply(ctx, state())
-	case "on", "off":
-		c.mu.Lock()
-		store := c.b.quietMode
-		c.mu.Unlock()
-		if store == nil || store.Path == "" {
-			c.sendReply(ctx, "⚠️ quiet mode has nowhere to persist (no store configured).")
-			return
-		}
-		if err := store.Set(arg == "on"); err != nil {
-			c.sendReply(ctx, "⚠️ "+err.Error())
-			return
-		}
-		c.sendReply(ctx, state())
-	default:
-		c.sendReply(ctx, "usage: /quiet on|off")
-	}
-}
-
-// runKitCommand answers one kit command, reporting whether it claimed the
-// verb. Stdout is the reply and empty posts nothing, so an idempotent command
-// stays silent. A failure is reported, not swallowed: a command grants and
-// blocks nothing, so there is no fail-closed question.
-func (c *conversation) runKitCommand(ctx context.Context, name, arg string) bool {
-	c.mu.Lock()
-	run := c.b.kitCommandRun
-	declared := false
-	for _, kc := range c.b.kitCommands {
-		if kc.Name == name {
-			declared = true
-			break
-		}
-	}
-	c.mu.Unlock()
-	if !declared || run == nil {
-		return false
-	}
-	out, err := run(ctx, name, arg)
-	switch {
-	case err != nil:
-		c.sendReply(ctx, "/"+name+" failed: "+err.Error())
-	case strings.TrimSpace(out) != "":
-		c.sendReply(ctx, out)
-	}
-	return true
-}
-
 // helpText covers what the command list cannot show: that each chat is its own
 // conversation, and what a group needs before the bot hears anything. Both are
 // configured once and forgotten, so the answer lives one /help away.
@@ -342,7 +191,7 @@ func (c *conversation) helpText() string {
 				"it in Telegram and my instructions here change, no config edit needed. " +
 				"Telegram only shares it with a bot that can see group info, so if I seem " +
 				"unaware of it, promote me to admin here and it arrives within a few minutes " +
-				"(or right away after `/reload`).\n\n")
+				"after the next refresh.\n\n")
 	} else {
 		sb.WriteString("**In this chat**\nJust type — every message continues our conversation here.\n\n" +
 			"**In a group**, start with `/ask <message>` and then reply to my answers to " +

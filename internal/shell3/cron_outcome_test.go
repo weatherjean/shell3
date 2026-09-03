@@ -7,6 +7,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 type outcomeSink struct {
@@ -30,7 +31,7 @@ func cronEvent() CompletionEvent {
 	return CompletionEvent{
 		Kind: EvCron, JobID: "sub7", Title: "cron:nightly", Agent: "auditor",
 		CronJob: "nightly", Elapsed: 7 * time.Minute,
-		notice: notifyAgentDone("sub7", "done", ""),
+		notice: notify.Notification{Kind: "agent_done", ID: "sub7", Preview: "done", Status: "ok"},
 	}
 }
 

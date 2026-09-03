@@ -12,10 +12,9 @@ import (
 // always rendered with the dark palette — these values keep that
 // look identical.
 var (
-	bannerPrimary  = lipgloss.Color("#EAB308") // brand yellow
-	bannerMuted    = lipgloss.Color("#6B7280")
-	bannerFgDim    = lipgloss.Color("#9CA3AF")
-	bannerContrast = lipgloss.Color("#1F2937") // dark text on a bannerPrimary background
+	bannerPrimary = lipgloss.Color("#EAB308") // brand yellow
+	bannerMuted   = lipgloss.Color("#6B7280")
+	bannerFgDim   = lipgloss.Color("#9CA3AF")
 )
 
 // brandLine renders the one-line snail wordmark shared by the full banner and
@@ -31,7 +30,7 @@ func brandLine() string {
 func PrintHeader(w io.Writer) {
 	sub := lipgloss.NewStyle().Foreground(bannerFgDim)
 	fmt.Fprintln(w, brandLine())
-	fmt.Fprintln(w, sub.Render("minimal Unix-composable personal agent"))
+	fmt.Fprintln(w, sub.Render("minimal Unix-composable harness harness"))
 	fmt.Fprintln(w)
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 // newTestRuntime builds a Runtime around fakellm-backed configs, bypassing
-// agentsetup the same way newTestSession does for single sessions. It opens a
+// runtime assembly the same way newTestSession does for single sessions. It opens a
 // real runs.Store in a temp dir so sessions (including in-process subagents)
 // can persist messages, and initialises rt.jobs for background-job tests.
 func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {

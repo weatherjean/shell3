@@ -110,7 +110,6 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 			gotCmd = command
 			return "bg1", nil
 		},
-		RunToolCall: nil,
 	}
 	out, err := BashBgHandler{}.Execute(context.Background(), "t", json.RawMessage(`{"command":"echo hi"}`), cfg)
 	if err != nil {

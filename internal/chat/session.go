@@ -52,11 +52,6 @@ type Session struct {
 	// teardown, everything delivered by the time Run returns. Never nil.
 	sink func(Event)
 
-	// onEvent is the kit event: subscriber, nil when none is wired. Separate
-	// from sink so a session with no front-end still observes. Guarded by
-	// msgMu: a reload swaps it while turns emit.
-	onEvent func(Event)
-
 	// inbox is pushed from any goroutine by Interject and drained by the turn
 	// loop at round boundaries. Guarded by inboxMu — the only Session state
 	// touchable concurrently with a running turn.
@@ -195,10 +190,6 @@ func reminderBlock(header string, items []string) string {
 type SessionOpts struct {
 	StoreID string
 	Sink    func(Event)
-	// OnEvent is a second observer beside Sink: Sink renders, OnEvent is the
-	// kit event: seam. It runs inline, so real work must hand off to its own
-	// worker (agentsetup.eventDispatcher). Nil is the normal case.
-	OnEvent func(Event)
 	// InitialMessages seeds the history verbatim when resuming.
 	InitialMessages []llm.Message
 	// InitialPromptTokens seeds the context gauge on resume with the
@@ -214,7 +205,7 @@ type SessionOpts struct {
 // NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
 // installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
-	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink, onEvent: opts.OnEvent}
+	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink}
 	if s.sink == nil {
 		s.sink = func(Event) {}
 	}
@@ -277,17 +268,6 @@ func (s *Session) recordReminder(text string) {
 func (s *Session) SetStore(store *runs.Store) {
 	s.msgMu.Lock()
 	s.store = store
-	s.msgMu.Unlock()
-}
-
-// SetOnEvent repoints the kit event observer on a LIVE session. The session
-// outlives a reload — it IS the conversation — while its observer belongs to
-// the generation whose dispatcher the reload closes. Without the swap the
-// subscriber goes silent on the first /reload, with nothing in the log to say
-// why. Nil clears it.
-func (s *Session) SetOnEvent(fn func(Event)) {
-	s.msgMu.Lock()
-	s.onEvent = fn
 	s.msgMu.Unlock()
 }
 

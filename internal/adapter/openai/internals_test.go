@@ -28,7 +28,8 @@ func sseResponse(body string) *http.Response {
 }
 
 func TestBodyTapCapturesRequestBody(t *testing.T) {
-	tap := &bodyTap{rt: &mockTransport{resp: sseResponse("data: [DONE]\n\n")}}
+	responseBody := "data: [DONE]\n\n"
+	tap := &bodyTap{rt: &mockTransport{resp: sseResponse(responseBody)}}
 	body := []byte(`{"test":true}`)
 	req, _ := http.NewRequest("POST", "http://x", bytes.NewReader(body))
 	resp, err := tap.RoundTrip(req)
@@ -42,7 +43,9 @@ func TestBodyTapCapturesRequestBody(t *testing.T) {
 	if !bytes.Equal(req2, body) {
 		t.Fatalf("request body: got %q want %q", req2, body)
 	}
-	_ = res2
+	if string(res2) != responseBody {
+		t.Fatalf("response body: got %q want %q", res2, responseBody)
+	}
 }
 
 func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
@@ -60,10 +63,33 @@ func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
 
 	_, res := tap.snapshot()
 	if !strings.Contains(string(res), "not authorized") {
 		t.Fatalf("error body not captured: %q", res)
+	}
+}
+
+func TestBodyTapBoundsTrafficCapture(t *testing.T) {
+	body := strings.Repeat("r", trafficCaptureBytes+1)
+	tap := &bodyTap{rt: &mockTransport{resp: sseResponse(body)}}
+	req, _ := http.NewRequest("POST", "http://x", strings.NewReader(strings.Repeat("q", trafficCaptureBytes+1)))
+	resp, err := tap.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reqBody, resBody := tap.snapshot()
+	if len(reqBody) != trafficCaptureBytes || len(resBody) != trafficCaptureBytes {
+		t.Fatalf("capture sizes = %d/%d, want %d/%d", len(reqBody), len(resBody), trafficCaptureBytes, trafficCaptureBytes)
 	}
 }
 

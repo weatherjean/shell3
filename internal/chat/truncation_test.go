@@ -15,7 +15,7 @@ type truncatingClient struct {
 
 func (c truncatingClient) Stream(_ context.Context, _ []llm.Message, _ []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	onEvent(llm.StreamEvent{TextDelta: c.text})
-	onEvent(llm.StreamEvent{Done: true, Truncated: c.truncated})
+	onEvent(llm.StreamEvent{Truncated: c.truncated})
 	return nil
 }
 

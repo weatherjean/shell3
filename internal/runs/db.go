@@ -49,7 +49,7 @@ func (s *Store) Close() error {
 
 // schemaVersion changes with every table-shape change. Mismatched databases
 // are archived and recreated rather than migrated or read with an older shape.
-const schemaVersion = 10
+const schemaVersion = 12
 
 // openDB opens path, applying the schema fresh or recreating the file when
 // its stamp does not match schemaVersion. A mismatched database is never
@@ -193,7 +193,7 @@ func recreateErr(asided []string, cause error) error {
 // openRaw opens the database file with the store's connection pragmas, doing
 // no schema work of its own.
 func openRaw(path string) (*sql.DB, error) {
-	// WAL for multi-process readers (shell3 ask can run alongside shell3
+	// WAL for multi-process readers (one-shot shell3 can run alongside an
 	// telegram over one store), busy_timeout so a brief writer overlap
 	// waits instead of erroring.
 	dsn := "file:" + url.PathEscape(path) +
@@ -272,10 +272,6 @@ CREATE TABLE IF NOT EXISTS threads (
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 	text, session_id UNINDEXED, seq UNINDEXED, role UNINDEXED
 );
-CREATE TABLE IF NOT EXISTS cron_status (
-	name TEXT PRIMARY KEY,
-	json TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS prompts (
 	hash TEXT PRIMARY KEY,
 	text TEXT NOT NULL
@@ -292,6 +288,21 @@ CREATE TABLE IF NOT EXISTS outbox (
 	kind TEXT NOT NULL,
 	json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS schedule_runs (
+	id            TEXT PRIMARY KEY,
+	schedule_name TEXT NOT NULL,
+	task          TEXT NOT NULL,
+	trigger       TEXT NOT NULL,
+	run_dir       TEXT NOT NULL,
+	output_path   TEXT NOT NULL,
+	scheduled_at  TEXT NOT NULL,
+	started_at    TEXT NOT NULL,
+	finished_at   TEXT NOT NULL DEFAULT '',
+	status        TEXT NOT NULL CHECK (status IN ('running','done','failed')),
+	error         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS schedule_runs_name_started
+	ON schedule_runs(schedule_name, started_at DESC);
 `
 
 // newID is a sortable wall-clock timestamp plus a random suffix, so ids order

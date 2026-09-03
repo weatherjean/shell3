@@ -28,6 +28,8 @@ type bodyTap struct {
 	rt      http.RoundTripper
 }
 
+const trafficCaptureBytes = 128 << 10
+
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Reset the buffered response body unconditionally: a stale resBody left
 	// over from a previous non-2xx attempt would otherwise pair with this
@@ -37,21 +39,35 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
 		buf, _ := io.ReadAll(req.Body)
 		req.Body = io.NopCloser(bytes.NewReader(buf))
-		b.reqBody = buf
+		b.reqBody = append([]byte(nil), buf[:min(len(buf), trafficCaptureBytes)]...)
+	} else {
+		b.reqBody = nil
 	}
 	b.mu.Unlock()
 	res, err := b.rt.RoundTrip(req)
 	if err != nil || res == nil || res.Body == nil {
 		return res, err
 	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		buf, _ := io.ReadAll(res.Body)
-		res.Body = io.NopCloser(bytes.NewReader(buf))
-		b.mu.Lock()
-		b.resBody = buf
-		b.mu.Unlock()
-	}
+	res.Body = &captureBody{ReadCloser: res.Body, tap: b}
 	return res, err
+}
+
+type captureBody struct {
+	io.ReadCloser
+	tap *bodyTap
+}
+
+func (r *captureBody) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.tap.mu.Lock()
+		remaining := trafficCaptureBytes - len(r.tap.resBody)
+		if remaining > 0 {
+			r.tap.resBody = append(r.tap.resBody, p[:min(n, remaining)]...)
+		}
+		r.tap.mu.Unlock()
+	}
+	return n, err
 }
 
 func (b *bodyTap) snapshot() (req, res []byte) {
@@ -232,7 +248,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		onEvent(llm.StreamEvent{ToolCall: tc})
 	}
 
-	onEvent(llm.StreamEvent{Done: true, Truncated: truncated})
+	if truncated {
+		onEvent(llm.StreamEvent{Truncated: true})
+	}
 	return nil
 }
 

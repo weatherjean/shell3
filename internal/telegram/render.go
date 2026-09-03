@@ -127,7 +127,7 @@ func chunk(s string) []string {
 }
 
 // sendReply posts chunked, unthreaded text: notices that are not a turn reply.
-func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendOpt) {
+func (c *conversation) sendReply(ctx context.Context, text string) {
 	if text == "" {
 		text = "(no output)"
 	}
@@ -136,9 +136,9 @@ func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendO
 		// Markdown to Telegram-safe HTML so formatting shows, falling back to
 		// raw text if Telegram still rejects it.
 		html := mdhtml.ToTelegramHTML(part)
-		id, err := c.b.client.SendHTML(ctx, chatID, html, opts...)
+		id, err := c.b.client.SendHTML(ctx, chatID, html)
 		if err != nil {
-			id, _ = c.b.client.Send(ctx, chatID, part, opts...)
+			id, _ = c.b.client.Send(ctx, chatID, part)
 		}
 		// Still a message from the bot: remembering its id lets a user reply
 		// in a group instead of retyping an @mention.

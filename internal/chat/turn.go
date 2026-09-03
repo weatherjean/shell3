@@ -31,10 +31,9 @@ const (
 	errorDumpErrorBytes    = 16 << 10
 )
 
-// logStreamError dumps the failing turn's messages and last raw HTTP traffic
-// to .shell3_project/last_error.json, then logs at Debug — the front-end
-// already shows the error, so stderr would duplicate it.
-func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
+// logStreamError retains a bounded, session-local provider trace and records
+// its location in the project diagnostic log.
+func logStreamError(cfg TurnConfig, sessionID string, msgs []llm.Message, streamErr error) {
 	var reqBody, resBody []byte
 	if ts, ok := cfg.LLM.(llm.TrafficInspector); ok {
 		reqBody, resBody = ts.LastTraffic()
@@ -43,7 +42,7 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	var dumpErr error
 	if cfg.WorkDir != "" {
 		if data, err := buildErrorDump(msgs, streamErr, reqBody, resBody, time.Now()); err == nil {
-			p := paths.LastErrorPath(cfg.WorkDir)
+			p := paths.LastErrorPath(cfg.WorkDir, sessionID)
 			if werr := writePrivateAtomic(p, data); werr != nil {
 				// Don't advertise a dump that wasn't written.
 				dumpErr = werr
@@ -54,7 +53,7 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 			dumpErr = err
 		}
 	}
-	cfg.Log.Debug("stream error", "error", streamErr, "dump", dumpPath, "dump_error", dumpErr,
+	cfg.Log.Error("stream error", streamErr, "session", sessionID, "dump", dumpPath, "dump_error", dumpErr,
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
@@ -192,7 +191,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			sess.lastPromptTokens = usage.PromptTokens
 		}
 		if err != nil {
-			logStreamError(cfg, allMsgs, err)
+			logStreamError(cfg, sess.id, allMsgs, err)
 			// Capture into a fresh local so terminalEmit carries the value
 			// itself and errors.Is/As survives the public boundary.
 			streamErr := err
@@ -356,52 +355,26 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
 		res, invalid := validateCall(toolSchemas, tc)
 		// On a validation failure res already carries the reason. Otherwise
-		// gate, then resolve a handler: custom dispatchers, then built-ins —
-		// custom first, so a declared tool name always wins.
+		// resolve host tools first, then built-ins.
 		if !invalid {
-			// The reviewer needs the transcript through the current tool call.
-			// Copy the slice so a reviewer cannot retain a view that later append
-			// operations mutate underneath it.
-			toolCfg := cfg.ToolConfig
-			toolCfg.ReviewMessages = append([]llm.Message(nil), st.allMsgs...)
-			// The gate is the only policy surface and fires before every tool.
-			// The bash family self-gates in its handlers, where rewrite and
-			// runner-swap resolve; everything else is gated here by name and
-			// args, pass or block only, with a nil command.
-			gateMsg, gateBlocked := "", false
-			if !isBashTool(tc.Name) {
-				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg.ToolConfig, tc.Name, tc.RawArgs)
-			}
-			if gateBlocked {
-				res = errResult(gateMsg)
+			var handler ToolHandler
+			if cfg.HostToolNames[tc.Name] {
+				res = dispatchHostTool(ctx, cfg, tc.Name, tc.RawArgs)
+			} else if h, ok := cfg.Handlers[tc.Name]; ok {
+				handler = h
 			} else {
-				var handler ToolHandler
-				if cfg.HostToolNames[tc.Name] {
-					res = dispatchHostTool(ctx, cfg, tc.Name, tc.RawArgs)
-				} else if h, ok := cfg.Handlers[tc.Name]; ok {
-					handler = h
-				} else {
-					res = errResult(unknownToolMsg(tc.Name))
-				}
-				if handler != nil {
-					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), toolCfg)
-					res = classifyHandlerOutput(out)
-					if herr != nil {
-						// Handlers normally encode failure in their output, so a
-						// non-nil error is a genuine fault. Log it, and with no
-						// output surface it to the model rather than an empty
-						// result.
-						cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
-						if out == "" {
-							res = errResult("error: " + herr.Error())
-						}
+				res = errResult(unknownToolMsg(tc.Name))
+			}
+			if handler != nil {
+				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), cfg.ToolConfig)
+				res = classifyHandlerOutput(out)
+				if herr != nil {
+					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+					if out == "" {
+						res = errResult("error: " + herr.Error())
 					}
 				}
 			}
-		}
-
-		if cfg.RunToolResult != nil {
-			res.output = cfg.RunToolResult(ctx, tc.Name, tc.RawArgs, res.output)
 		}
 		appendToolResult(sess, st, tc, res)
 	}
@@ -446,15 +419,6 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 
 // truncationNotice is appended when a reply hits the output token cap.
 const truncationNotice = "\n\n⚠️ [output cut off — hit the model's max_tokens limit]"
-
-// IsTruncatedReply reports the truncation notice in assistant text. A
-// front-end rendering for a human can ignore it — the notice speaks for
-// itself — but one consuming the text PROGRAMMATICALLY must check: the notice
-// rides the reply, not an error channel, so a cut-off reply is otherwise
-// indistinguishable from a complete one.
-func IsTruncatedReply(text string) bool {
-	return strings.Contains(text, truncationNotice)
-}
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting per-token chat.Events on the session sink.
@@ -580,18 +544,10 @@ func recordTurnPrompt(cfg TurnConfig, sess *Session, sysPrompt string, seq int) 
 	}
 }
 
-// renderSystemPrompt is the ONE place a turn's system prompt is assembled:
-// the agent profile's prompt, replaced by the refresher when one is wired (context
-// files re-read from disk, a fresh timestamp), then the session's own suffix.
-// Both are closures called per turn, so an edit to either source lands on the
-// next turn rather than at the next restart.
+// renderSystemPrompt appends the live per-session transport suffix to the
+// configured agent prompt.
 func renderSystemPrompt(cfg TurnConfig) string {
 	sysPrompt := cfg.Profile.SystemPrompt
-	if cfg.RefreshPrompt != nil {
-		if s := cfg.RefreshPrompt(); s != "" {
-			sysPrompt = s
-		}
-	}
 	if cfg.PromptSuffix != nil {
 		if suffix := strings.TrimSpace(cfg.PromptSuffix()); suffix != "" {
 			sysPrompt = strings.TrimRight(sysPrompt, "\n") + "\n\n" + suffix

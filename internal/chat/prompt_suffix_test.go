@@ -21,21 +21,6 @@ func TestRenderSystemPromptCallsSuffixEveryTurn(t *testing.T) {
 	}
 }
 
-func TestRenderSystemPromptKeepsRefreshedPrompt(t *testing.T) {
-	cfg := TurnConfig{
-		Profile:       AgentProfile{SystemPrompt: "stale"},
-		RefreshPrompt: func() string { return "fresh prompt" },
-		PromptSuffix:  func() string { return "room brief" },
-	}
-	got := renderSystemPrompt(cfg)
-	if !strings.Contains(got, "fresh prompt") || !strings.Contains(got, "room brief") {
-		t.Fatalf("render = %q, want both the refreshed prompt and the suffix", got)
-	}
-	if strings.Contains(got, "stale") {
-		t.Fatal("the refresher must still win over the construction-time prompt")
-	}
-}
-
 func TestRenderSystemPromptWithoutSuffix(t *testing.T) {
 	base := TurnConfig{Profile: AgentProfile{SystemPrompt: "base"}}
 	if got := renderSystemPrompt(base); got != "base" {

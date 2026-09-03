@@ -3,8 +3,6 @@ package shell3
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -49,6 +47,9 @@ type Session struct {
 	// busy spans Send until its turn goroutine finishes, rejecting overlapping
 	// sends and between-turn configuration changes instead of racing them.
 	busy bool
+	// pendingCfg is a validated reload generation queued while a turn is busy.
+	// The active turn keeps its captured TurnConfig; the next turn sees this one.
+	pendingCfg *chat.Config
 	// closed is set by doClose so a late Send — a Wake-driven drain racing
 	// teardown — is rejected rather than run against the ended store record.
 	closed bool
@@ -109,7 +110,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		InitialMessages:     seed,
 		InitialPromptTokens: seedTokens,
 		Sink:                s.route,
-		OnEvent:             cfg.OnEvent,
 		Store:               cfg.Store,
 	})
 	if resumedFrom != "" {
@@ -211,7 +211,7 @@ func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 // waiting — see chat.Session.HasSteer.
 func (s *Session) HasQueuedSteer() bool { return s.sess.HasSteer() }
 
-// Headless reports no human attached (subagent children, cron jobs).
+// Headless reports that no human is attached to this session.
 // Registrars skip tools that need one: send_media_telegram has nowhere to
 // send a file without a live chat session.
 func (s *Session) Headless() bool { return s.opts.Headless }
@@ -261,9 +261,13 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 				s.cur = nil
 			}
 			s.busy = false
+			if s.pendingCfg != nil && !s.closed {
+				s.reloadConfigLocked(*s.pendingCfg)
+				s.pendingCfg = nil
+			}
 			s.mu.Unlock()
 			close(out)
-			// Steering or a subagent result that arrived in the final round
+			// Steering or a host notice that arrived in the final round
 			// queued with no boundary left to drain it. The session is idle
 			// with a non-empty inbox, so Wake the host for a follow-up turn —
 			// after busy clears, or RunQueued would bounce off ErrBusy.
@@ -303,6 +307,30 @@ func (s *Session) isBusy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.busy
+}
+
+func (s *Session) reloadConfigLocked(cfg chat.Config) {
+	// Transport tools belong to the live front end, not the kit generation.
+	// Carry them across while replacing the model-facing core configuration.
+	for _, def := range s.cfg.Profile.Tools {
+		if s.cfg.HostToolNames[def.Name] {
+			cfg.Profile.Tools = append(cfg.Profile.Tools, def)
+		}
+	}
+	cfg.HostTool = s.cfg.HostTool
+	cfg.HostToolNames = s.cfg.HostToolNames
+	cfg.ParentID = s.cfg.ParentID
+	cfg.CronJob = s.cfg.CronJob
+	s.cfg = cfg
+	s.applyHostReminders()
+}
+
+func (s *Session) queueReloadLocked(cfg chat.Config) {
+	if s.busy {
+		s.pendingCfg = &cfg
+		return
+	}
+	s.reloadConfigLocked(cfg)
 }
 
 // ID is the store session id; it rolls when compaction starts a new one, and
@@ -389,35 +417,16 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		tc.StartBashBg = func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
 			return rt.jobs.startCommand(parent, command, workdir, argv, env, report, note)
 		}
-		allowed := cfg.Subagents // the active agent's registered-subagent allowlist
-		tc.StartSubagent = func(agent, prompt, desc string, report notify.ReportMode, note string) (string, error) {
-			// Only the registered subagent names the task tool's schema
-			// advertises; an empty allowlist means no delegation at all.
-			if !slices.Contains(allowed, agent) {
-				if len(allowed) == 0 {
-					return "", errors.New("this agent has no subagents configured (the kit declares no employee)")
-				}
-				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
-			}
-			// Dispatch depth is enforced centrally by the job manager; this
-			// session-local closure enforces the active agent's peer allowlist.
-			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{report: report, note: note})
-		}
-		tc.ListJobs = func() string {
-			return rt.jobs.formatJobList()
-		}
-		tc.JobStatus = func(id string) string {
-			return rt.jobs.formatJobStatus(id)
-		}
-		tc.CancelJob = func(id string) string {
-			return rt.jobs.formatJobCancel(id)
-		}
 	}
 	return tc
 }
 
 // ActiveAgent returns the name of the currently active agent.
-func (s *Session) ActiveAgent() string { return s.cfg.Agent }
+func (s *Session) ActiveAgent() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Agent
+}
 
 // Name is the session's runtime key, which front-ends use as a label.
 func (s *Session) Name() string { return s.name }

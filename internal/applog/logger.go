@@ -1,62 +1,36 @@
-// Package applog provides rotating file + stderr structured logging.
-//
-// Debug and Info lines go to the log file only; Warn and Error are mirrored to
-// stderr so users see actionable messages in their terminal. Open rotates the file
-// when it exceeds a size bound, keeping a bounded number of archives.
+// Package applog provides the bounded project diagnostic log.
 package applog
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
-// Rotation bounds for the shared global app log. Every opener of that file
-// (e.g. agentsetup's runtime logger) MUST use these same constants: rotation
-// happens at open time by renaming the path, so two openers with different
-// bounds could rotate the file out from under each other's file descriptor,
-// sending lines to an orphaned inode.
 const (
-	// DefaultMaxBytes is the size beyond which the log is rotated at open.
-	DefaultMaxBytes = 2 * 1024 * 1024
-	// DefaultMaxArchives is how many rotated archives (.1, .2, …) are kept.
-	DefaultMaxArchives = 3
+	// DefaultMaxBytes and DefaultMaxArchives bound the active log plus five
+	// archives to approximately 60 MiB.
+	DefaultMaxBytes    int64 = 10 << 20
+	DefaultMaxArchives       = 5
+	maxRecordBytes           = 256 << 10
 )
 
 // Logger is the application-wide logging interface. Fields are key/value
 // pairs: logger.Warn("msg", "key", val, "key2", val2).
 type Logger interface {
 	Debug(msg string, fields ...any)
-	// Info records something worth keeping but not worth interrupting for —
-	// notably the security audit trail (who signed in, from where). Separate
-	// from Debug so those lines are findable among the diagnostic noise.
 	Info(msg string, fields ...any)
 	Warn(msg string, fields ...any)
 	Error(msg string, err error, fields ...any)
 }
 
-// MirrorSetter is implemented by a Logger whose Warn/Error stderr mirror can
-// be redirected. A full-screen front-end asserts for it and mirrors to
-// io.Discard while it owns the terminal: it does not own stderr, so a WARN
-// written mid-frame paints raw text over the rendered screen and stays there
-// until the next full redraw. The line still reaches the log file either way —
-// only the mirror is silenced, and only for as long as the screen is held.
-type MirrorSetter interface {
-	SetMirror(w io.Writer)
-}
-
-// SetMirror redirects the Warn/Error stderr mirror. Pass io.Discard to
-// silence it; pass os.Stderr to restore the default.
-func (l *fileLogger) SetMirror(w io.Writer) {
-	l.mu.Lock()
-	l.stderr = w
-	l.mu.Unlock()
-}
-
-// Noop discards all log output. Use in tests.
+// Noop discards all log output. It is useful for isolated tests.
 type Noop struct{}
 
 func (Noop) Debug(string, ...any)        {}
@@ -64,108 +38,214 @@ func (Noop) Info(string, ...any)         {}
 func (Noop) Warn(string, ...any)         {}
 func (Noop) Error(string, error, ...any) {}
 
-// fileLogger writes structured log lines to w (mirroring Warn/Error to stderr).
+// fileLogger serializes records and rotates before a write would cross the
+// active-file bound.
 type fileLogger struct {
-	mu     sync.Mutex
-	w      io.WriteCloser
-	stderr io.Writer
+	mu       sync.Mutex
+	path     string
+	file     *os.File
+	lock     *os.File
+	size     int64
+	maxBytes int64
+	archives int
 }
 
-func (l *fileLogger) Debug(msg string, fields ...any) {
-	l.write("DEBUG", msg, nil, fields, false)
-}
-
-func (l *fileLogger) Info(msg string, fields ...any) {
-	l.write("INFO", msg, nil, fields, false)
-}
-
-func (l *fileLogger) Warn(msg string, fields ...any) {
-	l.write("WARN", msg, nil, fields, true)
-}
-
-func (l *fileLogger) Error(msg string, err error, fields ...any) {
-	l.write("ERROR", msg, err, fields, true)
-}
-
-// write formats and emits a log line, also mirroring to stderr when mirror is
-// true. Both writes happen under l.mu so their ordering stays consistent.
-func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bool) {
-	var b strings.Builder
-	b.WriteString(time.Now().UTC().Format(time.RFC3339))
-	b.WriteString(" [")
-	b.WriteString(level)
-	b.WriteString("] ")
-	b.WriteString(msg)
+// Open opens an append-only JSONL diagnostic log. Rotation continues while
+// the process is running; the returned closer owns the active file.
+func Open(path string) (Logger, io.Closer, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, nil, fmt.Errorf("applog: create directory: %w", err)
+	}
+	l := &fileLogger{path: path, maxBytes: DefaultMaxBytes, archives: DefaultMaxArchives}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		b.WriteString(" error=")
-		b.WriteString(err.Error())
+		return nil, nil, fmt.Errorf("applog: open lock: %w", err)
 	}
-	for i := 0; i+1 < len(fields); i += 2 {
-		fmt.Fprintf(&b, " %v=%v", fields[i], fields[i+1])
+	if err := lock.Chmod(0o600); err != nil {
+		_ = lock.Close()
+		return nil, nil, fmt.Errorf("applog: protect lock: %w", err)
 	}
-	if len(fields)%2 == 1 {
-		fmt.Fprintf(&b, " %v=<MISSING>", fields[len(fields)-1])
-	}
-	b.WriteString("\n")
-	line := b.String()
-	l.mu.Lock()
-	_, _ = io.WriteString(l.w, line)
-	if mirror {
-		fmt.Fprint(l.stderr, line)
-	}
-	l.mu.Unlock()
-}
-
-// Open creates a Logger that writes to path, rotating the file if it exceeds
-// maxBytes (keeping up to maxArchives archives). The caller closes the returned
-// closer when done. On error both other returns are nil — the caller decides
-// its own fallback (e.g. Noop) rather than receiving a half-usable pair.
-func Open(path string, maxBytes int64, maxArchives int) (Logger, io.Closer, error) {
-	f, err := OpenFile(path, maxBytes, maxArchives)
-	if err != nil {
+	l.lock = lock
+	if err := l.lockExclusive(); err != nil {
+		_ = lock.Close()
 		return nil, nil, err
 	}
-	lg := &fileLogger{w: f, stderr: os.Stderr}
-	return lg, f, nil
+	defer l.unlock()
+	if err := l.open(); err != nil {
+		_ = lock.Close()
+		return nil, nil, err
+	}
+	if l.size >= l.maxBytes {
+		if err := l.rotate(); err != nil {
+			_ = l.file.Close()
+			_ = l.lock.Close()
+			return nil, nil, err
+		}
+	}
+	return l, l, nil
 }
 
-// OpenFile rotates path if it exceeds maxBytes (keeping up to maxArchives
-// archives), then opens it for append and returns the file. Unlike Open it
-// returns the raw *os.File so callers can use it as a subprocess's stdout/stderr
-// (see internal/modelproxy). The caller owns closing the file.
-func OpenFile(path string, maxBytes int64, maxArchives int) (*os.File, error) {
-	if err := rotate(path, maxBytes, maxArchives); err != nil {
-		return nil, fmt.Errorf("applog: rotate: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("applog: open %s: %w", path, err)
-	}
-	return f, nil
+func (l *fileLogger) Debug(msg string, fields ...any) { l.write("debug", msg, nil, fields) }
+func (l *fileLogger) Info(msg string, fields ...any)  { l.write("info", msg, nil, fields) }
+func (l *fileLogger) Warn(msg string, fields ...any)  { l.write("warn", msg, nil, fields) }
+func (l *fileLogger) Error(msg string, err error, fields ...any) {
+	l.write("error", msg, err, fields)
 }
 
-// rotate renames path → path.1 → path.2 … up to maxArchives if path
-// exceeds maxBytes. Files beyond maxArchives are deleted.
-func rotate(path string, maxBytes int64, maxArchives int) error {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return nil
+func (l *fileLogger) write(level, msg string, cause error, fields []any) {
+	record := map[string]any{
+		"time":    time.Now().UTC().Format(time.RFC3339Nano),
+		"level":   level,
+		"message": msg,
+	}
+	if cause != nil {
+		record["error"] = cause.Error()
+	}
+	if len(fields) > 0 {
+		values := make(map[string]any, (len(fields)+1)/2)
+		for i := 0; i < len(fields); i += 2 {
+			key := fmt.Sprint(fields[i])
+			if i+1 == len(fields) {
+				values[key] = "<missing>"
+			} else {
+				values[key] = fieldValue(fields[i+1])
+			}
+		}
+		record["fields"] = values
+	}
+	line, err := json.Marshal(record)
+	if err != nil || len(line) > maxRecordBytes {
+		line, _ = json.Marshal(map[string]any{
+			"time": time.Now().UTC().Format(time.RFC3339Nano), "level": level,
+			"message": "diagnostic record omitted", "fields": map[string]any{"reason": "record exceeded encoding or size bound"},
+		})
+	}
+	line = append(line, '\n')
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lock == nil {
+		return
+	}
+	if err := l.lockExclusive(); err != nil {
+		return
+	}
+	defer l.unlock()
+	if err := l.refresh(); err != nil {
+		return
+	}
+	if l.size+int64(len(line)) > l.maxBytes {
+		if err := l.rotate(); err != nil {
+			return
+		}
+	}
+	n, err := l.file.Write(line)
+	l.size += int64(n)
+	if err != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+}
+
+func (l *fileLogger) lockExclusive() error {
+	if err := syscall.Flock(int(l.lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("applog: lock: %w", err)
+	}
+	return nil
+}
+
+func (l *fileLogger) unlock() {
+	_ = syscall.Flock(int(l.lock.Fd()), syscall.LOCK_UN)
+}
+
+// refresh follows a rotation performed by another process and reloads the
+// authoritative active size while the cross-process lock is held.
+func (l *fileLogger) refresh() error {
+	active, err := os.Stat(l.path)
+	if errors.Is(err, os.ErrNotExist) {
+		if l.file != nil {
+			_ = l.file.Close()
+			l.file = nil
+		}
+		return l.open()
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("applog: stat active log: %w", err)
 	}
-	if info.Size() <= maxBytes {
-		return nil
+	if l.file == nil {
+		return l.open()
 	}
-	// Delete the oldest archive to make room.
-	oldest := fmt.Sprintf("%s.%d", path, maxArchives)
-	_ = os.Remove(oldest)
-	// Shift archives: .2 → .3, .1 → .2, etc.
-	for i := maxArchives - 1; i >= 1; i-- {
-		from := fmt.Sprintf("%s.%d", path, i)
-		to := fmt.Sprintf("%s.%d", path, i+1)
-		_ = os.Rename(from, to)
+	opened, err := l.file.Stat()
+	if err != nil || !os.SameFile(opened, active) {
+		_ = l.file.Close()
+		l.file = nil
+		return l.open()
 	}
-	// Rotate current log to .1.
-	return os.Rename(path, path+".1")
+	l.size = active.Size()
+	return nil
+}
+
+func fieldValue(value any) any {
+	if err, ok := value.(error); ok {
+		return err.Error()
+	}
+	return value
+}
+
+func (l *fileLogger) open() error {
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("applog: open %s: %w", l.path, err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("applog: protect %s: %w", l.path, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("applog: stat %s: %w", l.path, err)
+	}
+	l.file, l.size = f, info.Size()
+	return nil
+}
+
+func (l *fileLogger) rotate() error {
+	if l.file != nil {
+		if err := l.file.Close(); err != nil {
+			return fmt.Errorf("applog: close before rotation: %w", err)
+		}
+		l.file = nil
+	}
+	oldest := fmt.Sprintf("%s.%d", l.path, l.archives)
+	if err := os.Remove(oldest); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("applog: remove oldest archive: %w", err)
+	}
+	for i := l.archives - 1; i >= 1; i-- {
+		from, to := fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1)
+		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("applog: rotate archive: %w", err)
+		}
+	}
+	if err := os.Rename(l.path, l.path+".1"); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("applog: rotate active log: %w", err)
+	}
+	return l.open()
+}
+
+func (l *fileLogger) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var first error
+	if l.file != nil {
+		first = l.file.Close()
+		l.file = nil
+	}
+	if l.lock != nil {
+		if err := l.lock.Close(); first == nil {
+			first = err
+		}
+		l.lock = nil
+	}
+	return first
 }

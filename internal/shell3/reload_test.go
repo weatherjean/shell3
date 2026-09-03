@@ -1,111 +1,88 @@
-package shell3_test
+package shell3
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
-func writeReloadCfg(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReloadPicksUpConfigChange(t *testing.T) {
-	dir := t.TempDir()
-	writeBaseTree(t, dir, nil)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "live"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	writeTreeFiles(t, dir, map[string]string{
-		"shell3.sh": baseWiring[:len(baseWiring)-len("#---\n")] +
-			"#   telegram:\n#     chat_id: \"123456789\"\n#---\n" +
-			kitAgentDecl("main", "hi") + kitAgentDecl("second", "p2", "description: d"),
-	})
-	res, err := rt.Reload()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Agents != 2 {
-		t.Fatalf("expected 2 agents after reload, got %d (notes: %v)", res.Agents, res.Notes)
-	}
-	if rt.Telegram().ChatID != "123456789" {
-		t.Fatalf("telegram config not refreshed: %+v", rt.Telegram())
-	}
-	if sess.Snapshot().Agent == "" {
-		t.Fatal("live session unusable after reload")
-	}
-}
-
-func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
-	dir := t.TempDir()
-	writeBaseTree(t, dir, nil)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "live"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	writeReloadCfg(t, filepath.Join(dir, "shell3.sh"), "#---\n# shell3:\n#   models: [not, a, map\n#---\n")
-	if _, err := rt.Reload(); err == nil {
-		t.Fatal("Reload must fail on a broken config")
-	}
-	if sess.Snapshot().Agent == "" {
-		t.Fatal("session must stay usable after a failed reload")
-	}
-}
-
-func TestReloadReappliesSessionDecorator(t *testing.T) {
-	dir := t.TempDir()
-	writeBaseTree(t, dir, nil)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rt.Close()
-	rt.SetSessionDecorator(func(s *shell3.Session) {
-		_ = s.RegisterHostTool(shell3.HostTool{
-			Name:       "image_generate",
-			Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
-			Handler:    func(ctx context.Context, argsJSON string) (string, error) { return "ok", nil },
-		})
-	})
-	sess, err := rt.Session(shell3.SessionOpts{Name: "live"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := func() int {
-		n := 0
-		for _, ti := range sess.Snapshot().Tools {
-			if ti.Name == "image_generate" {
-				n++
-			}
+func TestReloadConfigReplacesIdleSessionsAndPreservesHostTools(t *testing.T) {
+	client := fakellm.New()
+	factory := func(model, prompt string) func(SessionOpts) (chat.Config, error) {
+		return func(SessionOpts) (chat.Config, error) {
+			return chat.Config{
+				LLM: client, ModelID: model,
+				Profile: chat.AgentProfile{SystemPrompt: prompt, Tools: []llm.ToolDefinition{{Name: "bash"}}},
+			}, nil
 		}
-		return n
 	}
-	if count() != 1 {
-		t.Fatalf("before reload: image_generate registered %d times, want 1", count())
-	}
-	if _, err := rt.Reload(); err != nil {
+	rt, err := NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 1, nil, factory("old", "old prompt"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count() != 1 {
-		t.Fatalf("after reload: image_generate registered %d times, want exactly 1 (dropped or duplicated)", count())
+	defer rt.Close()
+	sess, err := rt.Session(SessionOpts{Name: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RegisterHostTool(HostTool{Name: "telegram", Handler: func(context.Context, string) (string, error) { return "ok", nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.ReloadConfig(factory("new", "new prompt")); err != nil {
+		t.Fatal(err)
+	}
+	snap := sess.Snapshot()
+	if snap.Model != "new" || snap.SystemPrompt != "new prompt" || len(snap.Tools) != 2 || snap.Tools[1].Name != "telegram" {
+		t.Fatalf("reloaded snapshot = %+v", snap)
+	}
+	created, err := rt.Session(SessionOpts{Name: "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := created.Snapshot().Model; got != "new" {
+		t.Fatalf("new session model=%q", got)
+	}
+}
+
+func TestReloadConfigDefersBusySessionUntilTurnEnds(t *testing.T) {
+	client := fakellm.NewBlocking()
+	factory := func(prompt string) func(SessionOpts) (chat.Config, error) {
+		return func(SessionOpts) (chat.Config, error) {
+			return chat.Config{LLM: client, Profile: chat.AgentProfile{SystemPrompt: prompt}}, nil
+		}
+	}
+	rt, err := NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 1, nil, factory("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	sess, err := rt.Session(SessionOpts{Name: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnCtx, cancel := context.WithCancel(context.Background())
+	events := sess.Send(turnCtx, "hold this turn")
+	<-client.Started
+	if err := rt.ReloadConfig(factory("new")); err != nil {
+		t.Fatal(err)
+	}
+	if got := sess.Snapshot().SystemPrompt; got != "old" {
+		t.Fatalf("busy session changed prompt to %q", got)
+	}
+	created, err := rt.Session(SessionOpts{Name: "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := created.Snapshot().SystemPrompt; got != "new" {
+		t.Fatalf("new session prompt=%q", got)
+	}
+	cancel()
+	for range events {
+	}
+	if got := sess.Snapshot().SystemPrompt; got != "new" {
+		t.Fatalf("completed session prompt=%q", got)
 	}
 }

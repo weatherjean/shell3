@@ -2,21 +2,15 @@ package shell3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/runs"
 )
-
-// RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
-// the loaded config, store, proxy spawner, and log.
-type RuntimeSpec struct {
-	ConfigDir string // "" → ~/.shell3/
-	WorkDir   string // runtime root; "" → os.Getwd(). Sessions default here.
-}
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
@@ -29,9 +23,7 @@ type SessionOpts struct {
 	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
-	// ParentID marks this a subagent child of that runs session: stored-run views
-	// groups the transcript under the conversation that spawned it, and the
-	// janitor never deletes a message-less session other rows name as parent.
+	// ParentID groups a child transcript under the session that spawned it.
 	ParentID string
 	// CronJob names the cron job that started this session, recorded in its
 	// meta so a job's runs are findable without guessing from duration.
@@ -77,6 +69,7 @@ type Runtime struct {
 	// sessionConfig derives a per-session chat.Config; tests inject fakes.
 	sessionConfig func(SessionOpts) (chat.Config, error)
 	cleanup       func()
+	log           applog.Logger
 
 	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
 	events chan HostEvent
@@ -89,29 +82,14 @@ type Runtime struct {
 	// store is the shared runs store, nil if unavailable: front-end session
 	// lists and replay, plus the job runtime's transcript reads.
 	store *runs.Store
-	// ctx is the runtime's base context under NewRuntime's. A watcher calls
+	// ctx is the runtime's base context. A watcher calls
 	// Close when the parent fires, and Close cancels ctx, so the watcher and
 	// everything scoped to the runtime unwind together.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	configDir string // captured from RuntimeSpec for ConfigDir
-	homeDir   string // captured from construction for ConfigDir
-
 	// jobs owns the in-process background jobs, cancelled at Close.
 	jobs *jobManager
-	// cron mirrors the parsed jobs, re-derived on Reload.
-	cron []CronJob
-
-	// parts is the config assembly this Runtime was built from, swapped at
-	// Reload, for host code needing resources Runtime does not expose.
-	parts *agentsetup.Parts
-
-	// parkedClosers holds teardowns deferred past a Reload that happened with
-	// background work live: a running job may still hold the old generation's
-	// store and MCP handles. Each drains exactly once, when the job manager
-	// reports zero running tasks. Guarded by mu.
-	parkedClosers []func()
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -126,67 +104,77 @@ type Runtime struct {
 	// scheduler); nil = nobody is keeping cron history. See CronOutcome.
 	cronOutcome func(CronOutcome)
 
-	// decorate runs for every session this runtime creates, and again for
-	// every live one after a Reload, which rebuilds configs and drops
-	// registered host tools. Front-ends register their tools here rather than
-	// on their own main session alone. Always invoked OUTSIDE rt.mu:
+	// decorate runs for every session this runtime creates and every session
+	// already live when it is installed. Front-ends register their tools here
+	// rather than on their own main session alone. Always invoked OUTSIDE rt.mu:
 	// decorators call back into locked Runtime methods.
 	decorate func(*Session)
 }
 
-// NewRuntime loads the config and assembles the shared parts. Cancelling ctx
-// tears the runtime down exactly as Close does; pass context.Background() for
-// a lifetime bounded only by Close. The Runtime must be Closed.
-func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
+// NewConfiguredRuntime builds the process/runtime half around an already
+// assembled chat configuration. Background jobs and session lifecycle remain
+// native. cleanup may be nil. The caller must Close the returned runtime.
+func NewConfiguredRuntime(ctx context.Context, workDir string, store *runs.Store, maxConcurrent int, cleanup func(), sessionConfig func(SessionOpts) (chat.Config, error)) (*Runtime, error) {
+	if sessionConfig == nil {
+		return nil, errors.New("shell3: configured runtime needs a session config")
+	}
 	parent := ctx
 	if parent == nil {
 		parent = context.Background()
 	}
 	if err := parent.Err(); err != nil {
-		return nil, err // caller already cancelled — don't build a runtime
+		return nil, err
 	}
-	workDir := spec.WorkDir
 	if workDir == "" {
-		w, err := os.Getwd()
+		wd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("get working directory: %w", err)
 		}
-		workDir = w
+		workDir = wd
 	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
+	if cleanup == nil {
+		cleanup = func() {}
 	}
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigDir: spec.ConfigDir, CWD: workDir, HomeDir: homeDir,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithCancel(parent)
+	runtimeCtx, cancel := context.WithCancel(parent)
 	rt := &Runtime{
-		sessionConfig: sessionConfigFrom(parts),
+		sessionConfig: sessionConfig,
 		cleanup:       cleanup,
-		store:         parts.Store(),
+		log:           applog.Noop{},
+		store:         store,
 		events:        make(chan HostEvent, 64),
 		jobEvents:     make(chan JobProgress, 256),
 		workDir:       workDir,
-		configDir:     spec.ConfigDir,
-		homeDir:       homeDir,
-		ctx:           ctx,
+		ctx:           runtimeCtx,
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
-		cron:          parts.Cron(),
-		parts:         parts,
 	}
-	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
-	// Close cancels rt.ctx, so this watcher always unwinds and its second
-	// Close is an idempotent no-op.
+	rt.jobs = newJobManager(rt, maxConcurrent)
 	go func() {
 		<-rt.ctx.Done()
 		_ = rt.Close()
 	}()
 	return rt, nil
+}
+
+// SetLogger installs the process diagnostic logger before front ends and
+// sessions begin work. Nil restores the silent test default.
+func (rt *Runtime) SetLogger(log applog.Logger) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if log == nil {
+		log = applog.Noop{}
+	}
+	rt.log = log
+}
+
+// Logger returns the runtime's shared diagnostic logger.
+func (rt *Runtime) Logger() applog.Logger {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.log == nil {
+		return applog.Noop{}
+	}
+	return rt.log
 }
 
 // Events is the out-of-turn bus; one receiver drives N sessions. Buffered,
@@ -198,12 +186,80 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 // stalls a job, and never closed.
 func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
-// ConfigDir returns the absolute path of the config directory this runtime was built
-// from. An empty or relative spec path is resolved exactly the way construction
-// resolves it — ~/.shell3/. Useful for self-reconfiguration
-// surfaces that need to show the agent/operator which file to edit.
-func (rt *Runtime) ConfigDir() (string, error) {
-	return agentsetup.ResolveConfigDir(rt.configDir, rt.homeDir)
+// Store returns the runtime's durable conversation store.
+func (rt *Runtime) Store() *runs.Store {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.store
+}
+
+// ReloadConfig atomically replaces the session factory and refreshes every
+// idle live session. A busy session retains its captured turn generation and
+// adopts the replacement before its next turn. All configs are built before
+// any are published, so a failed reload leaves the current generation intact.
+func (rt *Runtime) ReloadConfig(factory func(SessionOpts) (chat.Config, error)) error {
+	if factory == nil {
+		return errors.New("shell3: reload needs a session config")
+	}
+	for {
+		rt.mu.Lock()
+		if rt.closed {
+			rt.mu.Unlock()
+			return ErrRuntimeClosed
+		}
+		live := make(map[string]*Session, len(rt.sessions))
+		for name, session := range rt.sessions {
+			live[name] = session
+		}
+		rt.mu.Unlock()
+
+		configs := make(map[string]chat.Config, len(live))
+		for name, session := range live {
+			cfg, err := factory(session.opts)
+			if err != nil {
+				return err
+			}
+			configs[name] = cfg
+		}
+
+		rt.mu.Lock()
+		unchanged := len(rt.sessions) == len(live)
+		if unchanged {
+			for name, session := range live {
+				if rt.sessions[name] != session {
+					unchanged = false
+					break
+				}
+			}
+		}
+		if !unchanged {
+			rt.mu.Unlock()
+			continue
+		}
+		locked := make([]*Session, 0, len(live))
+		for _, session := range live {
+			session.mu.Lock()
+			locked = append(locked, session)
+		}
+		var stateErr error
+		for _, session := range locked {
+			if session.closed {
+				stateErr = ErrClosed
+				break
+			}
+		}
+		if stateErr == nil {
+			for name, session := range live {
+				session.queueReloadLocked(configs[name])
+			}
+			rt.sessionConfig = factory
+		}
+		for i := len(locked) - 1; i >= 0; i-- {
+			locked[i].mu.Unlock()
+		}
+		rt.mu.Unlock()
+		return stateErr
+	}
 }
 
 func (rt *Runtime) emit(ev HostEvent) {
@@ -223,8 +279,7 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 }
 
 // SetSessionDecorator installs fn for every session this runtime creates,
-// every one already live (so boot order does not matter), and every live one
-// after a Reload, which rebuilds configs and drops registered host tools. fn
+// every one already live (so boot order does not matter). fn
 // runs outside rt.mu, so it may call locked Runtime methods, and must be
 // installed only while sessions are idle. A new decorator replaces the old.
 func (rt *Runtime) SetSessionDecorator(fn func(*Session)) {
@@ -293,23 +348,6 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	return s, nil
 }
 
-// drainParkedClosers runs the teardowns a Reload deferred, once, provided no
-// background work could still be using an old generation. A no-op when
-// nothing is parked or a job is live — the next completion re-checks. The
-// running-jobs check runs before rt.mu, so the two locks never nest.
-func (rt *Runtime) drainParkedClosers() {
-	if rt.jobs != nil && len(rt.jobs.runningJobIDs()) > 0 {
-		return
-	}
-	rt.mu.Lock()
-	closers := rt.parkedClosers
-	rt.parkedClosers = nil
-	rt.mu.Unlock()
-	for _, c := range closers {
-		c()
-	}
-}
-
 // decorateFn returns the current session decorator under rt.mu.
 func (rt *Runtime) decorateFn() func(*Session) {
 	rt.mu.Lock()
@@ -338,6 +376,7 @@ func (rt *Runtime) Close() error {
 	}
 	rt.sessions = map[string]*Session{}
 	rt.mu.Unlock()
+	rt.Logger().Info("runtime closing", "sessions", len(open))
 
 	var firstErr error
 	for _, s := range open {
@@ -349,15 +388,6 @@ func (rt *Runtime) Close() error {
 	if rt.jobs != nil {
 		rt.jobs.cancelAll()
 		rt.jobs.wait()
-	}
-	// Jobs have unwound, so parked closers run now, before this generation's
-	// cleanup. Directly, not via drainParkedClosers: teardown is unconditional.
-	rt.mu.Lock()
-	parked := rt.parkedClosers
-	rt.parkedClosers = nil
-	rt.mu.Unlock()
-	for _, c := range parked {
-		c()
 	}
 	rt.cleanup()
 	// Cancel the runtime base ctx so anything scoped to the runtime's lifetime

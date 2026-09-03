@@ -12,7 +12,7 @@ func TestPrintHeader(t *testing.T) {
 	if !strings.Contains(out, "shell3") {
 		t.Errorf("header missing product name; got %q", out)
 	}
-	if !strings.Contains(out, "minimal Unix-composable personal agent") {
+	if !strings.Contains(out, "minimal Unix-composable harness harness") {
 		t.Errorf("header missing tagline; got %q", out)
 	}
 	if !strings.HasSuffix(out, "\n\n") {

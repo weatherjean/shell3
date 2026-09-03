@@ -297,51 +297,6 @@ func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) Com
 	return ev
 }
 
-// capSummary head-caps an agent-written summary, marking the cut so it never
-// ends mid-word unsignalled; the full result stays in task_status.
-func capSummary(summary string) string {
-	return strutil.Ellipsize(summary, agentDoneResultCap)
-}
-
-// subagentEvent builds a finished subagent's event. Cron events carry no
-// owner — the pinned parent runs no turns — so mail starts a fresh turn.
-func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
-	tail := capSummary(summary)
-	ev := CompletionEvent{
-		Kind: EvSubagent, JobID: j.id, Title: j.title, Agent: j.agent,
-		CronJob: j.cronJob, ErrText: errText, Tail: tail, Note: j.note,
-		RunID:    j.childID,
-		Elapsed:  time.Since(j.startedAt),
-		Report:   j.report,
-		Detached: j.detached,
-		notice:   notifyAgentDone(j.id, summary, errText),
-	}
-	if j.cronJob != "" {
-		ev.Kind = EvCron
-	} else if j.parent != nil {
-		ev.owner, ev.OwnerID = j.parent, j.parent.ID()
-	}
-	return ev
-}
-
-// followUpEvent builds one follow-up turn's event. Owner rule as above.
-func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) CompletionEvent {
-	tail := capSummary(summary)
-	ev := CompletionEvent{
-		Kind: EvFollowUp, JobID: sub.id, Title: sub.title, Agent: sub.agent,
-		CronJob: sub.cronJob, ErrText: errText, Tail: tail, Note: sub.note,
-		RunID:    sub.childID,
-		Elapsed:  time.Since(sub.startedAt),
-		Report:   sub.report,
-		Detached: sub.detached,
-		notice:   n,
-	}
-	if sub.cronJob == "" && sub.parent != nil {
-		ev.owner, ev.OwnerID = sub.parent, sub.parent.ID()
-	}
-	return ev
-}
-
 // joinNote concatenates two optional note fragments.
 func joinNote(a, b string) string {
 	switch {
@@ -396,7 +351,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	}()
 	host := m.rt.completionHost()
 	if host == nil {
-		// No front-end host (shell3 ask, tests): raw notice straight to the
+		// No front-end host (one-shot shell3, tests): raw notice straight to the
 		// owner, waking it — ask's verbose view sees everything.
 		if ev.owner != nil && !ev.Detached {
 			ev.owner.injectNotification(m.rt, ev.notice)
@@ -436,8 +391,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if ev.Report == notify.ReportRaw {
 		// The user is waiting: post the raw result now and queue it unwoken,
 		// so the next turn has it for free. The post uses the user-facing
-		// rendering — the notice is written FOR the agent ("call
-		// task_status") and must not leak into the chat.
+		// rendering rather than the agent-facing notice.
 		undelivered = host.PostCompletion(ev.post(directText(ev))) != nil
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)

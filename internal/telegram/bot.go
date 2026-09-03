@@ -33,12 +33,7 @@ type Bot struct {
 	// excepted — by path AND inode, so no symlink or hardlink launders a
 	// credential out. "" disables only those two checks.
 	configDir string
-	// runsRoot contains the durable store and job logs used by the explicit
-	// record-export tool. It is set by the host and stable across reloads.
-	runsRoot string
-
 	// threads is the thread index every room derives its own surface from.
-	// Kept across /reload, so a generation swap never strands a marker.
 	threads *ThreadIndex
 
 	mu sync.Mutex // guards the room registry and the mutable wiring below
@@ -49,45 +44,18 @@ type Bot struct {
 	// a global cap N rooms fan out N concurrent agents.
 	activeTurns int
 	maxTurns    int
-	// reloading blocks new turns during a config swap: rooms are independent,
-	// so one could otherwise start a turn against Parts being replaced.
-	reloading bool
-	debounce  time.Duration
-	// cronID is the adopted cron dispatch parent: a jobs/runs source that runs
-	// no turns and is never a room's conversation.
-	cronID string
-	// cron is the adopted parent handle (the jobs source /status reads).
-	cron *shell3.Session
+	debounce    time.Duration
 
-	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
-
-	runJob func(name string) error             // fires a cron job by name; nil if no scheduler
-	reload func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
-
-	// kitCommands are the kit's declared commands and their runner. Guarded
-	// by mu — /reload swaps them mid-life.
-	kitCommands   []KitCommand
-	kitCommandRun func(ctx context.Context, name, arg string) (string, error)
-	pendingReload bool // set by the reload tool mid-turn; applied at end-of-turn
-
-	// chatSettings is the wiring's per-room chats: block. Replaced by /reload.
-	chatSettings map[int64]roomSettings
 	// answerAllGroups disables the mention/reply trigger for allowlisted
 	// senders. Authorization still runs first.
 	answerAllGroups bool
-	// readContext reads a room's context: files through config's reader (cap,
-	// elision, warnings). nil = that brief layer is off.
-	readContext func(paths []string) string
-
+	reload          func() error
 	// metaMu guards the chat metadata cache, separate from b.mu because a miss
 	// makes a network call and holding the registry lock would stall routing.
 	metaMu        sync.Mutex
 	chatMetaCache map[int64]chatMeta
 	// metaInflight keeps at most one getChat per room in flight.
 	metaInflight map[int64]bool
-
-	// statusDocument renders a fresh HTML snapshot for /status.
-	statusDocument func(sess *shell3.Session) (filename string, data []byte, err error)
 
 	// botUser is the bot's own @username, for @mention matching.
 	// botUserKnown separates "not looked up" from "looked up, no answer".
@@ -181,6 +149,13 @@ func (b *Bot) SetAnswerAllGroupMessages(on bool) {
 	b.mu.Unlock()
 }
 
+// SetReload installs the host-owned, between-turn configuration reload.
+func (b *Bot) SetReload(fn func() error) {
+	b.mu.Lock()
+	b.reload = fn
+	b.mu.Unlock()
+}
+
 func (b *Bot) answersAllGroupMessages() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -195,47 +170,6 @@ func (b *Bot) allowlist() *senderAllowlist {
 	return b.allow
 }
 
-// SetJobRunner wires /run <job> to the scheduler's manual fire. Written from
-// the reload path and read on the update loop, so it goes through b.mu.
-func (b *Bot) SetJobRunner(fn func(name string) error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.runJob = fn
-}
-
-// jobRunner returns the current /run handler (nil when no scheduler is armed).
-func (b *Bot) jobRunner() func(name string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.runJob
-}
-
-// SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
-func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
-
-// SetStatusDocument wires the zero-token /status snapshot renderer.
-func (b *Bot) SetStatusDocument(render func(*shell3.Session) (string, []byte, error)) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.statusDocument = render
-}
-
-// SetQuiet installs the /quiet store. Nil means quiet never turns on.
-func (b *Bot) SetQuiet(s *QuietStore) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.quietMode = s
-}
-
-// isQuiet reports the /quiet toggle. Agent-initiated posts send silently
-// under it; replies to the user and ⚠️ failures always ring.
-func (b *Bot) isQuiet() bool {
-	b.mu.Lock()
-	s := b.quietMode
-	b.mu.Unlock()
-	return s.Get() // nil-safe: a nil store reads as off
-}
-
 // SetWorkDir sets the directory used to resolve relative paths passed to
 // send_media_telegram (the agent's session workdir).
 func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
@@ -243,28 +177,6 @@ func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
 // SetConfigDir sets the directory send_media_telegram refuses to send from.
 // Unset skips the path and inode checks, so every front-end must supply it.
 func (b *Bot) SetConfigDir(dir string) { b.configDir = dir }
-
-// SetRunsRoot sets the root used to render stored conversations and job logs.
-func (b *Bot) SetRunsRoot(dir string) { b.runsRoot = dir }
-
-// DecorateChatSession registers the bot's host tools on a main chat session.
-// The host wires it into Runtime.SetSessionDecorator, so every session and
-// every one a reload rebuilds gets them; headless children are skipped there.
-func (b *Bot) DecorateChatSession(s *shell3.Session) {
-	b.registerSendTool(s)
-	b.registerRecordTool(s)
-	b.registerReloadTool(s)
-	b.registerStatusTool(s)
-}
-
-// AdoptSession registers the cron dispatch parent: a jobs/runs source that
-// runs no turns, is never woken, and is never a conversation.
-func (b *Bot) AdoptSession(s *shell3.Session) {
-	b.mu.Lock()
-	b.cronID = s.ID()
-	b.cron = s
-	b.mu.Unlock()
-}
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
@@ -590,11 +502,7 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) error {
 	default:
 		text = "🔔 " + text
 	}
-	// Under /quiet these arrive without a ping; failures always ring.
 	var opts []SendOpt
-	if b.isQuiet() && !failure {
-		opts = append(opts, SendOpt{Silent: true})
-	}
 	c := b.roomOrHome(p.OwnerID)
 	// Plain messages, never replies — a quote header on every ⏰/🔔 is noise.
 	// recordSent still advances the anchor so a steer-catchup can thread.
@@ -659,11 +567,7 @@ func (b *Bot) StartFreshTurn(m shell3.Mail) {
 		if m.Required && m.Fallback != "" {
 			text = m.Fallback
 		}
-		var opts []SendOpt
-		if b.isQuiet() {
-			opts = append(opts, SendOpt{Silent: true})
-		}
-		go c.sendReply(context.Background(), "🔔 "+text, opts...)
+		go c.sendReply(context.Background(), "🔔 "+text)
 		return
 	}
 	if m.Required {
@@ -727,15 +631,12 @@ func (b *Bot) renderInbox() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// LiveSession is any room's conversation, else the adopted cron parent, for
-// host code that wants a session and does not care which. May be nil.
+// LiveSession is any room's live conversation, if one exists.
 func (b *Bot) LiveSession() *shell3.Session {
 	for _, c := range b.allConvs() {
 		if s := c.session(); s != nil {
 			return s
 		}
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.cron
+	return nil
 }

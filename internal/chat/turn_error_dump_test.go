@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,7 +10,31 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/paths"
 )
+
+type diagnosticLLM struct{}
+
+func (diagnosticLLM) Stream(context.Context, []llm.Message, []llm.ToolDefinition, func(llm.StreamEvent)) error {
+	return nil
+}
+
+func (diagnosticLLM) LastTraffic() ([]byte, []byte) {
+	return []byte("request bytes"), []byte("partial response bytes")
+}
+
+type diagnosticLogger struct {
+	message string
+	err     error
+	fields  []any
+}
+
+func (*diagnosticLogger) Debug(string, ...any) {}
+func (*diagnosticLogger) Info(string, ...any)  {}
+func (*diagnosticLogger) Warn(string, ...any)  {}
+func (l *diagnosticLogger) Error(message string, err error, fields ...any) {
+	l.message, l.err, l.fields = message, err, fields
+}
 
 func TestErrorDumpIsBoundedAndPrivate(t *testing.T) {
 	msgs := make([]llm.Message, 20)
@@ -48,5 +73,34 @@ func TestErrorDumpIsBoundedAndPrivate(t *testing.T) {
 	}
 	if temps, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".last_error-*.tmp")); err != nil || len(temps) != 0 {
 		t.Fatalf("temporary files remain: %v (glob error %v)", temps, err)
+	}
+}
+
+func TestStreamErrorWritesSessionTraceAndDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	logger := &diagnosticLogger{}
+	streamErr := errors.New("stream interrupted")
+	logStreamError(TurnConfig{
+		ToolConfig: ToolConfig{WorkDir: dir, Log: logger},
+		LLM:        diagnosticLLM{},
+	}, "session-1", []llm.Message{{Role: llm.RoleUser, Content: "hello"}}, streamErr)
+
+	path := paths.LastErrorPath(dir, "session-1")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "partial response bytes") || !strings.Contains(string(data), "stream interrupted") {
+		t.Fatalf("trace = %s", data)
+	}
+	if logger.message != "stream error" || !errors.Is(logger.err, streamErr) {
+		t.Fatalf("diagnostic = %q / %v", logger.message, logger.err)
+	}
+	fields := map[string]any{}
+	for i := 0; i+1 < len(logger.fields); i += 2 {
+		fields[logger.fields[i].(string)] = logger.fields[i+1]
+	}
+	if fields["session"] != "session-1" || fields["dump"] != path {
+		t.Fatalf("fields = %#v", fields)
 	}
 }

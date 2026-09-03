@@ -47,48 +47,12 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	if err != nil {
 		return "error: invalid bash arguments: " + err.Error(), nil
 	}
-	argv, blockMsg, blocked := gateBash(ctx, cfg, "bash", command, string(args))
-	if blocked {
-		return blockMsg, nil
-	}
+	argv := []string{"bash", "-c", command}
 	out, code := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
 	if code != 0 {
 		return fmt.Sprintf("error: command exited %d\n%s", code, out), nil
 	}
 	return out, nil
-}
-
-// gateBash runs the tool-call hook chain for a bash/bash_bg command and resolves
-// the verdict to either an argv to exec or a block message for the model. name is
-// the real tool name ("bash" or "bash_bg") so the handler sees the exact tool.
-// On allow, the verdict argv runs exactly as approved (it carries any rewrite
-// or runner-swap); an empty argv — a pure pass — defaults to bash -c command.
-func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON string) (argv []string, blockMsg string, blocked bool) {
-	if cfg.RunToolCall == nil {
-		return []string{"bash", "-c", command}, "", false // no hooks: unsafe default
-	}
-	v := cfg.RunToolCall(ctx, name, command, argsJSON, cfg.Headless)
-	if v.Action == ActionReview {
-		// Soft deny: the LLM reviewer decides. Approved runs the ORIGINAL
-		// command (a review carries no rewrite); denied blocks with the
-		// reviewer's message; no reviewer wired fails closed.
-		if msg, blocked := resolveReview(ctx, cfg, name, command, v.Reason); blocked {
-			logGateVerdict(cfg, "review denied", name, command, v.Reason)
-			return nil, guideSubagentBlock(cfg, msg), true
-		}
-		logGateVerdict(cfg, "review approved", name, command, v.Reason)
-		return []string{"bash", "-c", command}, "", false
-	}
-	allowed, msg := resolveGate(v)
-	if !allowed {
-		logGateVerdict(cfg, "blocked", name, command, v.Reason)
-		return nil, guideSubagentBlock(cfg, msg), true
-	}
-	if len(v.Argv) > 0 {
-		logGateVerdict(cfg, "rewrote command", name, command, v.Reason)
-		return v.Argv, "", false
-	}
-	return []string{"bash", "-c", command}, "", false
 }
 
 // runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with

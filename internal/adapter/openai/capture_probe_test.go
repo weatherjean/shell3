@@ -15,16 +15,10 @@ import (
 
 func captureKey(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(os.Getenv("HOME") + "/.shell3/.env")
-	if err != nil {
-		t.Skipf("no .env: %v", err)
+	if key := os.Getenv("MINMAX_API_KEY"); key != "" {
+		return key
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && strings.TrimSpace(k) == "MINMAX_API_KEY" {
-			return strings.Trim(strings.TrimSpace(v), `"'`)
-		}
-	}
-	t.Skip("MINMAX_API_KEY not in .env")
+	t.Skip("MINMAX_API_KEY not in process environment")
 	return ""
 }
 

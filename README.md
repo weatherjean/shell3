@@ -1,123 +1,163 @@
 <p align="center">
-  <img src="docs/assets/shell3-banner.svg" alt="shell3 — your shell, in your pocket" width="100%">
+  <img src="docs/assets/shell3-banner.svg" alt="shell3" width="100%">
 </p>
 
-A small personal agent you run on your own Unix box and reach through Telegram
-or the terminal. One Go binary, one shell kit, any OpenAI-compatible model.
+shell3 is a small harness harness: a local orchestrator that can work directly
+through Unix tools or dispatch durable workflows to other agent harnesses.
+The terminal is its primary control surface. Telegram is an optional remote
+control adapter over the same orchestrator, inbox, and workflow machinery.
 
-shell3 gives the model a gated shell, durable conversations, background jobs,
-subagents, cron, MCP, and tools you declare as Bash functions.
+One strict `shell3.lisp` is the complete portable kit: model declarations,
+prompt, memory, skills, harness
+protocols, agent profiles, schedules, and optional Telegram configuration. `*.wrk.lisp`
+files remain task-specific workflows.
 
-## Install
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/weatherjean/shell3/main/install.sh | sh
-```
-
-This installs the matching binary to `~/.local/bin`. You can also use
-`go install github.com/weatherjean/shell3/cmd/shell3@latest`, build from source,
-or download a binary from [Releases](https://github.com/weatherjean/shell3/releases).
-
-Linux, macOS, and WSL are supported. Native Windows is not.
-
-## Quickstart
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) and get your numeric
-   user ID from [@userinfobot](https://t.me/userinfobot).
-2. Run `shell3 boot` and complete the setup form.
-3. Run `shell3 telegram`, then message your bot.
+## Build and run
 
 ```sh
-shell3 boot
-shell3 telegram
+make build
+./shell3 boot
+./shell3 config check ~/.shell3/shell3.lisp
+./shell3
 ```
 
-The bot connects outbound to Telegram; shell3 opens no server or tunnel.
-To keep it running, see [Deploying](docs/deploying.md).
-
-## How it works
-
-<p align="center">
-  <img src="docs/assets/shell3-diagram.svg" alt="Messages enter a shell3 session; every tool call passes the gate; background jobs and subagents return through completion routing" width="100%">
-</p>
-
-The config is a directory centered on one definitions-only `shell3.sh` kit.
-Agents, tools, policy, commands, events, and schedules are declaration blocks
-bound to shell functions.
+The default runtime uses `~/.shell3/shell3.lisp` and
+`~/.shell3/workdir`. Use `--here` for `./shell3.lisp` plus the current
+directory, or provide `--config` and `--workdir` together. With no `-p`,
+bare `shell3` opens a line-oriented conversation. It deliberately
+does not take over the terminal: output remains normal scrollback, tool results
+are bounded, and final responses render as Markdown. A one-shot turn is
+explicit:
 
 ```sh
-#---
-# agent: bookmarks
-# description: Organize saved links
-# use: [bash, web]
-#---
-bookmarks_prompt() { cat <<'EOF'
-Process one batch of saved links and update memory.md.
-EOF
-}
-
-#---
-# tool: page-kind
-# description: Classify a saved page
-# params:
-#   url: {type: string, required: true}
-#---
-page_kind() { curl -sL "$url" | rg -o '<article|mw-content-text|add-to-cart'; }
+./shell3 --config /path/to/shell3.lisp \
+  --workdir /path/to/project \
+  -p 'Inspect this repository and report its test command.'
 ```
 
-See [Kits](docs/kits.md) and [Tools](docs/tools.md).
+Use `/reload` between turns after editing the kit. The new generation is
+validated before it replaces the current model, prompt, memory, skills, and
+session factory.
+
+Secrets are named in `shell3.lisp` and supplied through the process
+environment. Export them from a shell profile for interactive use or inject
+them with the host service/secret manager. Never put secret values in Lisp.
+
+## Product shape
+
+The attached orchestrator receives only:
+
+- `bash`
+- `bash_bg`
+- `edit_file`
+
+It uses those tools for local work, research, creating wrkfiles, and operating
+the shell3 CLI. A Telegram-attached session receives one additional
+`telegram` tool whose sole purpose is sending a local file to the current
+chat. Text travels as the ordinary assistant response.
+
+Skills are forms inside `shell3.lisp`. The orchestrator sees their names and
+descriptions and reads one body lazily with `shell3 config skill` only when it
+applies. Memory is another kit form and is included on every turn.
+
+## Configuration
+
+```lisp
+(shell3
+  (version 1)
+
+  (memory "Prefer concise progress reports.")
+
+  (model primary
+    (base-url "https://provider.example/v1")
+    (api-key-env SHELL3_API_KEY)
+    (id "model-id")
+    (reasoning medium)
+    (max-tokens 16000)
+    (context-window 128000))
+
+  (orchestrator
+    (model primary)
+    (prompt """
+You are the operator of shell3, a harness harness.
+Use wrk when delegation or verification adds value.
+"""))
+
+  (skill example
+    (description "Use when an example applies.")
+    (instructions "Follow this reusable guidance."))
+
+  (schedule daily-report
+    (cron "0 8 * * *")
+    (timezone "Europe/Ljubljana")
+    (run (wrkfile "workflows/daily-report.wrk.lisp"))
+    (request "Produce the daily report.")
+    (output "report.md")
+    (timeout "30m")
+    (overlap skip)
+    (notify "main")))
+```
+
+Runner and agent forms describe external harnesses as typed argv protocols,
+not interpolated shell strings. See [Wrk workflows](docs/wrk.md) for the full
+runnable format.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `shell3 telegram` | Run Telegram, cron, and completion delivery. |
-| `shell3 ask` | Open the terminal chat. |
-| `shell3 ask "…"` | Run one local turn; use `-p` for scripts. |
-| `shell3 boot` | Create `~/.shell3`. |
-| `shell3 health` | Validate the config. |
-| `shell3 tool check\|run\|test <kit>` | Develop declared tools. |
+| `shell3` | Open the local orchestrator conversation. |
+| `shell3 boot [shell3.lisp]` | Write one complete kit; no argument uses `~/.shell3/shell3.lisp`. |
+| `shell3 -p '…'` | Run one headless turn. |
+| `shell3 telegram` | Attach Telegram remote control. |
+| `shell3 telegram --console` | Exercise the Telegram bot contract locally. |
+| `shell3 service` | Run the persistent headless schedule and workflow host. |
+| `shell3 schedule run <name>` | Fire one declared schedule immediately. |
+| `shell3 schedule history [name]` | Inspect its SQLite run ledger as JSONL. |
+| `shell3 config check <shell3.lisp>` | Strictly validate the complete kit. |
+| `shell3 config skill <shell3.lisp> <name>` | Print one embedded skill body. |
+| `shell3 notify --to <destination>` | Persist an inbox message and attempt an immediate host notification. |
+| `shell3 inbox list|read|archive` | Explicitly inspect and archive durable inbox notices. |
+| `shell3 wrk …` | Check, compile, run, inspect, signal, beat, or cancel a workflow. |
 
-`telegram`, `ask`, and `health` accept `--config <dir>`.
+See the [CLI reference](docs/cli.md) for flags and the
+[implementation contract](docs/internals.md) for architectural invariants.
+Operational guidance is in [Operations](docs/operations.md), and the trust
+boundary is summarized in [Safety](docs/safety.md).
 
-## Core behavior
+## Durability and safety
 
-- The model acts through `bash`, `bash_bg`, and `edit_file`.
-- A `gate:` function runs before every tool call for named agents. Invalid or
-  failed gate output blocks the call.
-- Subagents and background commands are in-process jobs with bounded depth and
-  concurrency.
-- Every completion remains observable and survives restart through the outbox.
-- Conversations, tool calls, usage, prompts, cron status, and job logs are
-  stored locally.
-- Long conversations prune old tool output and can compact automatically.
-- Telegram keeps one conversation per chat. `/status`, `/stop`, `/superstop`,
-  `/new`, `/run`, `/btw`, `/reload`, and `/quiet` are host commands.
-- Attachments are saved for declared perception tools; shell3 does not choose
-  image, speech, or generation providers.
+Inbox delivery and background completion routing are durable and at-least-once.
+Main inbox notices never start a model turn or enter a prompt automatically.
+Telegram posts a human-only pending count, while the console prints that count
+at startup and whenever the user sends a message. The user asks the agent to
+check the inbox when ready; the embedded `shell3-inbox` skill owns the bounded
+read-and-archive procedure.
+Workflow definitions and resolved configuration are hashed into each run so an
+active run cannot silently change underneath its state. External agent workers
+are leaves; the attached orchestrator owns delegation and verification.
 
-## Security
+Schedules always invoke wrkfiles. Exactly one persistent process owns a
+project's schedule clock: either `shell3 telegram` or `shell3 service`. Keep
+that foreground command alive with launchd, systemd, or the host equivalent;
+the schedule lock prevents two owners from firing duplicate work. Schedule run
+status and output pointers live in SQLite while full artifacts and logs remain
+in the durable wrk run directory. An admitted run recovers after restart;
+calendar occurrences missed while no owner is running are not replayed in
+version 1.
 
-The agent has a real shell. The shipped gate is a speed bump, not a security
-boundary. Use a container or VM when you need isolation. Anyone who controls an
-allowed Telegram account or the bot token can drive the agent.
+The agent has a real shell. shell3 is a harness, not an operating-system
+sandbox. Use a container or VM when hard isolation matters. Runtime state lives
+under the selected workdir's `.shell3_project/`; do not commit it. Keep
+secrets outside the kit.
 
-Secrets stay in the config directory's `.env`. shell3 has no telemetry or
-update checks. See [Security & data](docs/security.md).
+## Development
 
-## Documentation
+```sh
+make build
+go test ./...
+make lint
+```
 
-- [Configuration](docs/configuration.md)
-- [Kits](docs/kits.md)
-- [CLI](docs/cli.md)
-- [Tools](docs/tools.md)
-- [Deploying](docs/deploying.md)
-- [Cookbook](docs/cookbook/README.md)
-- [Internals](docs/internals.md)
-
-## Contributing and license
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). shell3 is [MIT licensed](LICENSE).
-The edit tool includes code ported from
-[opencode](https://github.com/sst/opencode); see
-[internal/edittool/replace.go](internal/edittool/replace.go).
+Linux, macOS, and WSL are supported. Native Windows is not. shell3 is
+[MIT licensed](LICENSE).

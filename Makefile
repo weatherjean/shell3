@@ -5,7 +5,7 @@ BIN := shell3
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build run install test coverage lint fmt clean deepcheck
+.PHONY: build run install test coverage lint fmt clean deepcheck acceptance
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
@@ -41,3 +41,6 @@ clean:
 
 deepcheck:
 	./scripts/deepcheck.sh
+
+acceptance: build
+	./scripts/acceptance-local.sh ./$(BIN)

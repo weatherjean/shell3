@@ -6,13 +6,143 @@ file about boundaries and invariants, not implementation history.
 
 ## Architecture
 
+### Lisp orchestrator
+
+`internal/lispconfig` strictly parses inert
+`shell3.lisp`; `internal/orchestrator` resolves its attached model, opens the
+project store, and supplies a `chat.Config` directly to
+`shell3.NewConfiguredRuntime`. The console exposes exactly `bash`, `bash_bg`,
+and `edit_file`. Prompt, memory, and skills are embedded in the kit; skill
+descriptions enter each turn while `shell3 config skill` returns one selected
+body. The runtime and chat loop are reused because their session,
+background completion, storage, and tool-execution invariants remain the
+desired kernel.
+
+The replacement product is a harness harness. The attached main agent is its
+control-plane operator: it converts intent into direct work or checked wrk
+workflows, dispatches configured external harnesses, and interprets durable
+results. Console and Telegram are merely local and remote adapters to that same
+orchestrator. Transport-specific code may deliver input, replies, and files,
+but must not own workflow semantics or create a transport-specific agent role.
+The Lisp Telegram adapter reuses the configured runtime, filesystem inbox, and
+workflow router used by the console. It decorates non-headless room sessions
+with one host tool named `telegram`; legacy status, reload, record, and media
+tools are not registered. Its command menu is limited to conversation control.
+
+The config parser records only model and transport secret names. Runtime
+assembly reads only the secret required by the active surface from the process
+environment and never prints its value. External runners do not receive the
+configured model or Telegram secrets through shell3's runner environment
+construction.
+Bare `shell3` is a plain line-oriented local front end rather than a
+full-screen TUI. It runs the same orchestrator and completion machinery that
+Telegram controls remotely.
+Without path flags, runtime front ends resolve
+`~/.shell3/shell3.lisp` and `~/.shell3/workdir`. `--here` resolves the
+current directory and its `shell3.lisp`; it is mutually exclusive with
+explicit paths. Explicit runtime selection requires both `--config` and
+`--workdir`.
+The REPL owns only presentation state: adaptive terminal colors, an in-place
+activity marker, bounded tool summaries, and Markdown rendering at assistant
+message boundaries. It never owns an alternate screen or scrollback. Bash
+results have a separate, stricter one-line display budget; full results still
+flow back to the model and only the human transcript is elided.
+Console input is accepted only between turns; Escape cancels the active child
+turn context without affecting the runtime. Mid-turn steering remains a
+Telegram transport behavior. The host-handled, unadvertised `/test_output`
+diagnostic renders deterministic sample content through the same presentation
+functions without changing session history or calling the model.
+External wrk agents are leaf processes. The runner prepends that universal
+contract to the wrk node prompt; agent profiles contain only a runner choice
+and typed invocation parameters, not task instructions. Their environment
+carries `SHELL3_WRK_WORKER=1`, and `wrk run` refuses nested launches from that
+environment. This prevents an implementation node from accidentally becoming a
+second orchestrator while leaving ordinary subprocesses available to the worker.
+
+`wrk run` creates a versioned run directory containing immutable Lisp
+snapshots, source hashes, request, task root, runner executable, notification
+route, optional whole-run deadline and required output, and initial node
+statuses. The durable Go workflow scheduler advances this state
+through one-shot beats; the agent process boundary remains `wrk _agent`, and
+deterministic commands and checks remain Bash. A beat holds a non-blocking run
+lock, fails closed on corrupt status or changed snapshots, converts a stranded
+`running` marker back to pending at-least-once work, and executes at most one
+dependency wave. Independent readers may share that wave up to `parallel`; a
+writer runs alone. A loop advances by one new process attempt per beat;
+freshness is unconditional and has no grammar field. `wrk run`
+repeats beats only until completed, failed, or quiescent on a wait node.
+Foreground `wrk run` and explicit `wrk beat` invocations mirror node lifecycle,
+runner stdout and runner stderr while retaining the same per-node logs. Router
+beats remain quiet. With no request argument, `wrk run` reads piped standard
+input but treats an interactive terminal as an empty request instead of waiting
+for EOF.
+External workflow events enter through the shared filesystem inbox addressed
+to `wrk:<task>/<run-id>`; `wrk signal` is its typed producer. Start registers
+that destination and the absolute run directory under the shared control root,
+so custom workflow state remains discoverable without scanning arbitrary
+paths. The sole socket consumer exposes non-main destinations as advisory
+hints. A bounded workflow router advances hinted runs and reconciles the route
+registry at startup and periodically; durable inbox state, not the datagram,
+is authoritative. A beat recovers and claims those messages, records them in
+the run event ledger, then acknowledges the inbox copies. A matching event can
+release an already-waiting node or remain durable until that node's
+dependencies pass. Cancellation is a durable marker watched by active beats;
+observing it cancels the beat context and therefore the configured process
+group. Status inspection reads atomic run and node markers without mutating
+them.
+
+An incompatible or corrupt immutable run route is terminal. The router renames
+its registry record with a `.invalid` suffix and sends one structured record to
+the process-wide project logger; it does not attempt a version migration.
+Infrastructure diagnostics never become actionable model inbox notices.
+
+### Schedules and persistent hosts
+
+`internal/schedule` owns the small calendar layer. A strict top-level schedule
+form contains a five-field cron expression, IANA timezone, typed wrkfile
+reference, request, artifact-relative required output, whole-run timeout,
+overlap policy, and notification destination. Startup resolves and parses every
+referenced wrkfile before arming any entry. Schedules cannot execute arbitrary
+commands directly; command work remains a workflow node.
+
+Exactly one process holds `.shell3_project/schedule.lock`. A live Telegram
+adapter owns that lock and clock when it is the persistent frontend; otherwise
+the foreground `shell3 service` command owns it without opening a model client
+or consuming main inbox notices. The latter also runs the workflow router's
+durable periodic reconciliation with no wake-socket ownership. Schedule edits
+are restart-only in version 1; Telegram reload rejects a changed schedule set
+before replacing any runtime configuration.
+
+Each admitted fire creates a `running` SQLite schedule row before constructing
+its wrk run. The row records schedule, task, trigger, run directory, required
+output path, and timestamps. `overlap=skip` performs admission and the existing
+running-row check in one SQLite statement; a skipped clock event enters the
+application log but creates no fake run. Restart reconciliation advances every
+running row from the immutable wrk snapshot, including a schedule removed from
+the current kit. A short creation grace distinguishes an admission still
+building its run directory from a crash between those writes. The captured task
+identity is checked again at wrk startup so a concurrent task rename cannot
+create a run outside the admitted ledger path.
+
+The recovery boundary is an admitted SQLite row. The cron clock does not
+backfill occurrences that elapsed while no owner was alive in version 1.
+
+The schedule timeout becomes a durable wrk manifest deadline and therefore
+includes waiting time and survives restart. A completed graph becomes failed
+before notification if its required output is absent, a symlink, or not a
+regular file. A terminal wrk status is the durable decision point: later beats
+retry its notice but never reinterpret that status from mutable filesystem
+state. Only then does the schedule ledger move to `done` or `failed`.
+
 shell3 is a small harness around an agent turn:
 
 ```text
-kit + wiring -> Parts -> Runtime -> Session -> chat turn -> provider
-                         |          |
-                         |          +-> tools, gates, persistence
-                         +-> jobs, cron, completion routing, front ends
+shell3.lisp -> orchestrator -> Runtime -> Session -> chat turn -> provider
+                                  |          |
+                                  |          +-> core tools, persistence
+                                  +-> background commands and completion routing
+*.wrk.lisp -> durable workflow scheduler -> external runner processes
+schedule -> persistent clock -> durable wrk run -> required output
 ```
 
 The binary owns transport, filesystem integration, process execution,
@@ -20,45 +150,41 @@ persistence, and turn lifecycle. Decisions stay in the model turn. If an agent
 can build or inspect a capability itself, prefer a command, script, skill, or
 declared tool over another built-in.
 
-`agentsetup.Parts` is one loaded generation: parsed configuration, providers,
-MCP clients, store, hooks, and agent factories. `shell3.Runtime` owns the live
-generation, sessions, jobs, and reload lifecycle. `chat.Session` owns one
-conversation's messages, inbox, reminders, and turn serialization.
+`shell3.Runtime` owns sessions, background commands, and completion routing.
+`chat.Session` owns one conversation's messages, inbox, reminders, and turn
+serialization.
 Resolved agent and model identities remain structured through assembly, turns,
 and stored metadata; human-readable labels are produced only at rendering
 boundaries.
 
-## Kit and configuration
+## Configuration
 
-A config directory contains exactly one `shell3.sh`. There is no fallback
-format or migration shim. Its top level is definitions-only: declaration
-comments, function definitions, and literal heredocs. Sourcing it must not run
-work. The parser therefore rejects top-level statements, ambiguous declaration
-kinds, malformed structure, and commands hidden after a function close.
+A kit is exactly one `shell3.lisp`. It is inert S-expression data, not
+executable Lisp. Unknown, duplicate, misplaced, contradictory, and unresolved
+forms are load errors. The root declares memory, models, the complete attached
+orchestrator prompt, embedded skills, typed external runners and agent profiles,
+an optional Telegram adapter, and optional schedules.
 
-Declaration scopes are positional:
+Secrets are environment-variable names resolved only from the inherited
+process environment. Secret values never enter Lisp data. Skill names and
+descriptions enter the prompt; bodies stay in parsed configuration until the
+agent deliberately requests one through the config CLI.
 
-- The first `agent:` is main; later agents are employees and need delegation
-  descriptions.
-- `tool:` and `test:` belong to the preceding `agent:` or `shared:` block.
-- `gate:`, `note:`, and `event:` name their target agents.
-- `command:` and `cron:` are global. A cron block names its target agent.
-- `shell3:` contains strict YAML wiring for models, Telegram, MCP, storage,
-  review, and runtime limits.
+The model form configures the one supported OpenAI-compatible adapter directly;
+there is no provider selector. A runner's prompt input, task-root working
+directory, and stdout capture are fixed protocol behavior. Agent profiles bind
+only runner parameters, while wrk node prompts own task instructions. Removed
+spellings remain strict parse errors rather than ignored compatibility syntax.
 
-Unknown, removed, misplaced, duplicated, negative, or contradictory fields are
-load errors. Every agent capability resolves during parsing. MCP opt-ins use
-the agent's `mcp:` field; old spellings fail with a directed replacement.
-
-Secrets are `env:KEY` references resolved from the config directory's `.env`.
-Never print or inspect credential contents. Tools inherit only the small
-environment allowlist unless their declaration explicitly maps more values.
-
-Relative agent workdirs resolve from the config directory. Context files
-resolve from the active agent's workdir, refresh every turn, and are capped at
-64 KB with middle elision. Skills are Markdown files under `skills/` or an
-employee's project skill directory; only their index enters the prompt, and the
-agent reads a selected file with ordinary shell tools.
+`shell3 boot` creates the parent directory when necessary and exclusively
+writes one `shell3.lisp`; it never overwrites. No argument selects
+`~/.shell3/shell3.lisp`, while `--here` selects the current directory. Its generated file has a human
+header and stable section dividers. A reload parses and resolves a complete
+replacement generation before updating every idle live session and the factory
+for future sessions. A busy session finishes its captured generation and adopts
+the replacement before its next turn. Invalid configuration leaves the current
+generation untouched. Telegram token variable or home-chat changes require
+adapter restart because they define the active transport connection.
 
 ## Turns and history
 
@@ -82,69 +208,80 @@ head and keeps a verbatim tail before `compact_at`. A successful compaction
 rolls to a new stored session while preserving front-end attribution and the
 current-session marker. Errors leave the original history intact.
 
-Inbox notices are durable conversation input, not authorization. User steering
-may enter an active turn at a round boundary; completion notices queue and can
-wake an idle owner.
+For Lisp-configured sessions, a declared context window derives these internal
+thresholds: compaction at 80% of the window, pruning at 60% of that threshold,
+and the standard derived verbatim tail. They are policy, not separate public
+configuration fields.
+
+Each session owns its provider client so concurrent rooms cannot overwrite one
+another's diagnostic traffic capture. A failed stream retains bounded request,
+response, message, and tool-call context in that session's
+`runs/<session-id>/last_error.json`; the project log records the error and dump
+path. Successful and partial response bytes are captured as the stream is read.
+
+Filesystem inbox notices are durable untrusted input, not authorization.
+`main` is deliberately passive: an arrival never starts a model turn and
+neither its metadata nor body enters a prompt automatically. The console
+renders only the pending count at startup and before each ordinary user turn.
+Telegram posts only that count to the home chat. The user explicitly asks the
+agent to load the inbox skill before any notice is inspected.
+
+The filesystem inbox uses `new`, `processing`, `archived`, and `reads`
+directories per encoded destination. Workflow events are atomically claimed
+into `processing`, recorded in their run event ledger, and acknowledged;
+startup and periodic route reconciliation recover missed hints and abandoned
+workflow claims. Main notices normally stay in `new` while bounded reads
+durably advance a contiguous byte offset. Skipping content is rejected. The
+agent explicitly archives a notice or prevalidated batch only after every
+named notice is fully read; the per-notice archive is an atomic rename. Full
+bodies remain JSON files and are not copied into the runs database.
+
+`shell3 inbox list|read|archive` requires no model configuration. List output
+defaults to ten rows and is capped at 100; read output defaults to 8 KiB and is
+capped at 32 KiB with byte offsets constrained to UTF-8 boundaries. Notice
+bodies remain untrusted machine-origin data even when fetched deliberately.
+
+The persistent Telegram or headless service host owns the exclusive advisory
+wake socket. Its listener never claims messages and fans non-main hints to the
+workflow router. Telegram additionally turns a `main` hint into a direct
+human notification; the headless service ignores it. The listener is a latency
+optimization only. A local console owns no socket, can coexist against the
+same state, and relies on the router's durable periodic reconciliation.
 
 ## Tools and policy
 
-The core model-facing tools are `bash`, `bash_bg`, and `edit_file`. Optional
-built-ins cover history and task management. Custom kit tools are Bash
-functions with a strict object schema. Their arguments become validated
-environment variables; stdout is the result. Cancellation sends `SIGTERM` to
-the invocation's process group and bounds inherited-pipe shutdown.
+The core model-facing tools are `bash`, `bash_bg`, and `edit_file`. Telegram
+adds one file-send tool named `telegram`. There is no MCP or custom-tool
+registry in the orchestrator. Reusable capability belongs in shell commands,
+scripts, or skills; multi-agent decisions belong in wrkfiles.
 
-MCP servers connect as part of a Parts generation. Their tools are namespaced
-`mcp_<server>_<tool>`, filtered by each agent's opt-in, validated as JSON
-objects, and retried once after reconnect. A failed MCP call returns a tool
-error rather than killing the turn.
+Foreground command cancellation and background shutdown terminate process
+groups and bound inherited-pipe shutdown. The shipped harness is not an
+operating-system sandbox.
 
-Gates run before every tool for explicitly named agents. There is no fallback
-gate and no ask verdict. Hook input and output are strict JSON. Hook failure,
-timeout, malformed output, unknown fields, and invalid rewrites fail closed.
-Verdict precedence is block, review, argv, command. Rewrites apply only to Bash
-tools. Notes may rewrite output but never refuse a call; events only observe.
+## Runtime and background work
 
-Contextual review trusts only ephemeral human-origin content captured in an
-interactive root session. Stored history, generated user carriers, subagent
-prompts, cron input, and tool output are not approval. Critical risk denies;
-high risk requires approval of the exact action and side effects. The public
-verdict remains `{"review":true}`.
+Background commands are in-process jobs. Admission, concurrency, and the
+positive `WaitGroup.Add` happen under the job-manager lock before work is
+published; shutdown closes admission before waiting. External agent work runs
+through the durable wrk scheduler, and dispatched agents are leaf processes.
 
-The shipped gate is a speed bump, not isolation. It must distinguish a hard
-block from a routed refusal that names the permitted method. Operating-system
-sandboxing is the security boundary.
-
-## Runtime, jobs, and reload
-
-Subagents and background commands are in-process jobs. Admission, concurrency,
-and the positive `WaitGroup.Add` happen under the job-manager lock before work
-is published; shutdown closes admission before waiting. Dispatch depth is at
-most two levels and is checked when a task starts, not by hiding tools.
-
-A subagent can outlive its first turn while its background commands finish.
-Each completion may resume it for a bounded follow-up. Results climb through
-the parent that requested them. `report:` is the sole reporting axis:
+`report:` is the sole reporting axis:
 
 - `auto` lets the owner decide whether a user-facing update is warranted.
 - `always` requires an update, with a raw fallback if the owner says nothing.
 - `raw` posts the result without another model turn.
 
-`NO_REPLY`, failures, owner mail, cron attribution, and report traces must stay
-consistent across command and subagent completion paths.
+`NO_REPLY`, failures, owner mail, and report traces must stay consistent across
+completion paths.
 
 Every completion is persisted to the outbox before routing and deleted only
 after successful handoff. Delivery is intentionally at-least-once. Running
 markers make work lost to a process crash observable at restart. Event rows,
-markers, job logs, and transcript reads use the store generation belonging to
-the session/job that created them.
-
-Reload builds and validates a complete new Parts before swapping. Idle root
-sessions move to it in place. Active child sessions and jobs retain their old
-generation until they drain, so old cleanup is parked rather than closing live
-handles. A busy front-end turn blocks reload; background work does not. Cron
-shutdown closes fire admission and waits for scheduled and manual dispatch
-calls before its store generation closes.
+markers, job logs, and transcript reads use the runtime's store. Background
+work retains the configuration generation captured when it was dispatched. A
+validated reload updates idle and future sessions without changing
+already-running work.
 
 Graceful shutdown, ordinary cancellation, `/stop`, and `/superstop` have
 different reporting rules. Manufactured shutdown cancellations must not become
@@ -153,7 +290,7 @@ misleading failure posts.
 ## Storage
 
 `internal/runs` owns the SQLite store for sessions, messages, usage, search,
-thread markers, cron status, and the outbox. Schema mismatch is explicit; never
+thread markers, the outbox, and the schedule-run index. Schema mismatch is explicit; never
 silently discard history or completions. An incompatible database bundle is
 moved aside and retained before a fresh schema is created; shell3 does not
 migrate it or read through it. The store and filesystem artifacts form one
@@ -163,19 +300,34 @@ durability contract:
 - thread markers map a front-end surface to its current session;
 - outbox rows preserve running work and undelivered completions;
 - job logs preserve bounded background output;
-- janitors remove only data outside configured retention and reference rules.
+- schedule rows preserve running/done/failed status and pointers to the
+  authoritative wrk run directory and required output;
 
-Message and chat IDs are opaque strings across storage and transports. SQLite
-operations that select the Runtime's current store hold the Runtime lock through
-the short database call so reload cannot close the chosen handle.
+Message and chat IDs are opaque strings across storage and transports.
 
-## Telegram and console
+## Diagnostics
 
-Telegram is the primary front end. Each chat owns one long-lived
+Every attached runtime opens one private JSONL logger at
+`.shell3_project/errors.jsonl` and shares it with turns, transports, and the wrk
+router. Headless schedule service mode opens the same logger. Schedule start,
+completion, failure, overlap skip, and recovery failures are structured records
+there rather than model notices. It rotates during operation at 10 MiB, retaining five archives; the
+active file plus archives are therefore bounded to approximately 60 MiB.
+Writers sharing a workdir coordinate each append and rotation with a
+cross-process lock and reopen the active path after another process rotates it.
+The log and per-session provider traces use owner-only permissions. Diagnostic
+failures never become model inbox input, and credentials must never be added as
+fields.
+
+## Control surfaces: Telegram and console
+
+In the replacement architecture Telegram is an optional remote-control adapter
+to the same orchestrator used by the local console. Each chat owns one long-lived
 `conversation`; replies add context but do not select another session. `/new`
 detaches the current conversation, `/stop` cancels its turn, `/superstop` also
-cancels background work, and `/reload` applies a new generation. Host commands
-never spend a model turn.
+cancels background work. The replacement menu exposes those conversation
+controls plus `/ask`, `/help`, and `/reload`; legacy kit, status, aside,
+and quiet commands are not advertised. Host commands never spend a model turn.
 
 `Bot.mu` guards the room registry and process-wide wiring;
 `conversation.mu` guards room state. When both are needed, lock the room first.
@@ -184,15 +336,15 @@ room. Busy-room messages queue; text may steer the active turn. Releasing any
 global slot must rescan all rooms, because a queued room has no other wakeup.
 
 Each room persists its marker under `<transport>:<chat-id>`. Groups require an
-addressed message by default; `telegram.group_messages: all` bypasses that
+addressed message by default; `(group-messages all)` bypasses that
 trigger only after sender authorization. Group-to-supergroup
 migration moves the same conversation, swaps identity under the room-then-bot
 lock order, persists the new marker, clears the old one, and invalidates cached
 metadata. Room descriptions are untrusted contextual text, capped and refreshed
 without blocking normal turns.
 
-Completions return to the room owning their session; orphans and cron output
-fall back to the home chat. Posted turns create their best-effort progress
+Completions return to the room owning their session; orphans fall back to the
+home chat. Posted turns create their best-effort progress
 bubble at turn start and add tool calls as they occur; quiet wake turns create
 none. Long replies become
 a short message plus a self-contained HTML document. Attachment paths are
@@ -207,15 +359,10 @@ never become model input.
 local room. It needs no Telegram credentials or `allow_from` authorization and
 is the end-to-end development transport. EOF shuts it down cleanly.
 
-## Status, media, and rendering
+## Media and rendering
 
-`/status` reads concurrency-safe runtime snapshots and sends one self-contained
-HTML document without a model turn. Stored conversations and job logs are
-rendered only after the agent selects an opaque, validated id and explicitly
-sends the resulting document through the attached Telegram room.
-
-`mediadir` provides durable attachment/generated-file paths and an age-based
-janitor. Telegram media sending opens only regular files, refuses credential
+`mediadir` provides durable attachment paths. Telegram media sending opens
+only regular files, refuses credential
 and config-tree aliases (including hardlinks), and bounds reads. Media
 perception and generation are bring-your-own declared tools.
 
@@ -227,31 +374,29 @@ send falls back to plain text.
 
 ```text
 cmd/shell3/              command tree and front-end wiring
-internal/agentsetup/     Parts and per-session configuration
 internal/adapter/openai/ OpenAI-compatible provider adapter
-internal/applog/         rotating application log
-internal/askui/          interactive terminal UI
+internal/applog/         shared rotating project logger
 internal/bootstrap/      runtime-directory initialization
-internal/chat/           turns, tools, gates, events, compaction
+internal/chat/           turns, core tools, events, compaction
 internal/cli/            one-shot output helpers
-internal/config/         wiring and hook execution
-internal/cron/           scheduler and run status
 internal/edittool/       direct-disk edit_file implementation
-internal/kit/            parser, declarations, runner, test harness
+internal/inbox/          durable filesystem inbox and wake socket
+internal/lispconfig/     strict shell3.lisp parser and resolver
 internal/llm/            provider interfaces and message types
-internal/mcp/            MCP connections and dispatch
 internal/mdpage/         standalone HTML reply rendering
-internal/mediadir/       media paths and cleanup
-internal/modelproxy/     local provider proxy lifecycle
+internal/mediadir/       durable attachment paths
 internal/notify/         completion notification types
-internal/paths/          global and local path resolution
-internal/render/         status and stored-record HTML renderers
-internal/review/         contextual gate reviewer
-internal/runs/           SQLite history, outbox, markers, janitors
-internal/scaffold/       embedded starter kit, skills, scripts
-internal/shell3/         Runtime, Session, jobs, reload, routing
+internal/orchestrator/   attached-model assembly and core schemas
+internal/scaffold/       complete single-file starter kit
+internal/paths/          project runtime and sensitive-path resolution
+internal/runner/         typed external runner process boundary
+internal/runs/           SQLite history, outbox, and markers
+internal/schedule/       Cron clock, ownership, wrk dispatch, recovery
+internal/sexpr/          inert S-expression reader
+internal/shell3/         Runtime, Session, background jobs, completion routing
 internal/strutil/        shared text safety helpers
 internal/telegram/       bot loop, transports, rooms, host tools
+internal/wrk/            workflow parser, compiler, scheduler, state
 ```
 
 ## Development
@@ -266,8 +411,8 @@ make deepcheck
 ```
 
 Use focused success and failure tests while changing a subsystem, then broaden
-verification in proportion to risk. Parsing, policy, storage, concurrency,
-reload, and delivery changes require regressions for the rejected/error path as
+verification in proportion to risk. Parsing, storage, concurrency, and
+delivery changes require regressions for the rejected/error path as
 well as success.
 
 Do not commit build output, runtime state, secrets, `.shell3_project/`, or local

@@ -72,7 +72,7 @@ func TestTranslateErrorPassesTypedErrThrough(t *testing.T) {
 }
 
 // newTestSession builds a Session backed by a fakellm client, bypassing
-// agentsetup so the test needs no real config/network. It mirrors what Start
+// runtime assembly so the test needs no real config/network. It mirrors what Start
 // produces: a persistent chat.Session + drain over a fake-LLM chat.Config.
 func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Session {
 	t.Helper()
@@ -333,7 +333,6 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 		ModelID:      "gpt-x",
 		AgentKnobs:   chat.AgentKnobs{ContextWindow: 4096},
 		ActiveSkills: []string{"a", "b"},
-		Params:       llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
 	}
 	cfg.Profile.SystemPrompt = "be helpful"
 	cfg.Profile.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}

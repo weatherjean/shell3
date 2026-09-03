@@ -161,7 +161,6 @@ func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = b.rt.Reload()
 	c := tconv(b)
 	c.mu.Lock()
 	c.main = nil

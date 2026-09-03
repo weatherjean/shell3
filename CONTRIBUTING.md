@@ -10,6 +10,7 @@ Go (version pinned in `go.mod`) is the only requirement.
 make build     # build ./shell3
 make test      # go test -race ./...
 make lint      # gofmt drift check + go vet + golangci-lint (what CI enforces)
+make acceptance # deterministic config → wrk → runner smoke test
 ```
 
 The test suite is hermetic: temp `HOME`, a fake LLM provider
@@ -37,24 +38,25 @@ better are more welcome than ones that grow the footprint.
 - Doc comments explain **why**, not what. Write down any concurrency or lifecycle
   contract at the declaration (see `internal/chat/session.go`,
   `internal/shell3/session.go`).
-- shell3 is a self-hosted agent with a web front-end, not an embeddable
-  library — everything under `internal/` (including `internal/shell3`) may
-  change freely.
+- shell3 is a local orchestrator with terminal and Telegram front ends, not an
+  embeddable library — everything under `internal/` (including
+  `internal/shell3`) may change freely.
 - Tool failures use the typed `toolResult` path in `internal/chat`, classified in
   one place — don't introduce new string-sniffing.
 
 ## Architecture orientation
 
-`AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
-`internal/agentsetup` assembles a `chat.Config` from the config directory
-(`internal/config`), `internal/chat` runs turns against an OpenAI-compatible
-provider (`internal/adapter/openai`), and the front-ends (`internal/telegram`
-for `shell3 telegram` and `internal/cli` for `shell3 ask`) are built on
-`internal/shell3`'s session/runtime core.
+`AGENTS.md` and `docs/internals.md` have the package map. The short version:
+`internal/lispconfig` parses inert configuration, `internal/orchestrator`
+assembles the attached model, `internal/chat` runs turns, and
+`internal/shell3` owns sessions and durable background commands. Bare shell3
+and `internal/telegram` are local and remote adapters to that runtime;
+`internal/wrk` dispatches typed external agent runners.
 
 ## Security
 
-Never read or commit credential files (`.env` beside `shell3.sh`). shell3 is
-unsafe by default — model-chosen commands run with full shell access, gated only
-by the optional per-agent `gate:` function in the kit. Report vulnerabilities via GitHub
-Security Advisories.
+Never read, print, log, or commit credentials from the process environment or
+host secret manager. shell3 is
+not an operating-system sandbox: model-chosen commands run with the process's
+real permissions. Use a container, VM, or restricted account for hard
+isolation. Report vulnerabilities via GitHub Security Advisories.

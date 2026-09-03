@@ -4,29 +4,23 @@ import "time"
 
 // JobProgress is an incremental progress event emitted on the JobEvents() bus
 // for each background job. Chunk events carry a non-empty Chunk field; the
-// terminal event has Done=true and an empty Chunk (plus Summary for subagents).
+// terminal event has Done=true and an empty Chunk.
 // Parent is the parent session's registry name (same value bgJob.parentID holds).
 type JobProgress struct {
-	JobID   string
-	Parent  string
-	Kind    JobKind
-	Title   string
-	Chunk   string // incremental rendered text; empty on the terminal event
-	Done    bool
-	Summary string // subagent jobs only; empty for command jobs
+	JobID  string
+	Parent string
+	Kind   JobKind
+	Title  string
+	Chunk  string // incremental rendered text; empty on the terminal event
+	Done   bool
 }
 
-// JobInfo is the public projection of one background job (a bash_bg process or
-// a fire-and-forget subagent) for a front-end to display. Done jobs are
+// JobInfo is the public projection of one bash_bg process. Done jobs are
 // retained in-memory for the session lifetime (up to 100) so a front-end can show
 // their final output and transcript.
 type JobInfo struct {
-	ID string
-	// Cmd is the command text for command jobs and the model-supplied
-	// description for subagent jobs (whose agent name is in Agent).
-	Cmd string
-	// Agent is the spawned agent's name for subagent jobs; "" for commands.
-	Agent     string
+	ID        string
+	Cmd       string
 	StartedAt time.Time
 	Kind      JobKind
 	ParentID  string
@@ -35,18 +29,8 @@ type JobInfo struct {
 	// the in-process handle and does NOT name a directory.
 	ParentSession string
 	Done          bool      // true once the job has finished
-	Exit          *int      // command jobs: exit code (nil while running or for subagents)
-	Summary       string    // subagent jobs: final assistant text (empty for command jobs)
-	Error         string    // subagent jobs: last turn error ("" = clean run)
+	Exit          *int      // nil while running
 	EndedAt       time.Time // zero while running
-	// ChildOpen is true for a subagent job whose child session is still open —
-	// either still running its main turn, or lingering after Done=true to run
-	// follow-up turns for a bash_bg that outlived the turn (see bgJob.lingering /
-	// jobManager.runningJobIDs). A caller that wants to know whether a subagent
-	// job can still produce more output (an agent_update notice, more job
-	// events) must check this rather than Done alone: Done flips true at
-	// main-turn end even while the child lingers. Always false for command jobs.
-	ChildOpen bool
 }
 
 // JobEvents exposes the owning Runtime's background-job progress stream so a
@@ -60,8 +44,7 @@ func (s *Session) JobEvents() <-chan JobProgress {
 	return rt.JobEvents()
 }
 
-// Jobs lists the live background jobs for this session's project — bash_bg
-// processes and in-process subagents — newest first. Returns nil when the
+// Jobs lists the runtime's bash_bg processes, newest first. Returns nil when the
 // in-process job runtime is unavailable. (Backs the Jobs view.)
 func (s *Session) Jobs() []JobInfo {
 	rt := s.runtimeHandle() // snapshot under s.mu: doClose nils s.runtime concurrently
@@ -75,15 +58,14 @@ func (s *Session) Jobs() []JobInfo {
 // user and the agent both read.
 type KilledJob struct {
 	ID      string
-	Title   string // command text or subagent description
-	Kind    string // "command" or "subagent"
+	Title   string
+	Kind    string // "command"
 	Runtime time.Duration
 }
 
-// KillAllForStop kills every live background job in the runtime — commands,
-// subagents (cascading like task_cancel), and in-flight cron dispatches —
-// with their completion routing SUPPRESSED: no ⚠️ posts, no owner mail. The
-// returned list is the material for the one superstop summary that replaces
+// KillAllForStop kills every live background command with completion routing
+// suppressed: no failure posts or owner mail. The returned list supplies
+// the one superstop summary that replaces
 // them. The front-ends' /superstop primitive.
 func (s *Session) KillAllForStop() []KilledJob {
 	rt := s.runtimeHandle()

@@ -11,7 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
@@ -27,6 +26,12 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 		return chat.Config{
 			LLM: client, Agent: "code",
 			Headless: o.Headless, Store: st,
+			Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{
+				Name: "bash_bg",
+				Parameters: map[string]any{
+					"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}, "required": []string{"command"},
+				},
+			}}},
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
 	})
@@ -36,24 +41,6 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 
 func storeRuntime(t *testing.T, reply string) *shell3.Runtime {
 	return storeRuntimeClient(t, fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: reply}}}))
-}
-
-// splitRuntime builds a Runtime whose main (non-headless) sessions reply with
-// `reply`, while headless children (subagents) run a BlockingClient — so a
-// dispatched subagent stays verifiably in flight. Returns the runtime and the
-// shared blocking client (its Started channel closes when a child turn begins).
-func splitRuntime(t *testing.T, reply string) (*shell3.Runtime, *fakellm.BlockingClient) {
-	t.Helper()
-	blk := fakellm.NewBlocking()
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
-		if o.Headless {
-			return chat.Config{LLM: blk, Agent: "code", Headless: true}, nil
-		}
-		scripts := []fakellm.Script{{Events: []llm.StreamEvent{{TextDelta: reply}}}}
-		return chat.Config{LLM: fakellm.New(scripts...), Agent: "code"}, nil
-	})
-	t.Cleanup(func() { _ = rt.Close() })
-	return rt, blk
 }
 
 func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
@@ -259,23 +246,27 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 
 func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	fc := newFakeClient()
-	rt, blk := splitRuntime(t, "done")
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "bg-call", Name: "bash_bg", RawArgs: `{"command":"sleep 30"}`}}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "background job started"}}},
+	)
+	rt := storeRuntimeClient(t, client)
 	b := newBot(t, fc, rt)
 
 	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	b.AdoptSession(sess)
-
-	if _, err := sess.Dispatch("", "bg work", shell3.DispatchOpts{Report: notify.ReportRaw}); err != nil {
-		t.Fatalf("Dispatch: %v", err)
+	for range sess.Send(context.Background(), "start background work") {
 	}
-	select {
-	case <-blk.Started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("background job never started")
-	}
+	waitFor(t, func() bool {
+		for _, job := range sess.Jobs() {
+			if !job.Done {
+				return true
+			}
+		}
+		return false
+	})
 
 	ctx := context.Background()
 	c := tconv(b)
@@ -347,8 +338,6 @@ func TestContract7_ForeignWakeDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	b.AdoptSession(cron)
-
 	b.dispatchWake(context.Background(), cron.ID())
 	c := tconv(b)
 	c.mu.Lock()

@@ -74,7 +74,6 @@ type StreamEvent struct {
 	ToolCall       *ToolCall
 	Usage          *Usage
 	Retry          *RetryNotice
-	Done           bool
 	// Truncated reports that the provider cut the response at the output
 	// token cap (finish_reason "length") rather than finishing it. Set on the
 	// terminal event. Without it a capped reply is indistinguishable from a

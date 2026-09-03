@@ -219,7 +219,6 @@ func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Sessio
 	c.settleRequired(reply != "")
 	c.markCurrent(sess)
 	c.releaseSlot(cancel)
-	c.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
 	c.b.startNextWorkAll(ctx, c)
 }
 
@@ -506,8 +505,8 @@ func (c *conversation) launchQueuedTurnLocked(ctx context.Context, sess *shell3.
 // takeSlotLocked marks a turn active here and returns its ctx and cancel.
 // Caller holds c.mu.
 //
-// ok is false when the global cap is full or a reload is swapping the config,
-// and the caller must queue instead. A room queued by the CAP has no waker of
+// ok is false when the global cap is full, and the caller must queue instead.
+// A room queued by the cap has no waker of
 // its own — startNextWorkAll, run when any room frees a slot, drains it.
 func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	if !c.b.claimTurn() {
@@ -677,23 +676,7 @@ func (c *conversation) chatIDValue() int64 {
 	return c.chatID
 }
 
-// isGroupRoom reports whether this room is a group (where a description and
-// the trigger gate apply) rather than a direct chat.
-func (c *conversation) isGroupRoom() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.isGroup
-}
-
-// busy reports whether this room is mid-turn.
-func (c *conversation) busy() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.turnActive
-}
-
-// wake runs this room's queued mail turn (a subagent or bash_bg finished, or
-// a completion was mailed here). A wake that lands while the room is mid-turn
+// wake runs this room's queued completion turn. A wake that lands mid-turn
 // — or while the global cap is full — is marked pending and drained by the
 // next turn end.
 func (c *conversation) wake(ctx context.Context) {
@@ -712,12 +695,12 @@ func (c *conversation) wake(ctx context.Context) {
 }
 
 // claimTurn takes one of the global turn slots, or reports false when the cap
-// is full or a reload is in flight. Without the cap, N rooms speaking at once
+// is full. Without the cap, N rooms speaking at once
 // fan out N concurrent agents against one provider account.
 func (b *Bot) claimTurn() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.reloading || b.activeTurns >= b.maxTurns {
+	if b.activeTurns >= b.maxTurns {
 		return false
 	}
 	b.activeTurns++
@@ -731,16 +714,6 @@ func (b *Bot) freeTurn() {
 		b.activeTurns--
 	}
 	b.mu.Unlock()
-}
-
-// anyBusy reports whether any room is mid-turn — what /reload refuses on.
-func (b *Bot) anyBusy() bool {
-	for _, c := range b.allConvs() {
-		if c.busy() {
-			return true
-		}
-	}
-	return false
 }
 
 // startNextWorkAll runs end-of-turn housekeeping across EVERY room, starting

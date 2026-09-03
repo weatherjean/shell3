@@ -23,7 +23,6 @@ type retryOnlyClient struct{ notice llm.RetryNotice }
 
 func (c retryOnlyClient) Stream(_ context.Context, _ []llm.Message, _ []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	onEvent(llm.StreamEvent{Retry: &c.notice})
-	onEvent(llm.StreamEvent{Done: true})
 	return nil
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// `shell3 ask` renderer colors (dark-palette brand values, matching PrintHeader).
+// one-shot renderer colors (dark-palette brand values, matching PrintHeader).
 var (
 	askReason = lipgloss.NewStyle().Foreground(lipgloss.Color("#87A58C")) // reasoning — muted green
 	askCall   = lipgloss.NewStyle().Foreground(lipgloss.Color("#5BB6C9")).Bold(true)
@@ -27,14 +27,6 @@ var errAskTurnFailed = errors.New("turn ended with error")
 // errJobBusClosed marks a closed Wake or job-progress bus: neither can report
 // a future change, so the caller ends the wait rather than busy-spinning.
 var errJobBusClosed = errors.New("job event bus closed")
-
-// RunAskTurn drives one turn and renders every public event verbosely:
-// reasoning, streamed reply, each tool call with its args, untruncated
-// results, retries, per-round usage, final totals. Nothing is hidden or capped
-// the way a chat front-end would. errAskTurnFailed if the turn ended in error.
-func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt string) error {
-	return renderAskEvents(w, sess.Send(ctx, prompt))
-}
 
 // FollowAskJobs keeps a one-shot process alive while jobs or queued notices
 // remain, rendering each wake turn until completion or context cancellation.
@@ -53,10 +45,7 @@ func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *s
 		}
 		running := 0
 		for _, j := range sess.Jobs() {
-			// A subagent reports Done at main-turn end while its child lingers
-			// for a bash_bg that outlived the turn. Still running: exiting
-			// would drop the follow-up's narration.
-			if !j.Done || j.ChildOpen {
+			if !j.Done {
 				running++
 			}
 		}

@@ -32,9 +32,6 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if !strings.Contains(string(b), "logged") {
 		t.Fatalf("log content = %q", b)
 	}
-	if st := rt.jobs.formatJobStatus(id); !strings.Contains(st, logPath) {
-		t.Fatalf("task_status should name the log path, got: %q", st)
-	}
 }
 
 func TestCommandJobLogCapped(t *testing.T) {

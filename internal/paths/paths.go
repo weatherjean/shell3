@@ -10,47 +10,36 @@ import (
 // route every path through the helpers here rather than rebuilding the literal.
 const ProjectDirName = ".shell3_project"
 
-// Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
-// The root itself is the default config directory (shell3.sh, skills/, …).
-type Global struct {
-	Root    string // ~/.shell3/
-	LogFile string // ~/.shell3/shell3.log
-}
-
-// Local holds paths under ./.shell3_project/ (project-scoped runtime data;
-// gitignored via /.shell3_project/ in the repo root .gitignore).
+// Local holds project-scoped runtime paths under ./.shell3_project/.
 type Local struct {
-	Root string // ./.shell3_project/
-	Runs string // ./.shell3_project/runs/
-}
-
-// NewGlobal returns a Global path set rooted at homeDir/.shell3/.
-func NewGlobal(homeDir string) Global {
-	root := filepath.Join(homeDir, ".shell3")
-	return Global{
-		Root:    root,
-		LogFile: filepath.Join(root, "shell3.log"),
-	}
+	Root   string // ./.shell3_project/
+	Runs   string // ./.shell3_project/runs/
+	Errors string // ./.shell3_project/errors.jsonl
 }
 
 // NewLocal returns a Local path set rooted at cwd/.shell3_project/.
 func NewLocal(cwd string) Local {
 	root := filepath.Join(cwd, ProjectDirName)
 	return Local{
-		Root: root,
-		Runs: filepath.Join(root, "runs"),
+		Root:   root,
+		Runs:   filepath.Join(root, "runs"),
+		Errors: filepath.Join(root, "errors.jsonl"),
 	}
 }
 
-// LastErrorPath is where a failed turn dumps its request/response for debugging.
-func LastErrorPath(workdir string) string {
-	return filepath.Join(workdir, ProjectDirName, "last_error.json")
+// LastErrorPath is where one session keeps its latest failed provider turn.
+// The fallback covers callers without a safe durable session id.
+func LastErrorPath(workdir, sessionID string) string {
+	root := filepath.Join(workdir, ProjectDirName)
+	if sessionID == "" || sessionID == "." || sessionID == ".." || filepath.Base(sessionID) != sessionID {
+		return filepath.Join(root, "last_error.json")
+	}
+	return filepath.Join(root, "runs", sessionID, "last_error.json")
 }
 
-// IsCredentialFile reports whether a base file name is one shell3 treats as
-// secret: the `.env` beside the kit and its dotenv siblings (.env.local, …).
-// One definition, so config guards and send_media_telegram (which refuses to
-// send credentials) can never drift apart.
+// IsCredentialFile reports common dotenv names as sensitive even though
+// shell3 does not load them. The Telegram file tool must not become a generic
+// credential-exfiltration path for files used by other software.
 func IsCredentialFile(name string) bool {
 	lower := strings.ToLower(name)
 	return lower == ".env" || strings.HasPrefix(lower, ".env.")

@@ -45,6 +45,6 @@ func decoratedSession(t *testing.T, b *Bot, rt *shell3.Runtime) *shell3.Session 
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.DecorateChatSession(sess)
+	b.DecorateOrchestratorSession(sess)
 	return sess
 }

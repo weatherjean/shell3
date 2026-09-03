@@ -33,16 +33,16 @@ func hostRemindersCfg() func() chat.Config {
 			Agent:     "code",
 			ModelID:   "gpt-x",
 			ConfigDir: "/cfg",
-			RunsDir:   "/root/.shell3_project/runs",
+			RenderEnvironment: func(sessionID string) string {
+				return "<system-reminder>\nEnvironment:\n- session: " + sessionID + "\n</system-reminder>"
+			},
 		}
 	}
 }
 
 func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
-	rt := newTestRuntime(t, mk)
-	rt.configDir = "/cfg"
-	return rt
+	return newTestRuntime(t, mk)
 }
 
 func TestHostReminders_Environment(t *testing.T) {

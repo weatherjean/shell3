@@ -1,8 +1,4 @@
-// Package notify defines the completion-notification value rendered into a
-// live agent's context when a background job or subagent finishes. Jobs run
-// in-process (internal/shell3's job runtime), which injects the rendered
-// notification directly into the parent session — there is no cross-process
-// transport.
+// Package notify defines background-command completion notices.
 package notify
 
 // Kind discriminates completion notifications. Typed so a mistyped kind is a
@@ -10,20 +6,16 @@ package notify
 type Kind string
 
 const (
-	KindBgDone    Kind = "bg_done"    // a background bash job finished
-	KindAgentDone Kind = "agent_done" // a fire-and-forget subagent finished
-	// KindAgentUpdate is a follow-up from an already-"done" subagent: one of
-	// its background jobs finished after its main turn ended, the child session
-	// was resumed for a follow-up turn, and this carries that turn's summary.
-	KindAgentUpdate Kind = "agent_update"
+	KindBgDone Kind = "bg_done"
 )
 
 // Notification is one completion event surfaced into a live agent's context.
 type Notification struct {
-	Kind    Kind   // KindBgDone | KindAgentDone | KindAgentUpdate
-	ID      string // job or subagent id
+	Kind    Kind
+	ID      string // background job id
 	Status  string // free-form completion status
 	Exit    *int   // process exit code, if known
-	Preview string // short human-readable summary
-	Cmd     string // the command that ran (bg jobs)
+	Preview string // bounded output tail
+	Cmd     string // command that ran
+	Detail  string // path to the complete output, if persisted
 }

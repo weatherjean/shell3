@@ -1,7 +1,6 @@
 package shell3
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/notify"
@@ -74,7 +73,7 @@ func TestDefaultCommandJobMailsOwner(t *testing.T) {
 	if posts, _, fresh := host.snapshot(); len(posts)+len(fresh) != 0 {
 		t.Fatalf("default completion must not post or start fresh turns, got posts=%v fresh=%v", posts, fresh)
 	}
-	if got := rt.jobs.formatJobList(); !strings.Contains(got, "done") {
-		t.Fatalf("job list = %q, want the finished job listed as done", got)
+	if jobs := rt.jobs.list(); len(jobs) != 1 || !jobs[0].Done {
+		t.Fatalf("jobs = %+v, want one finished job", jobs)
 	}
 }

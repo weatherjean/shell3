@@ -80,43 +80,15 @@ func TestNormalKillStillRoutes(t *testing.T) {
 	})
 }
 
-func TestKillAllForStopPoisonsLingeringSubagent(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("x"))
-	child, err := rt.Session(SessionOpts{Name: "child", Headless: true})
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	parent, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	rt.jobs.mu.Lock()
-	rt.jobs.jobs["sub1"] = &bgJob{
-		id: "sub1", kind: JobSubagent, title: "lingering worker",
-		finished: true, lingering: true, child: child, childClosed: false,
-	}
-	rt.jobs.mu.Unlock()
-
-	parent.KillAllForStop()
-
-	rt.jobs.mu.Lock()
-	j := rt.jobs.jobs["sub1"]
-	suppressed, noFollow := j.suppress, j.noFollowUps
-	rt.jobs.mu.Unlock()
-	if !suppressed || !noFollow {
-		t.Fatalf("lingering subagent not poisoned: suppress=%v noFollowUps=%v", suppressed, noFollow)
-	}
-}
-
 func TestDispatchCompletionDropsSuppressed(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	host := &fakeHost{wakeOK: true}
 	rt.SetCompletionHost(host)
 	rt.jobs.mu.Lock()
-	rt.jobs.jobs["sub9"] = &bgJob{id: "sub9", kind: JobSubagent, suppress: true}
+	rt.jobs.jobs["bg9"] = &bgJob{id: "bg9", kind: JobCommand, suppress: true}
 	rt.jobs.mu.Unlock()
 	ev := failedEvent()
-	ev.JobID = "sub9"
+	ev.JobID = "bg9"
 	rt.jobs.dispatchCompletion(ev)
 	time.Sleep(50 * time.Millisecond)
 	posts, wakes, fresh := host.snapshot()

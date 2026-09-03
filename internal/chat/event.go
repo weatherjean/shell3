@@ -50,11 +50,6 @@ const (
 	// pre-compaction count; Usage carries the estimated post-compaction size,
 	// so a UI can reflect the freed context immediately.
 	EventCompacted
-
-	// numEventKinds must stay LAST: it bounds kit_events_test.go's iteration,
-	// and a hardcoded bound there would leave a kind added below it invisible
-	// to the check that exists to catch drift.
-	numEventKinds
 )
 
 func (k EventKind) String() string {
@@ -213,15 +208,5 @@ func emit(s *Session, ev Event) {
 	}
 	if s.sink != nil {
 		s.sink(ev)
-	}
-	// The kit subscriber observes the same event, and does so even when no
-	// Sink is installed: a headless session still has observable events. Read
-	// under msgMu because a reload swaps the observer (SetOnEvent) while a
-	// turn is emitting.
-	s.msgMu.RLock()
-	onEvent := s.onEvent
-	s.msgMu.RUnlock()
-	if onEvent != nil {
-		onEvent(ev)
 	}
 }

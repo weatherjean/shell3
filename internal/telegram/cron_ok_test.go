@@ -4,7 +4,6 @@ package telegram
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -147,7 +146,6 @@ func TestWakeOwner_MainAndForeign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.AdoptSession(cron)
 	if b.WakeOwner(shell3.Mail{OwnerID: cron.ID(), Note: "n"}) {
 		t.Fatal("cron parent must return false")
 	}
@@ -246,54 +244,6 @@ func TestWakeTurn_MailAlwaysSilentAndPlain(t *testing.T) {
 		if strings.Contains(m.text, "hushed news") {
 			t.Fatalf("agent mail must be a plain message, not a reply (got reply to %q)", m.replyTo)
 		}
-	}
-}
-
-func setQuiet(t *testing.T, b *Bot, on bool) *QuietStore {
-	t.Helper()
-	qs := &QuietStore{Path: filepath.Join(t.TempDir(), "quiet_mode.json")}
-	b.SetQuiet(qs)
-	if err := qs.Set(on); err != nil {
-		t.Fatal(err)
-	}
-	return qs
-}
-
-func TestPostCompletion_QuietSilencesButFailuresRing(t *testing.T) {
-	fc := newFakeClient()
-	b := newBot(t, fc, storeRuntime(t, "unused"))
-	setQuiet(t, b, true)
-
-	b.PostCompletion(shell3.CompletionPost{CronJob: "nightly", Text: "all well"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⏰ nightly: all well")
-	})
-	if !fc.lastSilent() {
-		t.Error("quiet cron post should be silent")
-	}
-
-	b.PostCompletion(shell3.CompletionPost{Text: "the fetch finished"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "🔔 the fetch finished")
-	})
-	if !fc.lastSilent() {
-		t.Error("quiet 🔔 post should be silent")
-	}
-
-	b.PostCompletion(shell3.CompletionPost{Text: "⚠️ nightly failed: exit 1"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⚠️ nightly failed")
-	})
-	if fc.lastSilent() {
-		t.Error("⚠️ failure post must ring even under quiet")
-	}
-
-	b.PostCompletion(shell3.CompletionPost{CronJob: "weekly", Text: "⚠️ weekly failed: exit 2"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⚠️ weekly failed")
-	})
-	if fc.lastSilent() {
-		t.Error("cron-origin ⚠️ failure must ring even under quiet")
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/cli"
 )
 
@@ -21,22 +20,7 @@ var version = "dev"
 // main wires the cobra command tree and executes it through fang, which owns
 // help, usage, error, and --version styling.
 func main() {
-	root := &cobra.Command{
-		Use:   "shell3",
-		Short: "Minimal Unix-composable personal agent",
-	}
-
-	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
-	// error rather than be silently swallowed.
-	root.Args = cobra.NoArgs
-	root.RunE = func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
-	}
-	root.AddCommand(newTelegramCommand())
-	root.AddCommand(newAskCommand())
-	root.AddCommand(newBootCommand())
-	root.AddCommand(newHealthCommand())
-	root.AddCommand(newToolCommand())
+	root := newRootCommand()
 
 	// Print the brand header (the ๑ï snail): the full two-line banner when a
 	// subcommand actually runs (PersistentPreRun), and the slim one-line logo
@@ -46,7 +30,7 @@ func main() {
 	// Both are TTY-only.
 	tty := term.IsTerminal(int(os.Stdout.Fd()))
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		if tty && shouldPrintHeaderInPreRun(root, cmd) {
+		if tty && shouldPrintHeaderInPreRun(cmd) {
 			cli.PrintHeader(os.Stdout)
 		}
 	}
@@ -63,17 +47,14 @@ func main() {
 	}
 }
 
-// wantsHelp reports whether the invocation renders a help page: the bare
-// root, the help subcommand, or a -h/--help token before a "--" terminator.
+// wantsHelp reports whether the invocation renders a help page: the help
+// subcommand or a -h/--help token before a "--" terminator.
 // A deliberate approximation of pflag's grammar: a literal "--help" passed as
 // a flag VALUE (e.g. dev -p "--help") false-positives an extra logo line —
 // harmless, and far cheaper than re-parsing flags or wrapping fang's output
 // stream (which breaks its color detection).
 func wantsHelp(args []string) bool {
-	if len(args) == 0 {
-		return true
-	}
-	if args[0] == "help" {
+	if len(args) > 0 && args[0] == "help" {
 		return true
 	}
 	for _, a := range args {
@@ -87,26 +68,10 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
-// addConfigFlag registers the shared --config/-c flag with the one canonical
-// description.
-func addConfigFlag(cmd *cobra.Command, configDir *string) {
-	cmd.Flags().StringVarP(configDir, "config", "c", "", "Path to the config directory containing shell3.sh (default ~/.shell3)")
-}
-
-// resolveConfig turns the --config flag value ("" = ~/.shell3) into the config
-// directory every subcommand loads.
-func resolveConfig(configDir string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return agentsetup.ResolveConfigDir(configDir, home)
-}
-
-// shouldPrintHeaderInPreRun gates the full banner to real subcommand runs:
-// the bare root and the help command render through the logo path instead.
+// shouldPrintHeaderInPreRun gates the full banner to real command runs. The
+// help command renders through the logo path instead.
 // (-h/--help never reaches PersistentPreRun — cobra short-circuits to the
 // help func first.)
-func shouldPrintHeaderInPreRun(root, cmd *cobra.Command) bool {
-	return cmd != nil && cmd != root && cmd.Name() != "help"
+func shouldPrintHeaderInPreRun(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Name() != "help"
 }

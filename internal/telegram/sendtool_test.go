@@ -25,14 +25,14 @@ func hasTool(sess *shell3.Session, name string) bool {
 	return false
 }
 
-func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
+func TestTelegramToolRegisteredAndSends(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	sess := decoratedSession(t, b, rt)
 
-	if !hasTool(sess, "send_media_telegram") {
-		t.Fatal("send_media_telegram should be registered in the schema")
+	if !hasTool(sess, "telegram") {
+		t.Fatal("telegram should be registered in the schema")
 	}
 
 	dir := t.TempDir()
@@ -47,6 +47,25 @@ func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	doc, ok := fc.lastDoc()
 	if !ok || doc.filename != "report.txt" || string(doc.data) != "hello" || doc.caption != "here" {
 		t.Fatalf("document not sent correctly: %+v ok=%v", doc, ok)
+	}
+}
+
+func TestOrchestratorDecoratorRegistersOnlyTelegramTransportTool(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	sess, err := rt.Session(shell3.SessionOpts{Name: "orchestrator-tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.DecorateOrchestratorSession(sess)
+	if !hasTool(sess, "telegram") {
+		t.Fatal("telegram should be registered in the schema")
+	}
+	for _, legacy := range []string{"send_media_telegram", "send_record_telegram", "reload_shell3", "shell3_status"} {
+		if hasTool(sess, legacy) {
+			t.Fatalf("legacy host tool %s leaked into orchestrator session", legacy)
+		}
 	}
 }
 

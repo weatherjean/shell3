@@ -16,11 +16,15 @@ import (
 const maxSendBytes = 50 << 20 // Telegram bot upload limit (~50 MB)
 const maxPhotoBytes = 10 << 20
 
-// registerSendTool gives the agent a send_media_telegram tool to push a local
-// file back to the user's Telegram chat.
-func (b *Bot) registerSendTool(s *shell3.Session) {
+// DecorateOrchestratorSession installs the replacement architecture's sole
+// transport-specific model tool. Text remains the ordinary assistant reply.
+func (b *Bot) DecorateOrchestratorSession(s *shell3.Session) {
+	b.registerFileTool(s, "telegram")
+}
+
+func (b *Bot) registerFileTool(s *shell3.Session, name string) {
 	_ = s.RegisterHostTool(shell3.HostTool{
-		Name: "send_media_telegram",
+		Name: name,
 		Description: "Send a local file from disk to the user via Telegram (image, document, audio, video, …). " +
 			"A .md file is rendered to a formatted HTML page on the way out — write the document as markdown and send it; " +
 			"the user gets a real page with headings and tables, not source. Name it .txt to send the source itself. " +
