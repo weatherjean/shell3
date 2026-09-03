@@ -98,14 +98,18 @@ fire one declaration:
 ```sh
 shell3 config check /absolute/shell3.lisp
 shell3 wrk check --config /absolute/shell3.lisp /absolute/job.wrk.lisp
+shell3 schedule list --config /absolute/shell3.lisp --workdir /absolute/project
 shell3 schedule run --config /absolute/shell3.lisp \
   --workdir /absolute/project JOB
 shell3 schedule history --workdir /absolute/project JOB
 ```
 
-History is a SQLite index with `running`, `done`, and `failed` states plus the
-durable run-directory and output-file pointers. Full workflow state and output
-remain under `.shell3_project/wrk/`. `schedule.started`, `schedule.done`,
+Use `schedule list` for the authoritative resolved declaration inventory.
+`.shell3_project/wrk/` is run history and does not contain declarations that
+have never fired. History is a SQLite index with `running`, `done`, and
+`failed` states plus the durable run-directory and output-file pointers. Full
+workflow state and output remain under `.shell3_project/wrk/`.
+`schedule.started`, `schedule.done`,
 `schedule.failed`, and overlap-skip events are also written to the rotating
 application JSONL log. A declared output must be a regular file beneath the
 run's artifacts directory before the workflow can report success.

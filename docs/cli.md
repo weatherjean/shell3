@@ -76,6 +76,7 @@ run against the same state while Telegram is active.
 
 ```sh
 shell3 service --config /absolute/shell3.lisp --workdir /absolute/project
+shell3 schedule list --config /absolute/shell3.lisp --workdir /absolute/project
 shell3 schedule run --config /absolute/shell3.lisp --workdir /absolute/project NAME
 shell3 schedule history --workdir /absolute/project [NAME]
 shell3 schedule history --workdir /absolute/project --status failed --limit 20
@@ -86,6 +87,12 @@ kept alive by launchd, systemd, or an equivalent service manager when Telegram
 is not the persistent host. It opens no model session and resolves no attached
 model or Telegram credential. Exactly one service or Telegram process may own
 one project's schedule lock.
+`schedule list` emits one resolved declaration per JSONL record, including its
+name, cron expression, timezone, wrkfile, task, required output, timeout,
+overlap policy, and notification target. It reads no runtime state: existing
+run directories are execution history and must not be used as a declaration
+inventory.
+
 These commands use the global defaults when path flags are omitted and accept
 `--here`; explicit config mode requires both path flags.
 

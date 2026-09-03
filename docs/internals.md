@@ -105,6 +105,9 @@ overlap policy, and notification destination. Startup resolves and parses every
 referenced wrkfile before arming any entry. Schedules cannot execute arbitrary
 commands directly; command work remains a workflow node.
 
+`schedule list` enumerates resolved declarations without opening runtime state.
+Run directories are execution records and are never a declaration inventory.
+
 Exactly one process holds `.shell3_project/schedule.lock`. A live Telegram
 adapter owns that lock and clock when it is the persistent frontend; otherwise
 the foreground `shell3 service` command owns it without opening a model client

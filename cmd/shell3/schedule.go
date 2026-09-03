@@ -121,8 +121,67 @@ func newServiceCommand() *cobra.Command {
 
 func newScheduleCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "schedule", Short: "Run and inspect declared schedules"}
+	cmd.AddCommand(newScheduleListCommand())
 	cmd.AddCommand(newScheduleRunCommand())
 	cmd.AddCommand(newScheduleHistoryCommand())
+	return cmd
+}
+
+type scheduleListRecord struct {
+	Name     string `json:"name"`
+	Cron     string `json:"cron"`
+	Timezone string `json:"timezone"`
+	Wrkfile  string `json:"wrkfile"`
+	Task     string `json:"task"`
+	Output   string `json:"output"`
+	Timeout  string `json:"timeout"`
+	Overlap  string `json:"overlap"`
+	Notify   string `json:"notify"`
+}
+
+func newScheduleListCommand() *cobra.Command {
+	var configPath, workDir string
+	var here bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "Print declared schedules as JSONL",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolved, err := resolveRuntimePaths(cmd, configPath, workDir, here)
+			if err != nil {
+				return err
+			}
+			cfg, err := lispconfig.Load(resolved.config)
+			if err != nil {
+				return err
+			}
+			jobs, err := scheduler.Resolve(resolved.config, cfg)
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetEscapeHTML(false)
+			for _, job := range jobs {
+				declaration := job.Config
+				record := scheduleListRecord{
+					Name:     declaration.Name,
+					Cron:     declaration.Cron,
+					Timezone: declaration.Timezone,
+					Wrkfile:  job.Wrkfile,
+					Task:     job.Task,
+					Output:   declaration.Output,
+					Timeout:  declaration.Timeout.String(),
+					Overlap:  declaration.Overlap,
+					Notify:   declaration.Notify,
+				}
+				if err := enc.Encode(record); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	addRuntimeFlags(cmd, &configPath, &workDir, &here)
 	return cmd
 }
 

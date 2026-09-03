@@ -39,6 +39,31 @@ func writeScheduleCLIConfig(t *testing.T, dir string) string {
 	return config
 }
 
+func TestScheduleListReportsDeclarationsNotRunDirectories(t *testing.T) {
+	dir := t.TempDir()
+	config := writeScheduleCLIConfig(t, dir)
+	command := newScheduleListCommand()
+	var out bytes.Buffer
+	command.SetOut(&out)
+	command.SetArgs([]string{"--config", config, "--workdir", dir})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var record scheduleListRecord
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatalf("list output = %q: %v", out.String(), err)
+	}
+	if record.Name != "probe" || record.Task != "scheduled" || record.Cron != "0 8 * * *" || record.Timezone != "UTC" {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.Wrkfile != filepath.Join(dir, "scheduled.wrk.lisp") || record.Output != "result.txt" || record.Timeout != "1m0s" || record.Overlap != "skip" || record.Notify != "main" {
+		t.Fatalf("record = %+v", record)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".shell3_project")); !os.IsNotExist(err) {
+		t.Fatalf("schedule list created runtime state: %v", err)
+	}
+}
+
 func TestScheduleRunAndHistoryCommands(t *testing.T) {
 	dir := t.TempDir()
 	config := writeScheduleCLIConfig(t, dir)

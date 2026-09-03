@@ -112,6 +112,7 @@ runnable format.
 | `shell3 telegram` | Attach Telegram remote control. |
 | `shell3 telegram --console` | Exercise the Telegram bot contract locally. |
 | `shell3 service` | Run the persistent headless schedule and workflow host. |
+| `shell3 schedule list` | Inspect resolved schedule declarations as JSONL. |
 | `shell3 schedule run <name>` | Fire one declared schedule immediately. |
 | `shell3 schedule history [name]` | Inspect its SQLite run ledger as JSONL. |
 | `shell3 config check <shell3.lisp>` | Strictly validate the complete kit. |
