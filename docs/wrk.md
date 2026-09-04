@@ -11,9 +11,9 @@ Each file contains exactly one task:
   (timeout "45m")
 
   (agent inspect
-    (using researcher)
+    (using builder)
     (access read)
-    (prompt "Inspect the code and write findings.md.")
+    (prompt "Inspect the code. Write findings to $TASK_ARTIFACTS/findings.md.")
     (accept (file "findings.md")))
 
   (loop implement
@@ -24,11 +24,10 @@ Each file contains exactly one task:
     (prompt "Implement the requested change.")
     (until (sh "go test ./...")))
 
-  (command package
+  (command verify
     (after implement)
     (access read)
-    (run "tar -czf \"$TASK_ARTIFACTS/result.tgz\" .")
-    (accept (file "result.tgz"))))
+    (run "go test ./...")))
 ```
 
 `root` defaults to `.`, `parallel` defaults to `1`, and `timeout` is optional.
@@ -55,7 +54,7 @@ An `agent` or `command` may use `accept`. A loop uses `until`. Checks are:
 (until (sh "test -s \"$TASK_ARTIFACTS/report.md\""))
 ```
 
-File checks are confined to the run's artifact directory. Shell checks run
+File-check paths are relative to the run's artifact directory. Shell checks run
 outside the agent, so the verifier—not the worker's claim—decides success.
 
 A wait can include an operator-facing message:
@@ -69,7 +68,7 @@ A wait can include an operator-facing message:
 
 ## Runners and agents
 
-Wrkfile `using` names resolve through `shell3.lisp`:
+Wrkfile `using` names resolve to configured agent profiles:
 
 ```lisp
 (runner codex
@@ -90,13 +89,14 @@ Wrkfile `using` names resolve through `shell3.lisp`:
   (model "model-id"))
 ```
 
-The runner declaration is a typed argv protocol, not an interpolated shell
-template. shell3 sends the prompt on standard input, runs in the task root, and
-always retains stdout. The generated prompt identifies the process as a leaf
-worker; nested workflow control is also rejected by the CLI.
+The runner declaration is typed argv, not a shell template. shell3 sends the
+prompt on standard input, runs in the task root, and retains stdout. The prompt
+identifies the process as a leaf worker; the CLI also rejects nested workflow
+control.
 
 Task instructions belong in node prompts. An agent form only selects a runner
-and binds its declared parameters.
+and binds its parameters. See [configuration.md](configuration.md) for the full
+runner schema and defaults.
 
 ## Running
 
@@ -113,10 +113,10 @@ shell3 wrk run --config shell3.lisp change.wrk.lisp 'request'
 until it completes, fails, or waits. Foreground runs stream lifecycle and
 runner output while retaining the same data in the run directory.
 
-Each run snapshots the resolved config, wrkfile, hashes, task root, request,
-and runner protocol. Later beats use that snapshot, not mutable source files.
-State transitions are atomic. Interrupted running work is recovered
-at-least-once.
+Each run snapshots the config and wrkfile sources, their hashes, the task root,
+request, and executable path. Later beats use the snapshots. A run lock
+serializes beats, and state files are replaced atomically. After interruption,
+a node left `running` returns to `pending` and may execute again.
 
 Useful controls:
 
@@ -127,14 +127,17 @@ shell3 wrk signal TASK/RUN approved 'review complete'
 shell3 wrk cancel TASK/RUN
 ```
 
+These controls default to `./.shell3_project/wrk`; pass `--state` when the run
+uses another state root.
+
 Signals are durable inbox events addressed to `wrk:TASK/RUN`. The router claims
 them atomically, records them in the run ledger, and acknowledges only after
 that write. A live host reduces latency; startup and periodic reconciliation
 recover notices accepted while no host was running.
 
 Run state, prompts, stdout, stderr, command output, verification logs, and
-artifacts live under `.shell3_project/wrk/`. An invalid route is renamed with
-an `.invalid` suffix and reported in `errors.jsonl`.
+artifacts live under `<state>/<task>/<run-id>/`. An invalid route record gains
+an `.invalid` suffix and is reported in `errors.jsonl`.
 
 ## Scheduled workflows
 
@@ -152,11 +155,12 @@ A schedule in `shell3.lisp` names a wrkfile:
   (notify "main"))
 ```
 
-The wrkfile path is relative to `shell3.lisp`. `output` is relative to the run's
-artifact directory. `overlap` is `skip` or `allow`; `request` is optional and
-`notify` defaults to `main`.
+`cron`, `timezone`, `run`, `output`, and `timeout` are required. The wrkfile is
+relative to `shell3.lisp`; `output` is relative to the run's artifact directory.
+`overlap` is `skip` (default) or `allow`. `request` is optional and `notify`
+defaults to `main`.
 
-Every admitted fire is an ordinary durable wrk run indexed in SQLite as
-`running`, `done`, or `failed`. The timeout includes waiting. Completion
-requires the declared output to exist as a regular file. See
+Every admitted fire is a durable wrk run indexed in SQLite as `running`, `done`,
+or `failed`; a skipped overlap creates no run. The timeout includes waiting.
+Success requires a symlink-free regular output file. See
 [operations.md](operations.md) for host ownership and recovery.

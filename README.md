@@ -2,35 +2,32 @@
   <img src="docs/assets/shell3-banner.svg" alt="shell3: local orchestration and durable workflows" width="100%">
 </p>
 
-shell3 is a small Go harness for one attached agent and checked multi-agent
-workflows. Its local interface is a line-oriented terminal conversation.
-Telegram can expose the same runtime remotely.
+shell3 is a Go harness for one attached agent and checked multi-agent
+workflows. Its primary interface is a line-oriented terminal conversation;
+Telegram is an optional adapter to the same runtime.
 
-The attached agent has two tools: `bash` and `bash_bg`. It edits files with
-ordinary project commands through `bash`; the starter kit prefers
-[`sd`](https://github.com/chmln/sd) and includes lazy editing guidance with a
-narrow portable-`sed` fallback. Delegated work runs through checked
-`*.wrk.lisp` workflows and typed external runners. Workers are leaf processes;
-they cannot launch workflows.
+The attached agent has two core tools: `bash` and `bash_bg`. Delegated work runs
+through checked `*.wrk.lisp` workflows and typed external runners. Workers are
+leaf processes and cannot launch workflows.
 
 ## Start
 
-Go is the only build dependency. `sd` is a recommended runtime companion for
-the attached agent, not something shell3 installs automatically.
+Building requires the Go version declared in `go.mod`. Runtime commands and
+workflows require a Unix environment with Bash.
 
 ```sh
 make build
 ./shell3 boot
-export YOUR_API_KEY=...
-./shell3
 ```
 
-`boot` writes `~/.shell3/shell3.lisp` and refuses to overwrite an existing
-file. Edit the generated model declaration, including the environment variable
-name for its API key, then validate it:
+`boot` writes `~/.shell3/shell3.lisp` and refuses to overwrite it. Edit the
+generated endpoint and model ID. The starter kit names its API-key variable
+`SHELL3_API_KEY`:
 
 ```sh
 ./shell3 config check ~/.shell3/shell3.lisp
+export SHELL3_API_KEY=...
+./shell3
 ```
 
 The default workdir is `~/.shell3/workdir`. To use a project-local kit and
@@ -46,14 +43,12 @@ credential values in `shell3.lisp`.
 
 ## Configuration
 
-One strict, inert `shell3.lisp` contains the model, orchestrator prompt, memory,
-skills, runner protocols, worker profiles, schedules, and optional Telegram
-settings. Unknown, duplicate, misplaced, contradictory, and unresolved forms
-are errors.
+One strict, inert `shell3.lisp` contains models, the orchestrator prompt,
+memory, skills, runner protocols, agent profiles, schedules, and optional
+Telegram settings. Invalid or unresolved forms are errors.
 
-Skills expose only their name and description in the prompt. The agent loads a
-relevant body with `shell3 config skill` when needed. `shell3 boot` is the
-canonical annotated configuration example.
+Skills expose only their name and description in the prompt; the agent loads a
+relevant body with `shell3 config skill`. See [Configuration](docs/configuration.md).
 
 ## Workflows
 
@@ -62,9 +57,9 @@ runners, execute deterministic commands, repeat fresh-agent loops until an
 external check passes, or wait for an event.
 
 ```sh
-shell3 wrk check change.wrk.lisp
-shell3 wrk compile --config shell3.lisp change.wrk.lisp
-shell3 wrk run --config shell3.lisp change.wrk.lisp 'Implement the change.'
+shell3 wrk check --config /path/to/shell3.lisp change.wrk.lisp
+shell3 wrk compile --config /path/to/shell3.lisp change.wrk.lisp
+shell3 wrk run --config /path/to/shell3.lisp change.wrk.lisp 'Implement the change.'
 shell3 wrk status TASK/RUN
 ```
 
@@ -73,8 +68,8 @@ Runs keep immutable inputs, state, logs, and artifacts under
 
 ## Persistent hosts
 
-Use one persistent host per project when schedules or immediate workflow wakeups
-are required:
+Use one persistent host per project for schedules and immediate workflow
+wakeups:
 
 ```sh
 shell3 telegram
@@ -93,6 +88,7 @@ inspect them.
 ## Reference
 
 - [CLI](docs/cli.md)
+- [Configuration](docs/configuration.md)
 - [Workflows](docs/wrk.md)
 - [Operations](docs/operations.md)
 - [Safety](docs/safety.md)
@@ -100,8 +96,8 @@ inspect them.
 - [Contributing](CONTRIBUTING.md)
 
 shell3 is not an operating-system sandbox. Model-selected commands run with the
-permissions of the shell3 process. Use a container, VM, or restricted account
-when hard isolation matters.
+process's permissions. Use a container, VM, or restricted account when hard
+isolation matters.
 
 Linux, macOS, and WSL are supported. Native Windows is not. Licensed under the
 [MIT License](LICENSE).

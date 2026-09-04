@@ -35,8 +35,8 @@ The resolved config contains:
 - optional Telegram settings.
 
 Secret fields contain environment-variable names. Values are resolved only
-when needed and never become config data. Model and Telegram credential names
-are removed from external runner environments.
+when needed and never become config data. Agent-runner environments remove all
+declared model and Telegram secret variables.
 
 `internal/orchestrator` renders the prompt and creates a config factory. The
 model-facing core schema contains only `bash` and `bash_bg`; file editing uses
@@ -50,7 +50,8 @@ until `shell3 config skill` retrieves one. Memory is rendered into every turn.
 `boot` exclusively writes one complete kit and never overwrites. Reload builds
 and validates a complete generation before publishing it. Idle sessions and
 future sessions adopt the new factory; a busy turn finishes on its captured
-config. Transport connection fields and schedules require a process restart.
+config. Telegram `token-env`, `home-chat`, and schedules require a process
+restart.
 
 ## Runtime and sessions
 
@@ -109,9 +110,10 @@ Provider stream failures write bounded diagnostic context to
 
 ## Commands
 
-Foreground and background commands execute through argv with an explicit
-working directory. shell3 does not use a shell for runner argv assembly;
-workflow `command` nodes intentionally execute their declared shell body.
+Foreground and background tools execute `bash -c` through argv with an explicit
+working directory. Runner argv is assembled without shell interpolation;
+workflow `command` nodes intentionally execute their declared body with Bash.
+Attached Bash tools and workflow commands inherit the host environment.
 
 Process cancellation targets a process group and bounds shutdown when children
 inherit output pipes. shell3 is not an OS sandbox.
@@ -170,7 +172,7 @@ console owns no socket.
 `internal/wrk` parses one strict task graph, validates dependencies and access
 modes, snapshots resolved inputs, and drives durable state transitions. A beat
 claims input, reconciles running nodes, verifies completed work, dispatches one
-runnable wave, writes state atomically, and exits when quiescent.
+runnable wave, atomically replaces each state file, and exits when quiescent.
 
 Independent `read` nodes may share a wave up to the task limit. A `write` node
 runs alone. Every loop attempt creates a fresh runner process. External checks
@@ -198,9 +200,9 @@ every running row from its immutable snapshot, even if the declaration was
 later removed. Missed calendar occurrences are not backfilled.
 
 The schedule timeout becomes the workflow deadline and includes wait time. A
-completed graph is changed to failure if its required output is missing, a
-symlink, or not a regular file beneath the artifact directory. Only then is the
-schedule row finalized and its notice emitted.
+completed graph becomes failed if any required-output path component is a
+symlink or the final path is not a regular file. Only then is the schedule row
+finalized and its notice emitted.
 
 ## Storage and diagnostics
 
@@ -220,10 +222,13 @@ remain resumable.
 Startup creates schema version 1 idempotently. Newer schema versions and corrupt
 databases fail without compatibility migration or replacement.
 
-`internal/applog` writes structured JSONL to
-`.shell3_project/errors.jsonl`. Rotation occurs at 10 MiB with five archives,
-and cross-process locking coordinates writers. Logs and provider dumps may
-contain conversation or command content and use owner-only permissions.
+`internal/applog` writes structured JSONL to `.shell3_project/errors.jsonl`.
+Rotation occurs at 10 MiB with five archives, and cross-process locking
+coordinates writers. Application logs, inbox data, shell3-authored workflow
+state, and provider dumps use owner-only file modes. The project root, SQLite
+files, session directories, background logs, and worker-created artifacts use
+ordinary modes subject to the process umask; the workdir remains the outer
+access boundary.
 
 ## Telegram
 
@@ -268,7 +273,7 @@ internal/paths/          project paths and sensitive-file checks
 internal/procutil/       process-group cancellation and pipe shutdown
 internal/runner/         typed external runner boundary
 internal/runs/           SQLite state
-internal/scaffold/       boot-kit templates and one-shot installation
+internal/scaffold/       boot-kit template and exclusive creation
 internal/schedule/       calendar host and schedule recovery
 internal/sexpr/          inert S-expression reader
 internal/shell3/         runtime, sessions, background commands
