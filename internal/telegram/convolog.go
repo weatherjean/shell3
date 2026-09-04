@@ -3,7 +3,7 @@
 package telegram
 
 // The optional conversation log records all transport traffic as JSONL,
-// including host replies, completion posts, and messages rejected before a
+// including host replies, inbox alerts, and messages rejected before a
 // room exists. It may contain every message visible to the bot.
 
 import (
@@ -35,8 +35,8 @@ type convoEvent struct {
 	ReplyTo  string `json:"reply_to,omitempty"`
 
 	Text string `json:"text,omitempty"`
-	// Silent marks a send that arrived without a ping (⏰/🔔 under /quiet, and
-	// every ✉️ update) — the difference between "they were not told" and
+	// Silent marks a send that arrived without a ping — the difference between
+	// "they were not told" and
 	// "they were told quietly", which the text alone cannot show.
 	Silent bool `json:"silent,omitempty"`
 
@@ -53,8 +53,7 @@ type convoEvent struct {
 	Err string `json:"err,omitempty"`
 }
 
-// convoLog serializes writes: sends come from turn goroutines, job-runtime
-// goroutines and the progress bubble's ticker at once.
+// convoLog serializes writes from turn goroutines and the progress bubble.
 type convoLog struct {
 	mu  sync.Mutex
 	w   io.Writer

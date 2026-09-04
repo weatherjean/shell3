@@ -10,8 +10,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // syncBuffer is a goroutine-safe io.Writer sink for the console client, whose
@@ -69,17 +67,4 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Bot.Run did not return after EOF")
 	}
-}
-
-func TestConsoleCompletionPosts(t *testing.T) {
-	rt, _ := newFakeRuntime(t, "unused")
-	out := &syncBuffer{}
-	cc := NewConsoleClient(strings.NewReader(""), out, ConsoleChatID)
-	b := NewBot(cc, rt, ConsoleChatID, mkThreads(t))
-
-	b.PostCompletion(shell3.CompletionPost{CronJob: "nightly", OwnerID: "", Text: "backup complete"})
-	waitFor(t, func() bool { return strings.Contains(out.String(), "⏰ nightly: backup complete") })
-
-	b.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "fetch finished"})
-	waitFor(t, func() bool { return strings.Contains(out.String(), "🔔 fetch finished") })
 }

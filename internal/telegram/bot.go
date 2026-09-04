@@ -73,9 +73,9 @@ type Bot struct {
 // defaultMaxTurns bounds concurrent turns across all rooms.
 const defaultMaxTurns = 4
 
-// NewBot wires a Bot over the runtime. homeChat takes cron results and
-// ownerless completions; threads is the process-wide index each room derives
-// its own surface from, kept across /reload.
+// NewBot wires a Bot over the runtime. homeChat receives host-owned inbox
+// alerts; threads is the process-wide index each room derives its own surface
+// from, kept across /reload.
 func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, threads *ThreadIndex) *Bot {
 	// Default allowlist: the home chat's owner.
 	allow, _ := newSenderAllowlist(homeChat, nil)
@@ -96,12 +96,11 @@ func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, threads *Thread
 // SetConvoLog records every message in and out to w, as JSONL. Call it before
 // Run: it swaps the transport for a logging wrapper, so anything sent through
 // the client this Bot was built with is covered — host command replies and
-// completion posts included, which is the traffic no other record holds.
+// inbox alerts included, which is traffic no other record holds.
 //
-// The startup banner and the "/" command registration are sent through the
-// concrete API client by the caller, before the Bot exists, and so are NOT in
-// the log. They are constant text sent once per boot; the log's own first line
-// records the start instead.
+// The "/" command registration is sent through the concrete API client and is
+// not in the log. Lifecycle and inbox notices use Bot methods and are logged
+// when this wrapper is installed.
 func (b *Bot) SetConvoLog(w io.Writer) {
 	if w == nil {
 		return
@@ -380,9 +379,7 @@ func (b *Bot) sessionHasRunningJob(sess *shell3.Session) bool {
 	return runningJobs(sess) > 0
 }
 
-// consumeWakes routes out-of-turn runtime events to their session. A Wake
-// fires when an idle session's inbox gains an item, and running the queued
-// turn lets that agent narrate the result into its own thread.
+// consumeWakes routes queued session input to its conversation.
 func (b *Bot) consumeWakes(ctx context.Context) {
 	for {
 		select {
@@ -400,9 +397,8 @@ func (b *Bot) consumeWakes(ctx context.Context) {
 	}
 }
 
-// dispatchWake runs the queued turn in the ROOM whose conversation is that
-// session. A wake for any other session — the cron parent, one /new left
-// behind — is dropped; its completions re-route through the CompletionHost.
+// dispatchWake runs queued input in the room that owns the session. Input for
+// a detached session is left in its persisted transcript.
 func (b *Bot) dispatchWake(ctx context.Context, id string) {
 	c := b.convFor(id)
 	if c == nil {
@@ -436,21 +432,8 @@ func withReplyContext(text, replyTo string) string {
 	return strings.Join(lines, "\n") + "\n\n" + text
 }
 
-// The Bot implements shell3.CompletionHost. Delivery is per ROOM: a result
-// returns where the job was started, and only what has no room — a cron tick,
-// an orphan — lands in the home chat. All three run on job-runtime
-// goroutines, so their sends never stall a conversation.
-var _ shell3.CompletionHost = (*Bot)(nil)
-
-// roomForOwner resolves a completion's room: the live registry first, then
-// the runs store. The second stage is not an optimization — after a restart,
-// redelivery runs before any room has been used, so a memory-only lookup
-// would report every recovered job to the home chat. The threads table
-// already maps each surface to its session, so the reverse lookup restores
-// the room without the user speaking first.
-//
-// nil when the owner names no room (cron, a session /new left behind); the
-// caller falls back to the home chat.
+// roomForOwner resolves a live session's room from memory or its durable
+// surface marker.
 func (b *Bot) roomForOwner(ownerID string) *conversation {
 	if ownerID == "" {
 		return nil
@@ -481,124 +464,29 @@ func (b *Bot) roomOrHome(ownerID string) *conversation {
 	return b.homeConv()
 }
 
-// PostCompletion posts to the room that spawned the job, threaded onto its
-// conversation: "⏰ <cronJob>: …" for a cron origin, "🔔 …" otherwise (⚠️
-// failure floors carry their own marker). The send is SYNCHRONOUS and its
-// error is returned, so the router keeps the outbox row and redelivers rather
-// than losing the post to an outage. Blocking is fine on a job goroutine.
-func (b *Bot) PostCompletion(p shell3.CompletionPost) error {
-	text := p.Text
-	if strings.TrimSpace(text) == "" {
-		text = "(no output)"
-	}
-	failure := strings.HasPrefix(text, "⚠️")
-	switch {
-	case p.Aside:
-		text = "💬 " + text
-	case p.CronJob != "":
-		text = fmt.Sprintf("⏰ %s: %s", p.CronJob, text)
-	case failure:
-		// The runtime's failure-floor text carries its own marker.
-	default:
-		text = "🔔 " + text
-	}
-	var opts []SendOpt
-	c := b.roomOrHome(p.OwnerID)
-	// Plain messages, never replies — a quote header on every ⏰/🔔 is noise.
-	// recordSent still advances the anchor so a steer-catchup can thread.
-	sess := c.session()
-	// Single chunks in practice, but chunk anyway; the first failed chunk
-	// fails the whole post, so the router redelivers it complete.
-	ctx := context.Background()
-	var firstErr error
-	for _, part := range chunk(text) {
-		if err := c.postChunk(ctx, sess, "", part, opts...); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
-}
-
-// WakeOwner delivers the mail into the owning session, in whatever room it
-// belongs to — including one this process has not opened yet, which is why
-// roomForOwner consults the store: after a restart this is the default route
-// for every recovered completion.
-//
-// A Required mail also arms the room's fallback, so the turn that reads it
-// answers the user or the job's own result posts in its place.
-//
-// False means there is no room: the cron parent, or a session /new left
-// behind. StartFreshTurn then lands it in the home chat, so nothing is lost.
-func (b *Bot) WakeOwner(m shell3.Mail) bool {
-	c := b.roomForOwner(m.OwnerID)
-	if c == nil {
-		return false
-	}
-	sess, err := c.mainSession()
-	if err != nil || sess == nil {
-		return false
-	}
-	if sess.ID() != m.OwnerID {
-		// A /new since this job started: the completion is an orphan.
-		return false
-	}
-	// Arm before queueing: the wake can be answered on another goroutine the
-	// moment NotifyText returns, and a bind armed after that turn settled
-	// would sit unanswered until the next one.
-	if m.Required {
-		c.requireReport(m.Post)
-	}
-	sess.NotifyText(m.Note) // queue + Wake; consumeWakes runs the quiet turn
-	return true
-}
-
-// StartFreshTurn queues the mail into the home chat, creating it on first use
-// — the catch-all for completions with no live owning room.
-func (b *Bot) StartFreshTurn(m shell3.Mail) {
-	c := b.homeConv()
-	sess, err := c.mainSession()
-	if err != nil {
-		// Degrade to a raw post rather than dropping the completion. That
-		// post IS the delivery, so a Required mail needs no second one — and
-		// it posts the FALLBACK, since m.Note is written for the agent and
-		// carries instructions ("NO_REPLY is not available here") that mean
-		// nothing to a reader.
-		text := m.Note
-		if m.Required && m.Fallback != "" {
-			text = m.Fallback
-		}
-		go c.sendReply(context.Background(), "🔔 "+text)
-		return
-	}
-	if m.Required {
-		c.requireReport(m.Post)
-	}
-	sess.NotifyText(m.Note)
-}
-
-// Inbox is every room's pending user mail and undrained agent mail:
+// Inbox is every room's pending user mail and undrained session input:
 // zero-token, deterministic, and included in /status.
 func (b *Bot) Inbox() string { return b.renderInbox() }
 
 func (b *Bot) renderInbox() string {
 	type roomInbox struct {
-		chatID    int64
-		mail      []inMail
-		agentMail bool
-		active    bool
+		chatID      int64
+		mail        []inMail
+		queuedInput bool
+		active      bool
 	}
 	var rooms []roomInbox
 	anyQueued, anyActive := false, false
 	for _, c := range b.allConvs() {
 		c.mu.Lock()
 		r := roomInbox{
-			chatID:    c.chatID,
-			mail:      append([]inMail{}, c.mailQueue...),
-			agentMail: c.main != nil && c.main.HasQueuedInput(),
-			active:    c.turnActive,
+			chatID:      c.chatID,
+			mail:        append([]inMail{}, c.mailQueue...),
+			queuedInput: c.main != nil && c.main.HasQueuedInput(),
+			active:      c.turnActive,
 		}
 		c.mu.Unlock()
-		anyQueued = anyQueued || len(r.mail) > 0 || r.agentMail
+		anyQueued = anyQueued || len(r.mail) > 0 || r.queuedInput
 		anyActive = anyActive || r.active
 		rooms = append(rooms, r)
 	}
@@ -613,7 +501,7 @@ func (b *Bot) renderInbox() string {
 	var sb strings.Builder
 	sb.WriteString("📥 inbox\n")
 	for _, r := range rooms {
-		if len(r.mail) == 0 && !r.agentMail {
+		if len(r.mail) == 0 && !r.queuedInput {
 			continue
 		}
 		fmt.Fprintf(&sb, "· chat %d\n", r.chatID)
@@ -624,8 +512,8 @@ func (b *Bot) renderInbox() string {
 			}
 			fmt.Fprintf(&sb, "  · from you: %s\n", strutil.Truncate(text, 80))
 		}
-		if r.agentMail {
-			sb.WriteString("  · agent mail waiting for its turn\n")
+		if r.queuedInput {
+			sb.WriteString("  · queued session input waiting for its turn\n")
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")

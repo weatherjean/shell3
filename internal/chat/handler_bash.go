@@ -19,7 +19,7 @@ const defaultBashTimeoutSeconds = 10
 // maxBashTimeoutSeconds caps the upper bound the model can request. Kept
 // deliberately low: a foreground bash call blocks the whole turn — the agent
 // cannot answer the user until it returns — so anything slower belongs in
-// bash_bg (which wakes the agent with the result on completion). The old
+// bash_bg (which saves its result to the durable inbox). The old
 // 600s cap let a single call wedge the bot for 10 minutes.
 const maxBashTimeoutSeconds = 120
 
@@ -81,7 +81,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 		switch {
 		case errors.Is(tctx.Err(), context.DeadlineExceeded):
 			exit = 124
-			fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds; for anything slower use bash_bg — it wakes you with the result when it finishes)\n", timeout, maxBashTimeoutSeconds)
+			fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds; for anything slower use bash_bg — it saves the result to the inbox)\n", timeout, maxBashTimeoutSeconds)
 		default:
 			if ee, ok := err.(*exec.ExitError); ok {
 				exit = ee.ExitCode()

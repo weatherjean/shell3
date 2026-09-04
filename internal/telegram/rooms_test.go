@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/runs"
-	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 func TestConvIsPerChat(t *testing.T) {
@@ -159,39 +158,6 @@ func TestInboxNamesRooms(t *testing.T) {
 	out := b.Inbox()
 	if !strings.Contains(out, "-100") || !strings.Contains(out, "waiting here") {
 		t.Fatalf("inbox = %q, want the room and its queued message", out)
-	}
-}
-
-func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
-	st, err := runs.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
-	rt := mustRuntime(t)
-
-	seed, err := rt.Session(shell3.SessionOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetCurrentSession(roomSurface("telegram", -200), seed.ID()); err != nil {
-		t.Fatal(err)
-	}
-
-	b := NewBot(newFakeClient(), rt, 42, idx)
-	if !b.WakeOwner(shell3.Mail{OwnerID: seed.ID(), Note: "your job finished"}) {
-		t.Fatal("a completion for an enrolled room must wake that room, not fall through to the home chat")
-	}
-	if c := b.peekConv(-200); c == nil || c.session() == nil {
-		t.Fatal("waking the owner must resume its room's conversation")
-	}
-}
-
-func TestWakeOwnerRejectsAStaleOwner(t *testing.T) {
-	b := newBot(t, newFakeClient(), mustRuntime(t))
-	if b.WakeOwner(shell3.Mail{OwnerID: "a-session-nobody-owns", Note: "note"}) {
-		t.Fatal("an owner naming no room must fall through to StartFreshTurn")
 	}
 }
 

@@ -110,8 +110,6 @@ func newTelegramCommand() *cobra.Command {
 					bot.DecorateOrchestratorSession(sess)
 				}
 			})
-			rt.SetCompletionHost(bot)
-
 			mailbox := inbox.Store{Root: paths.NewLocal(workDir).Root}
 			listener, err := inbox.StartListener(ctx, mailbox)
 			if err != nil {
@@ -136,12 +134,21 @@ func newTelegramCommand() *cobra.Command {
 			}
 
 			go notifyTelegramInbox(ctx, bot, mailbox, mainHints, 30*time.Second, rt.Logger())
-			_ = rt.RecoverCompletions()
-			go redeliverTelegramCompletions(ctx, rt)
+			_ = rt.RecoverBackgroundJobs()
 			if !console {
 				if err := apiClient.SetCommands(ctx, bot.BotCommands()); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not set Telegram commands: %v\n", err)
 				}
+				if err := bot.NotifyLifecycle(ctx, telegram.StartupNotice); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not send Telegram startup notice: %v\n", err)
+				}
+				defer func() {
+					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer shutdownCancel()
+					if err := bot.NotifyLifecycle(shutdownCtx, telegram.ShutdownNotice); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not send Telegram shutdown notice: %v\n", err)
+					}
+				}()
 				fmt.Fprintf(cmd.OutOrStdout(), "shell3 telegram: remote control attached (home chat %d)\n", cfg.Telegram.HomeChat)
 			}
 			botDone := make(chan struct{})
@@ -173,19 +180,6 @@ func validateTelegramReload(configPath string, current, fresh *lispconfig.Config
 		return fmt.Errorf("schedule declarations changed; restart the persistent adapter")
 	}
 	return nil
-}
-
-func redeliverTelegramCompletions(ctx context.Context, rt *shell3.Runtime) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			rt.RedeliverUndelivered()
-		}
-	}
 }
 
 func splitInboxHints(ctx context.Context, hints <-chan string, router chan<- string, main chan<- struct{}) {
@@ -237,7 +231,8 @@ func notifyTelegramInbox(ctx context.Context, bot *telegram.Bot, store inbox.Sto
 		if signature == last {
 			return true
 		}
-		if err := bot.NotifyInbox(ctx, count); err != nil {
+		msg := latest[0].Message
+		if err := bot.NotifyInbox(ctx, count, msg.Event, msg.Body); err != nil {
 			log.Warn("telegram inbox notification failed", "pending", count, "error", err)
 			return false
 		}

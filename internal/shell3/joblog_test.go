@@ -4,8 +4,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/weatherjean/shell3/internal/notify"
 )
 
 func TestCommandJobWritesLogFile(t *testing.T) {
@@ -14,7 +12,7 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startCommand(parent, "echo logged", t.TempDir(), []string{"echo", "logged"}, nil, notify.ReportAuto, "")
+	id, err := rt.jobs.startCommand(parent, "echo logged", t.TempDir(), []string{"echo", "logged"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +39,7 @@ func TestCommandJobLogCapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, err := rt.jobs.startCommand(parent, "yes", t.TempDir(),
-		[]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' 'x'"}, nil, notify.ReportAuto, "")
+		[]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' 'x'"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +58,7 @@ func TestCommandJobLogCapped(t *testing.T) {
 
 func TestCommandJobNoParentNoLog(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

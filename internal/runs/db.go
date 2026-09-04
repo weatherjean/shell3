@@ -1,7 +1,7 @@
 // Package runs is the session store: one SQLite database per project at
 // .shell3_project/shell3.db, holding sessions, messages, reminders, the
-// front-end thread indexes and a full-text index. Job logs stay plain files
-// beside it, so completion mail can point at them by path.
+// front-end thread indexes, running command markers, and a full-text index.
+// Job logs stay plain files beside it, and inbox notices may point to them.
 package runs
 
 import (
@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver; keeps cross-compiled release builds cgo-free
@@ -48,12 +47,13 @@ func (s *Store) Close() error {
 }
 
 // schemaVersion changes with every table-shape change. Mismatched databases
-// are archived and recreated rather than migrated or read with an older shape.
-const schemaVersion = 12
+// are discarded and recreated rather than migrated or read with another shape.
+const schemaVersion = 13
 
-// openDB opens path, applying the schema fresh or recreating the file when
-// its stamp does not match schemaVersion. A mismatched database is never
-// patched in place; its database/WAL/SHM bundle is archived together.
+// openDB opens path, applying the one current schema. A mismatched database is
+// deleted and recreated; shell3 has no schema migrations or compatibility
+// readers. Corrupt and unreadable databases still return an error because a
+// failure to inspect a file is not proof that it is merely stale.
 func openDB(path string) (*sql.DB, error) {
 	db, err := openRaw(path)
 	if err != nil {
@@ -82,16 +82,6 @@ func openDB(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// user_version is a bare unchecksummed field, so a corrupted byte reads
-	// back as an implausible version over intact tables. A version this
-	// binary could not have written is an error, never grounds to delete.
-	if version < 0 || version > schemaVersion {
-		_ = db.Close()
-		return nil, fmt.Errorf(
-			"runs: %s has an unrecognised schema stamp (user_version=%d, this binary understands 0..%d) — "+
-				"not recreating a database that might just be corrupt or from a newer binary; "+
-				"move or delete it yourself if you want a fresh store", path, version, schemaVersion)
-	}
 	if version == schemaVersion {
 		// Idempotent: harmless to re-run against an already-current database.
 		if _, err := db.Exec(schema); err != nil {
@@ -101,93 +91,39 @@ func openDB(path string) (*sql.DB, error) {
 		return db, nil
 	}
 
-	// Old but plausible: recreate rather than limp along on a shape this
-	// binary does not fully write. Move the old files aside rather than
-	// unlinking — a rename is atomic, so a failure partway through building
-	// the new schema never leaves the operator with no store at all.
-	//
-	oldSuffix := fmt.Sprintf(".old-v%d-%d", version, time.Now().UnixNano())
-	fmt.Fprintf(os.Stderr,
-		"runs store: schema v%d != v%d — archiving and resetting %s\n",
+	fmt.Fprintf(os.Stderr, "runs store: schema v%d != v%d — discarding and resetting %s\n",
 		version, schemaVersion, path)
 	if err := db.Close(); err != nil {
 		return nil, err
 	}
-	// -wal/-shm first: a suffix rename failing partway leaves the main
-	// database file, and its data, exactly where it was.
-	asided, err := moveOldFilesAside(path, oldSuffix)
-	if err != nil {
-		return nil, recreateErr(asided, err)
+	if err := removeDatabaseFiles(path); err != nil {
+		return nil, err
 	}
 
 	db, err = openRaw(path)
 	if err != nil {
-		return nil, recreateErr(asided, err)
+		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
-		return nil, recreateErr(asided, err)
+		return nil, err
 	}
 	if err := setUserVersion(db, schemaVersion); err != nil {
 		_ = db.Close()
-		return nil, recreateErr(asided, err)
+		return nil, err
 	}
-	// An old store is user history, not a temporary rollback file. Keep the
-	// complete bundle after a successful rebuild and name every path so the
-	// operator can archive, inspect with the matching old binary, or delete it.
-	fmt.Fprintf(os.Stderr, "runs store: previous schema preserved at: %s\n", strings.Join(asided, ", "))
 	return db, nil
 }
 
-// moveOldFilesAside renames path and its -wal/-shm siblings (whichever
-// exist) to path+suffix/path-wal+suffix/path-shm+suffix, in that order —
-// -wal/-shm first so a failure partway through never removes the main
-// database file while a sibling still carries the old name. It touches
-// nothing else in the directory: a sibling file that doesn't share path's
-// base name (or the -wal/-shm suffix) is never even stat'd. Returns the
-// list of files successfully moved aside, even when it later returns an
-// error, so a caller can report (or clean up) exactly what survived.
-func moveOldFilesAside(path, suffix string) ([]string, error) {
-	var asided []string
-	for _, s := range []string{"-wal", "-shm", ""} {
-		src := path + s
-		if _, statErr := os.Stat(src); statErr != nil {
-			if os.IsNotExist(statErr) {
-				continue
-			}
-			return asided, fmt.Errorf("runs: recreate db: stat %s: %w", src, statErr)
+// removeDatabaseFiles removes only the configured SQLite file and its two
+// conventional sidecars. It never scans the directory or touches siblings.
+func removeDatabaseFiles(path string) error {
+	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("runs: reset db: remove %s: %w", candidate, err)
 		}
-		dst := src + suffix
-		if err := os.Rename(src, dst); err != nil {
-			return asided, fmt.Errorf("runs: recreate db: move %s aside: %w", src, err)
-		}
-		asided = append(asided, dst)
 	}
-	return asided, nil
-}
-
-// recreateErr wraps a failure that happened while rebuilding the store. When
-// asided is non-empty, the old files are still sitting on disk under their
-// aside names and the operator can recover by hand — so the error names
-// every one of them and spells out the pairing hazard: the main db and its
-// -wal/-shm siblings all carry the same ".old-..." trailing suffix
-// (shell3.db.old-v1-123, shell3.db-wal.old-v1-123, shell3.db-shm.old-v1-123),
-// which is not a name SQLite will pair on its own — renaming only the main
-// file back leaves a stale/mismatched -wal or -shm sitting next to it, so
-// recovery means renaming every aside file back (dropping its trailing
-// ".old-..." suffix) together, not just one of them.
-func recreateErr(asided []string, cause error) error {
-	if len(asided) == 0 {
-		return fmt.Errorf("runs: recreate db: %w", cause)
-	}
-	return fmt.Errorf(
-		"runs: recreate db: %w — old data was moved aside to: %s "+
-			"(to recover by hand, rename every one of those files back to its "+
-			"original name — drop the trailing \".old-...\" suffix — together; "+
-			"renaming only the main db file back leaves a stale/mismatched -wal "+
-			"or -shm next to it, since SQLite pairs them by exact name, not by "+
-			"a shared suffix)",
-		cause, strings.Join(asided, ", "))
+	return nil
 }
 
 // openRaw opens the database file with the store's connection pragmas, doing
@@ -283,10 +219,14 @@ CREATE TABLE IF NOT EXISTS turn_prompts (
 	ts         TEXT    NOT NULL,
 	PRIMARY KEY (session_id, seq)
 );
-CREATE TABLE IF NOT EXISTS outbox (
+CREATE TABLE IF NOT EXISTS background_jobs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	kind TEXT NOT NULL,
-	json TEXT NOT NULL
+	pid INTEGER NOT NULL,
+	job_id TEXT NOT NULL,
+	title TEXT NOT NULL,
+	owner_id TEXT NOT NULL DEFAULT '',
+	log_path TEXT NOT NULL DEFAULT '',
+	started_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS schedule_runs (
 	id            TEXT PRIMARY KEY,

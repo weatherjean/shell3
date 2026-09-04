@@ -68,9 +68,13 @@ Unlike the local console, a Telegram adapter must remain running to receive new
 remote messages. A restarted adapter resumes its persisted per-room
 conversations. A persisted Telegram adapter also owns declared schedules. A
 schedule edit requires restarting it; `/reload` rejects that partial change.
-When a `main` notice arrives, Telegram posts only its pending count to the
-home chat. This is a host message, not a quiet model turn. A local console may
-run against the same state while Telegram is active.
+The real adapter posts `๑ï shell3 started` to the home chat after startup and
+`๑ï shell3 shutting down` on a graceful exit; neither message starts a model
+turn, and `--console` emits neither one.
+When a `main` notice arrives, Telegram posts a `✉️` pending count and a
+bounded preview of the latest notice to the home chat. This is a host message,
+not a quiet model turn. A local console may run against the same state while
+Telegram is active.
 
 ## `shell3 service` and `shell3 schedule`
 
@@ -144,8 +148,8 @@ shell3 notify --to wrk:TASK/RUN --state .shell3_project 'resume input'
 `notify` first persists a typed inbox message, then attempts to alert the
 persistent host. A successful command means the message was durably accepted;
 its JSON receipt separately reports whether the advisory datagram arrived.
-For `main`, that datagram can produce a Telegram pending-count message but
-never starts a model turn.
+For `main`, that datagram can produce a Telegram pending count plus latest
+preview but never starts a model turn.
 
 Options:
 

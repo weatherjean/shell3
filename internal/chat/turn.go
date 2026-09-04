@@ -250,8 +250,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// message in allMsgs only; sess.messages stays clean. Counting bytes
 		// across all of allMsgs reflects pruning with no delta tracking.
 		injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.ModelID, cfg.ContextWindow, estimatePromptTokens(allMsgs)), true)
-		// Mid-turn: steering is interactive and delivered now; notices wait for
-		// a turn boundary so a finished task never interrupts this turn.
+		// Mid-turn: steering is interactive and delivered now; host notices wait
+		// for a turn boundary.
 		steerTexts, _ := sess.drainInbox(true)
 		injectAndEmit(sess, &allMsgs, reminderBlock(steerReminderHeader, steerTexts), true)
 	}
@@ -275,8 +275,8 @@ func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast
 
 // assembleTurnContext builds one turn's provider-bound context: system prompt
 // + history + standing reminders, the tool list and schema index, then the
-// turn-start inbox drain. A fresh turn is a clean boundary, so BOTH steering
-// and notices are delivered, each in its own labeled block.
+// turn-start inbox drain. A fresh turn is a clean boundary, so both steering
+// and host notices are delivered in separately labeled blocks.
 //
 // skip=true means the turn delivers nothing: empty initiating message, a
 // drained inbox of only whitespace, no history. allMsgs would be just
@@ -311,16 +311,16 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	}
 
 	steerTexts, noticeTexts := sess.drainInbox(false)
-	// A delivered report leaves its one-line trace BEFORE any reminder
+	// A delivered host notice leaves its one-line trace before any reminder
 	// injects, so reminders land on it and the reply keeps a visible cause.
-	if trace := reportTrace(noticeTexts); trace != "" {
+	if trace := hostNoticeTrace(noticeTexts); trace != "" {
 		msg := llm.Message{Role: llm.RoleUser, Content: trace}
 		allMsgs = append(allMsgs, msg)
 		sess.append(msg)
 	}
 	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.ModelID, cfg.ContextWindow, sess.lastPromptTokens), false)
 	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
-	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
+	noticeReminder := reminderBlock(hostNoticeReminderHeader, noticeTexts)
 	injectAndEmit(sess, &allMsgs, steerReminder, false)
 	injectAndEmit(sess, &allMsgs, noticeReminder, false)
 

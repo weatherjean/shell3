@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/weatherjean/shell3/internal/notify"
 )
 
 func TestBashBgHandler_Execute_happyPath(t *testing.T) {
@@ -14,7 +12,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: wd,
-		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -60,7 +58,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	var gotWorkdir string
 	cfg := ToolConfig{
 		WorkDir: primary,
-		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotWorkdir = workdir
 			return "bg_2", nil
 		},
@@ -78,35 +76,11 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	}
 }
 
-func TestBashBgHandler_Execute_directAndNote(t *testing.T) {
-	var gotReport notify.ReportMode
-	var gotNote string
-	cfg := ToolConfig{
-		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
-			gotReport, gotNote = report, note
-			return "bg_3", nil
-		},
-	}
-	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","report":"raw","note":"user waiting"}`), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if gotReport != notify.ReportRaw || gotNote != "user waiting" {
-		t.Fatalf("report/note did not reach the start callback: %v %q", gotReport, gotNote)
-	}
-	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true"}`), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if gotReport != notify.ReportAuto {
-		t.Fatal("report should default to auto when omitted")
-	}
-}
-
 func TestBashBgUsesStartCallback(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotCmd = command
 			return "bg1", nil
 		},
@@ -123,24 +97,22 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	}
 }
 
-func TestBashBgRefusesRemovedDirectArg(t *testing.T) {
+func TestBashBgRejectsUnknownFields(t *testing.T) {
 	started := false
 	cfg := ToolConfig{
-		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			started = true
 			return "bg1", nil
 		},
 	}
 	for _, args := range []string{
 		`{"command":"true","direct":true}`,
-		`{"command":"true","direct":false}`,
+		`{"command":"true","report":"raw"}`,
+		`{"command":"true","note":"user waiting"}`,
 	} {
-		out, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(args), cfg)
-		if err != nil {
-			t.Fatalf("%s: %v", args, err)
-		}
-		if !strings.Contains(out, "report") || !strings.Contains(out, "NOT started") {
-			t.Fatalf("%s: refusal must name the replacement: %q", args, out)
+		_, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(args), cfg)
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("%s: want unknown-field error, got %v", args, err)
 		}
 		if started {
 			t.Fatalf("%s: the job must not run on a stale arg", args)

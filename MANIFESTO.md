@@ -204,7 +204,7 @@ The target kernel owns:
 - reliable exact file editing;
 - strict S-expression parsing, configuration resolution, and wrk validation;
 - external runner invocation and normalized results;
-- durable workflow state, inboxes, outboxes, logs, and restart reconciliation;
+- durable workflow state, inbox notices, running markers, logs, and restart reconciliation;
 - exclusive calendar ownership and a durable scheduled-run ledger;
 - local and remote control-surface attachment to the same turn contract;
 - one safe Telegram file-delivery tool;

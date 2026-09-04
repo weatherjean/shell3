@@ -17,13 +17,14 @@ is reclaimed when work finishes. Tool calls show their command or file path, and
 retain a bounded head and tail with an omission marker. Each bash result is
 collapsed to one whitespace-normalized line of at most roughly 240 runes. The
 local console accepts input only at its prompt; Escape cancels its active turn.
-Telegram alone supports mid-turn steering. An idle in-process background
-command completion starts its owning session's queued follow-up turn and prints
-into the transcript. The unadvertised
+Telegram alone supports mid-turn steering. An in-process background command
+completion writes one durable `main` filesystem-inbox notice; it never starts
+a model turn or posts a second completion message. The unadvertised
 `/test_output` diagnostic is answered by the host without a model turn and
 prints a representative sample of the rendering pipeline for terminal checks.
-Durable `main` inbox notices are different: they never start a turn or enter a
-prompt. The front end shows only a human-facing pending count, and the user asks
+Durable `main` inbox notices never start a turn or enter a prompt. Telegram
+shows a host-owned `✉️` pending count and a bounded preview of the latest
+notice; the local console shows the count. The user asks
 the agent to load the `shell3-inbox` skill and use
 `shell3 inbox list|read|archive` when ready.
 
@@ -46,8 +47,8 @@ Telegram is optional and remains only a remote control surface:
   (group-messages addressed))
 ```
 
-The token value belongs in the process environment. `home-chat` is where orphaned
-completion posts and human-only inbox counts land. `allow-from` contains positive Telegram user
+The token value belongs in the process environment. `home-chat` is where
+host-owned inbox alerts land. `allow-from` contains positive Telegram user
 IDs, not chat IDs; it is required when the home chat is a group. Set
 `group-messages` to `all` only when every allowlisted message in a group should
 trigger shell3 rather than requiring an address or reply.

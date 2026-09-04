@@ -4,8 +4,8 @@
 
 shell3 persists state, not a mandatory daemon. By default the kit is
 `~/.shell3/shell3.lisp` and the workdir is `~/.shell3/workdir`.
-Conversation records, inbox and
-outbox messages, wrk runs, and job logs live under the selected workdir's
+Conversation records, filesystem-inbox notices, running command markers, wrk
+runs, and job logs live under the selected workdir's
 `.shell3_project/` and survive process exit. Process-owned work does not:
 `bash_bg` and live model turns require their owning shell3 process, and graceful
 shutdown cancels their process groups while leaving honest recovery records.
@@ -44,7 +44,8 @@ shell startup files and does not load a kit-adjacent `.env`.
 
 The `main` inbox is passive. No arrival starts an agent turn and neither notice
 metadata nor bodies are injected into an unrelated prompt. Telegram posts a
-human-only pending-count message when its persistent host receives a wake hint.
+host-owned `✉️` pending-count message with a bounded preview of the latest
+notice when its persistent host receives a wake hint.
 The local console prints the pending count at startup and before every ordinary
 user turn. The user then explicitly asks the agent to check the inbox; the
 embedded `shell3-inbox` skill supplies the bounded read-and-archive procedure.
@@ -119,10 +120,11 @@ The recovery boundary is admission: a schedule run that reached the SQLite
 occurrences that happened entirely while the owner was offline are skipped;
 there is no catch-up burst in version 1.
 
-Give each experimental deployment its own kit, work directory,
-Telegram bot token, and process. Persist `.shell3_project/` if conversation,
-inbox, workflow, and completion recovery must survive restarts. Back up the kit
-and state together, while keeping credential values in the host's secret
+Give each experimental deployment its own kit, work directory, Telegram bot
+token, and process. Persist `.shell3_project/` if filesystem inbox and workflow
+state must survive restarts. The SQLite conversation/index database uses only
+the current base schema and is discarded on a version mismatch; no automatic
+compatibility backup is created. Keep credential values in the host's secret
 facility.
 
 ## Harness debugging and acceptance

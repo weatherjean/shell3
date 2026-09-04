@@ -255,12 +255,6 @@ func (f *fakeClient) sentReplies() []sentReply {
 	return out
 }
 
-func (f *fakeClient) lastSentID() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return strconv.Itoa(f.next)
-}
-
 func (f *fakeClient) htmlTexts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

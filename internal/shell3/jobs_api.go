@@ -63,10 +63,9 @@ type KilledJob struct {
 	Runtime time.Duration
 }
 
-// KillAllForStop kills every live background command with completion routing
-// suppressed: no failure posts or owner mail. The returned list supplies
-// the one superstop summary that replaces
-// them. The front-ends' /superstop primitive.
+// KillAllForStop kills every live background command with completion notices
+// suppressed. The returned list supplies the one superstop summary that
+// replaces them. The front-ends' /superstop primitive.
 func (s *Session) KillAllForStop() []KilledJob {
 	rt := s.runtimeHandle()
 	if rt == nil || rt.jobs == nil {

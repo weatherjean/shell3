@@ -61,7 +61,9 @@ func TestTelegramInboxNotifierPostsCountWithoutClaiming(t *testing.T) {
 	if pending.Status != inbox.StatusNew || pending.Message.Body != "workflow complete" {
 		t.Fatalf("pending notice = %+v", pending)
 	}
-	if !strings.Contains(out.String(), "Inbox: 1 pending notice") || strings.Contains(out.String(), "must not run") {
+	if !strings.Contains(out.String(), "✉️ Inbox: 1 pending notice") ||
+		!strings.Contains(out.String(), "Latest: done — workflow complete") ||
+		strings.Contains(out.String(), "must not run") {
 		t.Fatalf("Telegram output = %q", out.String())
 	}
 	if strings.Count(out.String(), "Inbox: 1 pending notice") != 1 {
@@ -91,7 +93,9 @@ func TestTelegramInboxNotifierReconcilesDroppedWake(t *testing.T) {
 	}
 	cancel()
 	<-done
-	if !strings.Contains(out.String(), "Inbox: 1 pending notice") || strings.Contains(out.String(), "must not run") {
+	if !strings.Contains(out.String(), "✉️ Inbox: 1 pending notice") ||
+		!strings.Contains(out.String(), "Latest: done — durable") ||
+		strings.Contains(out.String(), "must not run") {
 		t.Fatalf("Telegram output = %q", out.String())
 	}
 }

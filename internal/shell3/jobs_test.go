@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/weatherjean/shell3/internal/notify"
 )
 
 func (m *jobManager) output(id string) string {
@@ -43,7 +41,7 @@ func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -56,29 +54,13 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	}
 }
 
-func waitForWake(t *testing.T, rt *Runtime, s *Session) {
-	t.Helper()
-	id := s.ID()
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == id {
-				return
-			}
-		case <-deadline:
-			t.Fatalf("no Wake for session %s (timeout 3s)", id)
-		}
-	}
-}
-
 func TestJobManagerConcurrencyCap(t *testing.T) {
 	m := newJobManager(nil, 1)
-	id, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil)
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, notify.ReportAuto, ""); err == nil {
+	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
 	if err := m.cancel(id, false); err != nil {
@@ -90,7 +72,7 @@ func TestJobManagerConcurrencyCap(t *testing.T) {
 func TestJobManagerRejectsNewWorkAfterShutdownStarts(t *testing.T) {
 	m := newJobManager(nil, 8)
 	m.cancelAll()
-	if _, err := m.startCommand(nil, "echo late", t.TempDir(), []string{"echo", "late"}, nil, notify.ReportAuto, ""); err == nil {
+	if _, err := m.startCommand(nil, "echo late", t.TempDir(), []string{"echo", "late"}, nil); err == nil {
 		t.Fatal("startCommand admitted work after cancelAll")
 	}
 	m.wait()
@@ -98,7 +80,7 @@ func TestJobManagerRejectsNewWorkAfterShutdownStarts(t *testing.T) {
 
 func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -124,7 +106,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 	m := newJobManager(nil, maxDoneJobs+10)
 
 	for i := 0; i < maxDoneJobs+1; i++ {
-		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, notify.ReportAuto, "")
+		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
 		if err != nil {
 			t.Fatalf("startCommand %d: %v", i, err)
 		}
@@ -145,7 +127,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 
 func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -157,7 +139,7 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 
 func TestCommandRealExitCode(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -173,7 +155,7 @@ func TestCommandRealExitCode(t *testing.T) {
 
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil, notify.ReportAuto, "")
+	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

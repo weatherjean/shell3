@@ -14,8 +14,8 @@ project store, and supplies a `chat.Config` directly to
 `shell3.NewConfiguredRuntime`. The console exposes exactly `bash`, `bash_bg`,
 and `edit_file`. Prompt, memory, and skills are embedded in the kit; skill
 descriptions enter each turn while `shell3 config skill` returns one selected
-body. The runtime and chat loop are reused because their session,
-background completion, storage, and tool-execution invariants remain the
+body. The runtime and chat loop are reused because their session, background
+process, storage, and tool-execution invariants remain the
 desired kernel.
 
 The replacement product is a harness harness. The attached main agent is its
@@ -35,8 +35,7 @@ environment and never prints its value. External runners do not receive the
 configured model or Telegram secrets through shell3's runner environment
 construction.
 Bare `shell3` is a plain line-oriented local front end rather than a
-full-screen TUI. It runs the same orchestrator and completion machinery that
-Telegram controls remotely.
+full-screen TUI. It runs the same orchestrator that Telegram controls remotely.
 Without path flags, runtime front ends resolve
 `~/.shell3/shell3.lisp` and `~/.shell3/workdir`. `--here` resolves the
 current directory and its `shell3.lisp`; it is mutually exclusive with
@@ -143,7 +142,7 @@ shell3 is a small harness around an agent turn:
 shell3.lisp -> orchestrator -> Runtime -> Session -> chat turn -> provider
                                   |          |
                                   |          +-> core tools, persistence
-                                  +-> background commands and completion routing
+                                  +-> background commands -> filesystem inbox
 *.wrk.lisp -> durable workflow scheduler -> external runner processes
 schedule -> persistent clock -> durable wrk run -> required output
 ```
@@ -153,7 +152,7 @@ persistence, and turn lifecycle. Decisions stay in the model turn. If an agent
 can build or inspect a capability itself, prefer a command, script, skill, or
 declared tool over another built-in.
 
-`shell3.Runtime` owns sessions, background commands, and completion routing.
+`shell3.Runtime` owns sessions and managed background commands.
 `chat.Session` owns one conversation's messages, inbox, reminders, and turn
 serialization.
 Resolved agent and model identities remain structured through assembly, turns,
@@ -226,8 +225,9 @@ Filesystem inbox notices are durable untrusted input, not authorization.
 `main` is deliberately passive: an arrival never starts a model turn and
 neither its metadata nor body enters a prompt automatically. The console
 renders only the pending count at startup and before each ordinary user turn.
-Telegram posts only that count to the home chat. The user explicitly asks the
-agent to load the inbox skill before any notice is inspected.
+Telegram posts a host-owned `✉️` count and a bounded preview of the latest
+notice to the home chat. The user explicitly asks the agent to load the inbox
+skill before any notice is inspected.
 
 The filesystem inbox uses `new`, `processing`, `archived`, and `reads`
 directories per encoded destination. Workflow events are atomically claimed
@@ -269,22 +269,20 @@ positive `WaitGroup.Add` happen under the job-manager lock before work is
 published; shutdown closes admission before waiting. External agent work runs
 through the durable wrk scheduler, and dispatched agents are leaf processes.
 
-`report:` is the sole reporting axis:
+Every command completion is represented only by a `main` filesystem-inbox notice,
+`bash_bg.completed` or `bash_bg.failed`. Completion never wakes a model turn and
+never posts directly through a front end. The notice contains bounded command
+and output context plus the full job-log path when available.
 
-- `auto` lets the owner decide whether a user-facing update is warranted.
-- `always` requires an update, with a raw fallback if the owner says nothing.
-- `raw` posts the result without another model turn.
-
-`NO_REPLY`, failures, owner mail, and report traces must stay consistent across
-completion paths.
-
-Every completion is persisted to the outbox before routing and deleted only
-after successful handoff. Delivery is intentionally at-least-once. Running
-markers make work lost to a process crash observable at restart. Event rows,
-markers, job logs, and transcript reads use the runtime's store. Background
-work retains the configuration generation captured when it was dispatched. A
-validated reload updates idle and future sessions without changing
-already-running work.
+A typed SQLite `background_jobs` row marks each command while its owning
+process may still be running. Normal completion persists the filesystem notice
+before deleting that marker. Restart recovery converts a dead-process marker
+to a failure notice before deleting it, so delivery is intentionally
+at-least-once. `/superstop` suppresses its manufactured notice because the host
+already answers the user; graceful shutdown leaves the marker for honest
+restart recovery. Background work retains the configuration generation
+captured when it was dispatched. A validated reload updates idle and future
+sessions without changing already-running work.
 
 Graceful shutdown, ordinary cancellation, `/stop`, and `/superstop` have
 different reporting rules. Manufactured shutdown cancellations must not become
@@ -293,15 +291,17 @@ misleading failure posts.
 ## Storage
 
 `internal/runs` owns the SQLite store for sessions, messages, usage, search,
-thread markers, the outbox, and the schedule-run index. Schema mismatch is explicit; never
-silently discard history or completions. An incompatible database bundle is
-moved aside and retained before a fresh schema is created; shell3 does not
-migrate it or read through it. The store and filesystem artifacts form one
-durability contract:
+thread markers, running command markers, and the schedule-run index. It has one
+current base schema and no migration or compatibility reader. A version
+mismatch deletes only `shell3.db`, `shell3.db-wal`, and `shell3.db-shm`, then
+creates the current schema; no backup copy is created. Corrupt or unreadable
+files still fail closed because shell3 cannot establish that they are merely
+stale. The store and filesystem artifacts form one durability contract:
 
 - session rows and messages preserve conversation history;
 - thread markers map a front-end surface to its current session;
-- outbox rows preserve running work and undelivered completions;
+- `background_jobs` rows make command loss across a process crash observable;
+- filesystem inbox notices preserve completed command and workflow delivery;
 - job logs preserve bounded background output;
 - schedule rows preserve running/done/failed status and pointers to the
   authoritative wrk run directory and required output;
@@ -358,6 +358,11 @@ Provider prompt usage drives silent Telegram context milestones at 50% and
 re-baselines the cycle; `/new` clears it. These notices are host-rendered and
 never become model input.
 
+The real Telegram adapter posts `๑ï shell3 started` to the home chat after it
+has initialized and `๑ï shell3 shutting down` during a graceful exit. These
+are host-rendered lifecycle notices and do not create or resume an agent turn.
+The console transport does not emit them.
+
 `telegram --console` uses the same bot loop over stdin/stdout with a synthetic
 local room. It needs no Telegram credentials or `allow_from` authorization and
 is the end-to-end development transport. EOF shuts it down cleanly.
@@ -388,15 +393,14 @@ internal/lispconfig/     strict shell3.lisp parser and resolver
 internal/llm/            provider interfaces and message types
 internal/mdpage/         standalone HTML reply rendering
 internal/mediadir/       durable attachment paths
-internal/notify/         completion notification types
 internal/orchestrator/   attached-model assembly and core schemas
 internal/scaffold/       complete single-file starter kit
 internal/paths/          project runtime and sensitive-path resolution
 internal/runner/         typed external runner process boundary
-internal/runs/           SQLite history, outbox, and markers
+internal/runs/           SQLite history and running markers
 internal/schedule/       Cron clock, ownership, wrk dispatch, recovery
 internal/sexpr/          inert S-expression reader
-internal/shell3/         Runtime, Session, background jobs, completion routing
+internal/shell3/         Runtime, Session, background jobs, inbox persistence
 internal/strutil/        shared text safety helpers
 internal/telegram/       bot loop, transports, rooms, host tools
 internal/wrk/            workflow parser, compiler, scheduler, state

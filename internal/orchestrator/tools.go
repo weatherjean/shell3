@@ -18,19 +18,15 @@ func coreToolDefinitions() []llm.ToolDefinition {
 		},
 		{
 			Name:        "bash_bg",
-			Description: "Start a long-running shell command in the background and return its job id immediately. Its completion is delivered automatically; do not poll or sleep in the turn.",
+			Description: "Start a long-running shell command in the background and return its job id immediately. Its completion is saved to the durable inbox; do not poll or sleep in the turn.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{"type": "string", "description": "The shell command to run"},
 					"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-					"report": map[string]any{
-						"type": "string", "enum": []string{"auto", "always", "raw"},
-						"description": "Completion delivery: auto lets you decide, always requires a user update, raw posts command output directly",
-					},
-					"note": map[string]any{"type": "string", "description": "Context carried into an automatic completion report"},
 				},
-				"required": []string{"command"},
+				"required":             []string{"command"},
+				"additionalProperties": false,
 			},
 		},
 		{

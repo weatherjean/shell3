@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -33,11 +32,8 @@ type ToolConfig struct {
 	// attribution in the persisted transcript.
 	TrustedUserContext bool
 	// StartBashBg runs a command on the job runtime, returning its id. env is
-	// extra "K=V" entries (bash_bg passes nil); report is the single axis for
-	// what the finish does to the chat (see notify.ReportMode); note is
-	// context carried into the completion mail. Nil ⇒ background jobs
-	// disabled.
-	StartBashBg func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error)
+	// extra "K=V" entries (bash_bg passes nil). Nil disables background jobs.
+	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// Log records genuine handler faults. Nil is safe via LogOrNoop.
 	Log applog.Logger
 }

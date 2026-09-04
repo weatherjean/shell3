@@ -24,25 +24,16 @@ var (
 // errAskTurnFailed is returned when any turn event carried an error.
 var errAskTurnFailed = errors.New("turn ended with error")
 
-// errJobBusClosed marks a closed Wake or job-progress bus: neither can report
-// a future change, so the caller ends the wait rather than busy-spinning.
+// errJobBusClosed marks a closed job-progress bus: it cannot report a future
+// change, so the caller ends the wait rather than busy-spinning.
 var errJobBusClosed = errors.New("job event bus closed")
 
-// FollowAskJobs keeps a one-shot process alive while jobs or queued notices
-// remain, rendering each wake turn until completion or context cancellation.
+// FollowAskJobs keeps a one-shot process alive until its background commands
+// finish. Completions go to the filesystem inbox and never cause another model
+// turn in the CLI.
 func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *shell3.Session) error {
 	announced := 0 // running count last printed, so the waiting note isn't repeated per progress event
 	for {
-		// Queued notices first: a wake may never fire for a quiet job, and a
-		// one-shot run has no later turn to defer to.
-		if sess.HasQueuedInput() {
-			fmt.Fprintln(w, askLabel.Render("· background task finished, narrating:"))
-			if err := renderAskEvents(w, sess.RunQueued(ctx)); err != nil {
-				return err
-			}
-			announced = 0
-			continue
-		}
 		running := 0
 		for _, j := range sess.Jobs() {
 			if !j.Done {
@@ -69,17 +60,15 @@ func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *s
 	}
 }
 
-// waitForJobChange blocks until something worth re-evaluating happens: a Wake
-// for this session (a completion queued a notice), a background job reporting
-// Done (covers quiet jobs that complete without a wake), or ctx cancellation
-// (SIGINT → returns ctx.Err()). A closed bus returns errJobBusClosed — it is
+// waitForJobChange blocks until a background job reports Done or the context
+// is cancelled. A closed bus returns errJobBusClosed — it is
 // terminal (no future event can ever arrive on a closed channel), so the
 // caller must stop re-entering this function rather than treat it like an
 // ordinary wake, or it busy-spins re-selecting on the same closed channel.
 // Intermediate job output chunks are ignored so the caller doesn't re-print
 // its waiting note per chunk.
-func waitForJobChange(ctx context.Context, rt *shell3.Runtime, sess *shell3.Session) error {
-	return waitForChange(ctx, sess.ID(), rt.Events(), sess.JobEvents())
+func waitForJobChange(ctx context.Context, rt *shell3.Runtime, _ *shell3.Session) error {
+	return waitForChange(ctx, rt.JobEvents())
 }
 
 // waitForJobChangeFn is a package-level indirection over waitForJobChange so
@@ -92,18 +81,11 @@ var waitForJobChangeFn = waitForJobChange
 // waitForChange is waitForJobChange's channel-level body, split out so tests
 // can drive it with plain (possibly closed) channels without needing a real
 // Runtime/Session pair wired up to produce one.
-func waitForChange(ctx context.Context, sessID string, hostEvents <-chan shell3.HostEvent, jobEvents <-chan shell3.JobProgress) error {
+func waitForChange(ctx context.Context, jobEvents <-chan shell3.JobProgress) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case ev, ok := <-hostEvents:
-			if !ok {
-				return errJobBusClosed
-			}
-			if ev.Session == sessID && ev.Kind == shell3.Wake {
-				return nil
-			}
 		case p, ok := <-jobEvents:
 			if !ok {
 				return errJobBusClosed

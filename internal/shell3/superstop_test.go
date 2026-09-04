@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/notify"
+	"github.com/weatherjean/shell3/internal/inbox"
 )
 
 func TestNotifyTextNoWake(t *testing.T) {
@@ -27,13 +27,11 @@ func TestNotifyTextNoWake(t *testing.T) {
 
 func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	host := &fakeHost{wakeOK: true}
-	rt.SetCompletionHost(host)
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
+	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -45,28 +43,25 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 		t.Errorf("killed title = %q, want the command text", killed[0].Title)
 	}
 	rt.jobs.wait()
-	time.Sleep(50 * time.Millisecond)
-	posts, wakes, fresh := host.snapshot()
-	if len(posts)+len(wakes)+len(fresh) != 0 {
-		t.Fatalf("suppressed kill still routed: posts=%v wakes=%v fresh=%v", posts, wakes, fresh)
+	notices, total, err := rt.mainInbox().List("main", inbox.StatusPending, 0, 10)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if parent.HasQueuedInput() {
-		t.Fatal("suppressed completion still queued a notice on the owner")
+	if total != 0 || len(notices) != 0 {
+		t.Fatalf("suppressed kill persisted notices: total=%d notices=%+v", total, notices)
 	}
 	if again := parent.KillAllForStop(); len(again) != 0 {
 		t.Fatalf("second KillAllForStop = %+v, want empty", again)
 	}
 }
 
-func TestNormalKillStillRoutes(t *testing.T) {
+func TestNormalKillPersistsFailureNotice(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	host := &fakeHost{wakeOK: true}
-	rt.SetCompletionHost(host)
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
+	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -74,25 +69,11 @@ func TestNormalKillStillRoutes(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 	rt.jobs.wait()
-	waitFor(t, "completion routed", func() bool {
-		posts, wakes, fresh := host.snapshot()
-		return len(posts)+len(wakes)+len(fresh) > 0
-	})
-}
-
-func TestDispatchCompletionDropsSuppressed(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("x"))
-	host := &fakeHost{wakeOK: true}
-	rt.SetCompletionHost(host)
-	rt.jobs.mu.Lock()
-	rt.jobs.jobs["bg9"] = &bgJob{id: "bg9", kind: JobCommand, suppress: true}
-	rt.jobs.mu.Unlock()
-	ev := failedEvent()
-	ev.JobID = "bg9"
-	rt.jobs.dispatchCompletion(ev)
-	time.Sleep(50 * time.Millisecond)
-	posts, wakes, fresh := host.snapshot()
-	if len(posts)+len(wakes)+len(fresh) != 0 {
-		t.Fatalf("suppressed event routed: posts=%v wakes=%v fresh=%v", posts, wakes, fresh)
+	notices, total, err := rt.mainInbox().List("main", inbox.StatusPending, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(notices) != 1 || notices[0].Message.Event != "bash_bg.failed" {
+		t.Fatalf("failure notices: total=%d notices=%+v", total, notices)
 	}
 }

@@ -132,24 +132,24 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 	}
 }
 
-func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
+func TestInterjectHostNoticeDeliveredWithNoticeHeader(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, c := newCollectorSession(SessionOpts{})
-	sess.InterjectNotice("subagent x finished (done). Result: built the thing")
+	sess.InterjectHostNotice("[superstop] background commands stopped")
 
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	var rem string
 	for _, ev := range c.all() {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "subagent x finished") {
+		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "superstop") {
 			rem = ev.Text
 		}
 	}
 	if rem == "" {
 		t.Fatalf("notice should surface as a system-reminder at turn start; events=%+v", c.all())
 	}
-	if !strings.Contains(rem, "a background task you started reported back") {
+	if !strings.Contains(rem, "shell3 host notice") {
 		t.Fatalf("notice must use the host-notification header: %q", rem)
 	}
 	if strings.Contains(rem, "user sent additional input") {
@@ -157,7 +157,7 @@ func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
 	}
 }
 
-func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
+func TestInterjectHostNoticeNotDeliveredMidTurn(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
 			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
@@ -170,7 +170,7 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 		Profile: AgentProfile{SystemPrompt: "t"},
 		Handlers: map[string]ToolHandler{"echo": funcHandler{name: "echo",
 			fn: func(context.Context, string, json.RawMessage, ToolConfig) (string, error) {
-				sess.InterjectNotice("subagent bg1 finished (done).")
+				sess.InterjectHostNotice("[superstop] background commands stopped")
 				return "echoed", nil
 			}}},
 		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
@@ -178,7 +178,7 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
 	for _, ev := range c.all() {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "subagent bg1 finished") {
+		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "superstop") {
 			t.Fatalf("a notice must not be injected mid-turn; got reminder: %q", ev.Text)
 		}
 	}

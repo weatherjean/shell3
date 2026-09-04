@@ -3,8 +3,6 @@ package shell3
 import (
 	"testing"
 	"time"
-
-	"github.com/weatherjean/shell3/internal/notify"
 )
 
 func TestJobSink(t *testing.T) {
@@ -64,7 +62,7 @@ func TestJobProgressIntegration(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 
-	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil, notify.ReportAuto, "")
+	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

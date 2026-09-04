@@ -96,14 +96,6 @@ type Runtime struct {
 	nextName int
 	closed   bool
 
-	// completionH is the front-end completion surface; nil = the library
-	// fallback, a raw notice to the owning session.
-	completionH CompletionHost
-
-	// cronOutcome is where a finished cron run's real result goes (the
-	// scheduler); nil = nobody is keeping cron history. See CronOutcome.
-	cronOutcome func(CronOutcome)
-
 	// decorate runs for every session this runtime creates and every session
 	// already live when it is installed. Front-ends register their tools here
 	// rather than on their own main session alone. Always invoked OUTSIDE rt.mu:

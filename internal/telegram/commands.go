@@ -82,8 +82,8 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 }
 
 // handleSuperstop is the everything-off switch: cancel the turn, then kill
-// every background job with completion routing suppressed. One summary
-// replaces the per-job posts — a ⚠️ reply, plus the same text queued unwoken
+// every background job with completion notices suppressed. One summary
+// replaces the per-job notices — a ⚠️ reply, plus the same text queued unwoken
 // so the next turn knows without spending one now.
 func (c *conversation) handleSuperstop(ctx context.Context) {
 	c.mu.Lock()
@@ -131,8 +131,8 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 		return
 	}
 	c.mu.Unlock()
-	// Clear the marker BEFORE detaching, or a StartFreshTurn racing this sees
-	// main==nil with the old marker set and resurrects what is being detached.
+	// Clear the marker before detaching so a restart cannot resurrect the
+	// conversation being replaced.
 	if err := c.setCurrentThread(""); err != nil {
 		c.b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
 	}
@@ -141,7 +141,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.main = nil
 	c.mainAnchor = ""
 	c.steerAnchor = ""
-	c.lastAgentMail = ""
+	c.lastWakeReply = ""
 	c.contextMilestone = 0
 	c.wakePending = false
 	c.mu.Unlock()
@@ -150,10 +150,6 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	if old != nil && !c.b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
-	// The turn that would have answered the room's report:"always" binds has
-	// just been detached with the session, so post their results now: a
-	// completion the spawner marked as awaited must not be what /new discards.
-	c.flushRequired()
 	c.sendReply(ctx, "🧵 fresh conversation — the old one stays searchable in history")
 }
 

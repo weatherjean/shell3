@@ -325,7 +325,7 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 		return !tconv(b).turnActive && !tconv(b).wakePending && !sess.HasQueuedInput()
 	})
 	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ queued reply")
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "queued reply")
 	})
 }
 

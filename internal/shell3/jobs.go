@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/procutil"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
@@ -148,14 +147,8 @@ type bgJob struct {
 	startedAt     time.Time
 	cancel        context.CancelFunc
 	out           *jobSink
-	// report is the single axis for what this job's finish does to the chat:
-	// raw output, a report turn the agent may answer, or one it must.
-	report   notify.ReportMode
-	detached bool
-	// note is the spawner's intent hint, carried into the completion mail.
-	note string
 	// logPath is runs/<parent-session>/jobs/<id>.log, "" when no store or
-	// parent existed at start. Completion mail points here.
+	// parent existed at start. The inbox notice points here.
 	logPath string
 	// store is the configuration-generation handle captured at dispatch.
 	store *runs.Store
@@ -164,12 +157,12 @@ type bgJob struct {
 	suppress bool
 
 	// shutdownCancel marks a job cancelAll killed on teardown: its "context
-	// canceled" failure was manufactured by the shutdown, so its outbox event
-	// is dropped and the RUNNING marker survives instead — the next boot then
+	// canceled" failure was manufactured by the shutdown, so no notice is
+	// written and the running marker survives instead — the next boot then
 	// reports it honestly as "was running when shell3 stopped".
 	shutdownCancel bool
 
-	// markerID is the job's outbox "running" row (0 = none), deleted when the
+	// markerID is the job's background_jobs row (0 = none), deleted when the
 	// job finishes unless shutdownCancel left it for boot-time recovery.
 	markerID int64
 
@@ -189,12 +182,6 @@ type jobManager struct {
 
 	// closing is set by cancelAll so shutdown cannot admit new work.
 	closing bool
-
-	// undelivered holds outbox rows whose user-facing post failed to send:
-	// they were kept rather than deleted, and RedeliverUndelivered retries
-	// them. Boot-time recovery covers the same rows if the process dies
-	// first — this set exists so a LIVE process retries without a restart.
-	undelivered map[int64]struct{}
 }
 
 func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {
@@ -250,9 +237,8 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 }
 
 // startCommand launches argv as a managed background job. env appends "K=V"
-// entries to the inherited environment; nil inherits it unchanged. report is
-// what the finish does to the chat; note is carried into the completion mail.
-func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+// entries to the inherited environment; nil inherits it unchanged.
+func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")
 	}
@@ -307,7 +293,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		parentID:      parentName(parent),
 		parentSession: parentSessionID(parent),
 		startedAt:     time.Now(), cancel: cancel, out: out,
-		report: report, note: note, logPath: logPath, store: jobStore,
+		logPath: logPath, store: jobStore,
 	}
 	m.jobs[id] = j
 	// Count the job before publishing it outside m.mu. cancelAll takes this
@@ -329,7 +315,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		delete(m.jobs, id)
 		mid := j.markerID
 		m.mu.Unlock()
-		m.deleteOutboxRow(mid)
+		m.deleteRunningMarker(mid, j.store, j.id)
 		cancel()
 		// finishCommand never runs for this job — release the log fd here.
 		if out.file != nil {
@@ -363,7 +349,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	return id, nil
 }
 
-// bgNoticeTailCap bounds the output tail carried into the next turn.
+// bgNoticeTailCap bounds the output tail stored in the durable inbox notice.
 const bgNoticeTailCap = 1500
 
 // finishCommand delivers a command completion, marks it done, and retains it
@@ -373,12 +359,9 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		j.out.file.Close()
 	}
 	outStr := j.out.String()
-	e := exit
-	n := notifyBg(j.id, j.title, &e, strutil.Tail(outStr, bgNoticeTailCap), j.logPath)
-	if j.parent != nil {
-		m.dispatchCompletion(commandEvent(j, n, exit, j.parent))
+	if m.persistCommandCompletion(j, exit, strutil.Tail(outStr, bgNoticeTailCap)) {
+		m.clearRunningMarker(j)
 	}
-	m.clearRunningMarker(j)
 	ex := exit
 	m.mu.Lock()
 	m.markDoneLocked(j, func(j *bgJob) { j.exit = &ex })
@@ -438,7 +421,7 @@ func (m *jobManager) cancelAll() {
 	}
 }
 
-// killAllForStop kills every live command with completion routing suppressed.
+// killAllForStop kills every live command with its completion notice suppressed.
 func (m *jobManager) killAllForStop() []KilledJob {
 	m.mu.Lock()
 	var killed []KilledJob
@@ -463,14 +446,6 @@ func (m *jobManager) killAllForStop() []KilledJob {
 	}
 	slices.SortFunc(killed, func(a, b KilledJob) int { return strings.Compare(a.ID, b.ID) })
 	return killed
-}
-
-// suppressed reports whether ev's job was killed by superstop (routing drop).
-func (m *jobManager) suppressed(jobID string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	j := m.jobs[jobID]
-	return j != nil && j.suppress
 }
 
 // wait blocks until every job goroutine has unwound. Call after cancelAll,

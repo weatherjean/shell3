@@ -23,10 +23,6 @@ func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 			{TextDelta: "dispatched the job"},
 			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
 		}},
-		fakellm.Script{Events: []llm.StreamEvent{
-			{TextDelta: "JOB-FINISHED-NARRATION"},
-			{Usage: &llm.Usage{PromptTokens: 5, TotalTokens: 5}},
-		}},
 	)
 	rt := shell3test.NewRuntimeForTestClient(t, fake)
 	sess, err := rt.Session(shell3.SessionOpts{})
@@ -50,8 +46,11 @@ func TestFollowAskJobs_WaitsForBackgroundJob(t *testing.T) {
 		t.Fatal("FollowAskJobs did not return after the background job completed")
 	}
 
-	if !strings.Contains(buf.String(), "JOB-FINISHED-NARRATION") {
-		t.Fatalf("wake-turn narration missing — the run did not wait for the background job:\n%s", buf.String())
+	if strings.Contains(buf.String(), "narrating") {
+		t.Fatalf("background completion started a legacy follow-up turn:\n%s", buf.String())
+	}
+	if got := len(fake.CallsSnapshot()); got != 2 {
+		t.Fatalf("model calls = %d, want only the original tool round and answer round", got)
 	}
 	for _, j := range sess.Jobs() {
 		if !j.Done {
@@ -110,12 +109,11 @@ func TestFollowAskJobs_CtxCancelStopsWait(t *testing.T) {
 }
 
 func TestWaitForChange_ClosedBusReturnsPromptly(t *testing.T) {
-	hostEvents := make(chan shell3.HostEvent)
-	close(hostEvents)
 	jobEvents := make(chan shell3.JobProgress)
+	close(jobEvents)
 
 	done := make(chan error, 1)
-	go func() { done <- waitForChange(context.Background(), "sess1", hostEvents, jobEvents) }()
+	go func() { done <- waitForChange(context.Background(), jobEvents) }()
 	select {
 	case err := <-done:
 		if !errors.Is(err, errJobBusClosed) {

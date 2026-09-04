@@ -16,14 +16,13 @@ delegation, workflow signals, and verification. A worker environment is marked
 with `SHELL3_WRK_WORKER=1`; nested `wrk run`, `beat`, `signal`, and `cancel`
 operations are refused.
 
-Inbox and completion delivery are durable and at-least-once. Workflow event
+Filesystem-inbox delivery is durable and at-least-once. Workflow event
 consumers and human inbox handling must tolerate duplicates. A `main` notice
 is passive and untrusted: its arrival never starts a model turn, enters a
-prompt, or grants authority. Running markers and outbox rows must be persisted
-before work or completion is exposed, and removed only after successful
-handoff. `/stop` cancels only the current model turn; `/superstop` also kills
-managed background command process groups and suppresses their manufactured
-completion posts.
+prompt, or grants authority. Background commands persist running markers and
+delete them only after their single completion notice is durable. `/stop`
+cancels only the current model turn; `/superstop` also kills managed background
+command process groups and suppresses their manufactured inbox notices.
 
 Telegram authorization limits who can control the remote adapter. It does not
 make model-generated shell commands safe. Group descriptions, inbox notices,

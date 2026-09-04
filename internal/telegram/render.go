@@ -175,8 +175,7 @@ func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, repl
 // postChunk posts one chunk through the HTML→plain fallback path and records
 // the sent id. The returned error is the PLAIN fallback's — non-nil means
 // neither rendering reached the transport, i.e. the chunk was not delivered.
-// Most callers ignore it (a turn reply has no redelivery path); the
-// completion router uses it to keep an undelivered post's outbox row.
+// Most callers ignore it because turn replies have no redelivery path.
 func (c *conversation) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, part string, opts ...SendOpt) error {
 	html := mdhtml.ToTelegramHTML(part)
 	chatID := c.chatIDValue()
@@ -195,8 +194,7 @@ func (c *conversation) postChunk(ctx context.Context, sess *shell3.Session, repl
 	return err
 }
 
-// recordSent advances the conversation's anchor to a message the bot just
-// sent, so agent mail and completion posts thread onto the latest message.
+// recordSent advances the conversation's anchor to a message the bot sent.
 // No-op for a failed send.
 func (c *conversation) recordSent(sess *shell3.Session, msgID string) {
 	if msgID == "" {

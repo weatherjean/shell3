@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -67,7 +66,7 @@ func TestOpen_CorruptFilePreservedOnError(t *testing.T) {
 	}
 }
 
-func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
+func TestOpen_ImplausibleUserVersionResetsStore(t *testing.T) {
 	root := t.TempDir()
 	st, err := Open(root)
 	if err != nil {
@@ -94,33 +93,17 @@ func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	before, err := os.ReadFile(path)
+	reopened, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := Open(root); err == nil {
-		t.Fatal("Open with an implausible user_version: want error, got nil")
+	defer reopened.Close()
+	if _, ok := reopened.CurrentSession("web"); ok {
+		t.Fatal("mismatched store row survived reset")
 	}
-
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("file vanished after refusing to recreate: %v", err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("Open modified the file instead of erroring out")
-	}
-
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Name() != DBFile {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.Name()
-		}
-		t.Fatalf("root dir after refused Open = %v, want only %q", names, DBFile)
+	v, err := userVersion(reopened.db)
+	if err != nil || v != schemaVersion {
+		t.Fatalf("user_version = %d, err=%v; want %d", v, err, schemaVersion)
 	}
 }
 
@@ -147,7 +130,7 @@ func TestOpen_GenuineMismatchStillRecreates(t *testing.T) {
 	}
 }
 
-func TestOpen_RecreateMovesOldFilesAsideNotDeletes(t *testing.T) {
+func TestOpen_RecreateDeletesOldDatabaseButPreservesSibling(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, DBFile)
 	buildV1DB(t, path)
@@ -184,13 +167,9 @@ func TestOpen_RecreateMovesOldFilesAsideNotDeletes(t *testing.T) {
 	if !names["not-the-database.txt"] {
 		t.Fatalf("root dir after recreate = %v, want sibling file present", names)
 	}
-	archived := false
 	for name := range names {
-		if strings.Contains(name, ".old-v0-") {
-			archived = true
+		if name != DBFile && name != "not-the-database.txt" {
+			t.Errorf("unexpected backup or sidecar after reset: %q", name)
 		}
-	}
-	if !archived {
-		t.Errorf("root dir after recreate = %v, want preserved old database", names)
 	}
 }

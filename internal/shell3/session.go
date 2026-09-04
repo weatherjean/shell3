@@ -8,7 +8,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -414,8 +413,8 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s
-		tc.StartBashBg = func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
-			return rt.jobs.startCommand(parent, command, workdir, argv, env, report, note)
+		tc.StartBashBg = func(command, workdir string, argv, env []string) (string, error) {
+			return rt.jobs.startCommand(parent, command, workdir, argv, env)
 		}
 	}
 	return tc
