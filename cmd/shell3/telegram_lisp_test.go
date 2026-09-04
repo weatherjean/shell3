@@ -45,7 +45,7 @@ func TestTelegramInboxNotifierPostsCountWithoutClaiming(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		notifyTelegramInbox(ctx, bot, store, hints, time.Hour, applog.Noop{})
+		notifyTelegramInbox(ctx, bot, store, hints, false, time.Hour, applog.Noop{})
 		close(done)
 	}()
 	deadline := time.Now().Add(time.Second)
@@ -80,7 +80,7 @@ func TestTelegramInboxNotifierReconcilesDroppedWake(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		notifyTelegramInbox(ctx, bot, store, make(chan struct{}), 10*time.Millisecond, applog.Noop{})
+		notifyTelegramInbox(ctx, bot, store, make(chan struct{}), false, 10*time.Millisecond, applog.Noop{})
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -97,6 +97,35 @@ func TestTelegramInboxNotifierReconcilesDroppedWake(t *testing.T) {
 		!strings.Contains(out.String(), "Latest: done — durable") ||
 		strings.Contains(out.String(), "must not run") {
 		t.Fatalf("Telegram output = %q", out.String())
+	}
+}
+
+func TestTelegramInboxNotifierPostsStartupBeforePendingNotice(t *testing.T) {
+	rt := shell3test.NewRuntimeForTest(t, "must not run")
+	var out lockedBuffer
+	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
+		telegram.ConsoleChatID, telegram.NewThreadIndex(func() *runs.Store { return rt.Store() }, "telegram"))
+	store := inbox.Store{Root: t.TempDir()}
+	if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		notifyTelegramInbox(ctx, bot, store, make(chan struct{}), true, time.Hour, applog.Noop{})
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(out.String(), "Inbox: 1 pending notice") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	got := out.String()
+	startup := strings.Index(got, telegram.StartupNotice)
+	pending := strings.Index(got, "Inbox: 1 pending notice")
+	if startup < 0 || pending < 0 || startup >= pending {
+		t.Fatalf("startup must precede inbox notice: %q", got)
 	}
 }
 

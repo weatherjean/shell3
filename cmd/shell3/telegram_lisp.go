@@ -133,14 +133,10 @@ func newTelegramCommand() *cobra.Command {
 				defer scheduleManager.Close()
 			}
 
-			go notifyTelegramInbox(ctx, bot, mailbox, mainHints, 30*time.Second, rt.Logger())
 			_ = rt.RecoverBackgroundJobs()
 			if !console {
 				if err := apiClient.SetCommands(ctx, bot.BotCommands()); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not set Telegram commands: %v\n", err)
-				}
-				if err := bot.NotifyLifecycle(ctx, telegram.StartupNotice); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not send Telegram startup notice: %v\n", err)
 				}
 				defer func() {
 					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -151,6 +147,7 @@ func newTelegramCommand() *cobra.Command {
 				}()
 				fmt.Fprintf(cmd.OutOrStdout(), "shell3 telegram: remote control attached (home chat %d)\n", cfg.Telegram.HomeChat)
 			}
+			go notifyTelegramInbox(ctx, bot, mailbox, mainHints, !console, 30*time.Second, rt.Logger())
 			botDone := make(chan struct{})
 			go func() {
 				bot.Run(ctx)
@@ -207,7 +204,25 @@ func splitInboxHints(ctx context.Context, hints <-chan string, router chan<- str
 	}
 }
 
-func notifyTelegramInbox(ctx context.Context, bot *telegram.Bot, store inbox.Store, hints <-chan struct{}, reconcileEvery time.Duration, log applog.Logger) {
+func notifyTelegramInbox(ctx context.Context, bot *telegram.Bot, store inbox.Store, hints <-chan struct{}, announceStartup bool, reconcileEvery time.Duration, log applog.Logger) {
+	if announceStartup {
+		for {
+			if err := bot.NotifyLifecycle(ctx, telegram.StartupNotice); err == nil {
+				break
+			} else {
+				log.Warn("telegram startup notification failed", "error", err)
+			}
+			retry := time.NewTimer(30 * time.Second)
+			select {
+			case <-ctx.Done():
+				if !retry.Stop() {
+					<-retry.C
+				}
+				return
+			case <-retry.C:
+			}
+		}
+	}
 	last := ""
 	notify := func() bool {
 		_, count, err := store.List("main", inbox.StatusPending, 0, 1)

@@ -15,8 +15,14 @@ func TestNotifyLifecyclePostsWithoutStartingTurn(t *testing.T) {
 	if err := b.NotifyLifecycle(context.Background(), StartupNotice); err != nil {
 		t.Fatal(err)
 	}
+	if !fc.lastSilent() {
+		t.Fatal("startup notice was not silent")
+	}
 	if err := b.NotifyLifecycle(context.Background(), ShutdownNotice); err != nil {
 		t.Fatal(err)
+	}
+	if !fc.lastSilent() {
+		t.Fatal("shutdown notice was not silent")
 	}
 	got := fc.sentTexts()
 	if len(got) != 2 || got[0] != "๑ï shell3 started" || got[1] != "๑ï shell3 shutting down" {
@@ -33,6 +39,9 @@ func TestNotifyInboxPostsWithoutStartingTurn(t *testing.T) {
 	b := newBot(t, fc, rt)
 	if err := b.NotifyInbox(context.Background(), 2, "wrk.failed", "workflow daily failed\nwith details"); err != nil {
 		t.Fatal(err)
+	}
+	if !fc.lastSilent() {
+		t.Fatal("inbox notice was not silent")
 	}
 	got := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(got, "✉️ Inbox: 2 pending notices") || !strings.Contains(got, "Latest: wrk.failed — workflow daily failed") {

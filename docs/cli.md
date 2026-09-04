@@ -70,7 +70,8 @@ conversations. A persisted Telegram adapter also owns declared schedules. A
 schedule edit requires restarting it; `/reload` rejects that partial change.
 The real adapter posts `๑ï shell3 started` to the home chat after startup and
 `๑ï shell3 shutting down` on a graceful exit; neither message starts a model
-turn, and `--console` emits neither one.
+turn, and `--console` emits neither one. Startup is delivered before any
+pending-inbox alert. Lifecycle and inbox alerts are silent notifications.
 When a `main` notice arrives, Telegram posts a `✉️` pending count and a
 bounded preview of the latest notice to the home chat. This is a host message,
 not a quiet model turn. A local console may run against the same state while

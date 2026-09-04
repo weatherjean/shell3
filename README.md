@@ -137,7 +137,8 @@ user sends a message. The user asks the agent to check the inbox when ready;
 the embedded `shell3-inbox` skill owns the bounded read-and-archive procedure.
 The real Telegram adapter also posts `๑ï shell3 started` after initialization
 and `๑ï shell3 shutting down` on graceful exit. These lifecycle messages are
-host-generated and never start a model turn.
+host-generated and never start a model turn. Startup arrives before pending
+inbox alerts; lifecycle and inbox notifications are silent.
 Workflow definitions and resolved configuration are hashed into each run so an
 active run cannot silently change underneath its state. External agent workers
 are leaves; the attached orchestrator owns delegation and verification.

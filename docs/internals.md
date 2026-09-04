@@ -361,7 +361,9 @@ never become model input.
 The real Telegram adapter posts `๑ï shell3 started` to the home chat after it
 has initialized and `๑ï shell3 shutting down` during a graceful exit. These
 are host-rendered lifecycle notices and do not create or resume an agent turn.
-The console transport does not emit them.
+The startup post is acknowledged before pending-inbox alerts begin, so it is
+always their first boot message. Lifecycle and inbox alerts use Telegram's
+silent-delivery flag. The console transport does not emit lifecycle notices.
 
 `telegram --console` uses the same bot loop over stdin/stdout with a synthetic
 local room. It needs no Telegram credentials or `allow_from` authorization and

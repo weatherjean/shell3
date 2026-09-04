@@ -20,7 +20,7 @@ const (
 // NotifyLifecycle posts a host-owned adapter lifecycle message to the home
 // chat without opening a session or starting an agent turn.
 func (b *Bot) NotifyLifecycle(ctx context.Context, text string) error {
-	_, err := b.client.Send(ctx, b.homeChat, text)
+	_, err := b.client.Send(ctx, b.homeChat, text, SendOpt{Silent: true})
 	return err
 }
 
@@ -50,6 +50,6 @@ func (b *Bot) NotifyInbox(ctx context.Context, count int, event, body string) er
 		text += "\nLatest: " + strutil.Truncate(preview, inboxPreviewRunes)
 	}
 	text += fmt.Sprintf("\nAsk me to check the inbox when you want me to handle %s.", object)
-	_, err := b.client.Send(ctx, b.homeChat, text)
+	_, err := b.client.Send(ctx, b.homeChat, text, SendOpt{Silent: true})
 	return err
 }
