@@ -13,7 +13,7 @@ func TestFlushMessages_PersistsFullStreamIncludingToolResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestFlushMessages_StopsAtFirstFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

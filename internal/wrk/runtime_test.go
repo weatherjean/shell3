@@ -5,6 +5,7 @@ package wrk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,6 +42,17 @@ func startCommandRunWithOptions(t *testing.T, definition string, configure func(
 		t.Fatal(err)
 	}
 	return dir, runDir
+}
+
+func TestStartWritesVersionOneManifest(t *testing.T) {
+	_, runDir := startCommandRun(t, `(task "version" (command work (run "true")))`)
+	var manifest Manifest
+	if err := readJSON(filepath.Join(runDir, "run.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != 1 {
+		t.Fatalf("manifest version = %d, want 1", manifest.Version)
+	}
 }
 
 func TestBeatAdvancesParallelReadersThenWriter(t *testing.T) {
@@ -144,6 +156,23 @@ func TestBeatWithProgressMirrorsAgentStreamWithoutDuplicatingResult(t *testing.T
 	resultFile, err := os.ReadFile(filepath.Join(runDir, "nodes", "work", "result-1.md"))
 	if err != nil || string(resultFile) != "final result\n" {
 		t.Fatalf("result file = %q, err = %v", resultFile, err)
+	}
+}
+
+func TestNodePersistenceFailuresAreReturned(t *testing.T) {
+	nodePath := filepath.Join(t.TempDir(), "blocked-node")
+	if err := os.WriteFile(nodePath, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cause := errors.New("runner failed")
+	state, err := transitionNode(nodePath, "failed", cause)
+	if state != "failed" || !errors.Is(err, cause) || !strings.Contains(err.Error(), "persist node blocked-node status failed") {
+		t.Fatalf("transition = %q, %v", state, err)
+	}
+
+	if err := writeNodeResult(nodePath, 1, "result"); err == nil || !strings.Contains(err.Error(), "persist node blocked-node result") {
+		t.Fatalf("result persistence error = %v", err)
 	}
 }
 

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 type conversation struct {
@@ -25,7 +24,7 @@ type conversation struct {
 	isGroup bool
 	// index persists which store session is this room's conversation, under
 	// the room's own surface key, so a restart resumes every room.
-	index *ThreadIndex
+	index *SessionIndex
 
 	mu sync.Mutex // guards this room's turn slot, session, anchors and queues
 	// main is the long-lived session every message here continues, replaced
@@ -36,18 +35,13 @@ type conversation struct {
 	// steerAnchor is the newest steered message id, separate so the running
 	// turn's own reply cannot clobber it.
 	steerAnchor string
-	// lastWakeReply is the previous quiet wake reply, so an identical repeat
-	// is dropped host-side. Cleared by /new.
-	lastWakeReply string
 	// contextMilestone is the highest fullness threshold announced in this
 	// growth cycle. Compaction and /new reset it.
 	contextMilestone int
 	cancelTurn       context.CancelFunc // non-nil while a turn runs in this room
 	turnActive       bool
-	turnQuiet        bool
-	wakePending      bool
-	mailQueue        []inMail
-	burst            []inMail
+	pendingMessages  []inboundMessage
+	burst            []inboundMessage
 	burstTimer       *time.Timer
 	// sentIDs rings the message ids the bot posted here: a group message
 	// replying to one is addressed to the bot, which short of an @mention is
@@ -97,47 +91,53 @@ func (c *conversation) flushBurst(ctx context.Context) {
 	c.burst, c.burstTimer = nil, nil
 	c.mu.Unlock()
 	if len(batch) > 0 {
-		c.dispatchMail(ctx, batch)
+		c.dispatchMessages(ctx, batch)
 	}
 }
 
-// dispatchMail routes a batch: mid-turn TEXT steers the running turn at the
+// dispatchMessages routes a batch: mid-turn TEXT steers the running turn at the
 // next round boundary, so "stop, wrong file" redirects work in flight rather
 // than waiting behind it; media queues; an idle bot runs the batch as one
 // turn. A steer landing after the final boundary gets a catch-up turn.
-func (c *conversation) dispatchMail(ctx context.Context, batch []inMail) {
+func (c *conversation) dispatchMessages(ctx context.Context, batch []inboundMessage) {
 	if len(batch) == 0 {
 		return
 	}
 	hasMedia := false
-	for _, mail := range batch {
-		hasMedia = hasMedia || len(mail.saved) > 0
+	for _, item := range batch {
+		hasMedia = hasMedia || len(item.saved) > 0
+	}
+	var steerText string
+	if !hasMedia {
+		parts := make([]string, 0, len(batch))
+		for _, item := range batch {
+			parts = append(parts, withReplyContext(item.text, item.m.ReplyTo))
+		}
+		steerText = strings.Join(parts, "\n\n")
 	}
 	c.mu.Lock()
 	if c.turnActive {
-		if !hasMedia && !c.turnQuiet && c.main != nil {
+		if !hasMedia && c.main != nil {
 			sess := c.main
 			c.mainAnchor = batch[len(batch)-1].m.ID
 			c.steerAnchor = c.mainAnchor
+			// Queue while holding c.mu. Turn completion takes the same lock
+			// before scanning for catch-up work, so it cannot miss this steer.
+			sess.Interject(steerText)
 			c.mu.Unlock()
-			parts := make([]string, 0, len(batch))
-			for _, mail := range batch {
-				parts = append(parts, withReplyContext(mail.text, mail.m.ReplyTo))
-			}
-			sess.Interject(strings.Join(parts, "\n\n"))
 			return
 		}
-		c.mailQueue = append(c.mailQueue, batch...)
+		c.pendingMessages = append(c.pendingMessages, batch...)
 		c.mu.Unlock()
 		return
 	}
-	// Slot before session, so a wake landing during creation queues instead
-	// of racing onto it.
+	// Slot before session, so another message landing during creation queues
+	// instead of racing onto it.
 	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
 	if !ok {
 		// Cap full: queue rather than refuse. Sending always succeeds, and the
 		// backlog drains as one batch turn when a slot frees.
-		c.mailQueue = append(c.mailQueue, batch...)
+		c.pendingMessages = append(c.pendingMessages, batch...)
 		c.mu.Unlock()
 		return
 	}
@@ -149,7 +149,7 @@ func (c *conversation) dispatchMail(ctx context.Context, batch []inMail) {
 // runUserTurn runs one user turn over batch — one message or the backlog. The
 // slot is held on entry; this goroutine owns delivery, release, and starting
 // the next queued work.
-func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, batch []inMail) {
+func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, batch []inboundMessage) {
 	last := batch[len(batch)-1]
 	sess, err := c.mainSession()
 	if err != nil {
@@ -164,16 +164,16 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 
 	composeText := func() string {
 		parts := make([]string, 0, len(batch))
-		for _, mail := range batch {
-			out := mail.text
-			if injected := attachmentNote(mail.saved); injected != "" {
+		for _, item := range batch {
+			out := item.text
+			if injected := attachmentNote(item.saved); injected != "" {
 				if out != "" {
 					out += "\n\n" + injected
 				} else {
 					out = injected
 				}
 			}
-			parts = append(parts, withReplyContext(out, mail.m.ReplyTo))
+			parts = append(parts, withReplyContext(out, item.m.ReplyTo))
 		}
 		return strings.Join(parts, "\n\n")
 	}
@@ -188,18 +188,12 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 // finishPostedTurn delivers a POSTED turn's reply and runs the housekeeping
 // both posted paths share, a user turn and a steer catch-up.
 //
-// A posted turn always answers ("" renders as "(no output)"). NO_REPLY belongs
-// to wake turns, so a model over-generalizing it must not post the literal
-// string, and a corrupt reply — raw tool-call markup — becomes a short notice
-// rather than protocol garbage.
+// A posted turn always answers ("" renders as "(no output)"). A corrupt reply
+// containing raw tool-call markup becomes a short notice rather than protocol
+// garbage.
 //
 // The slot is held through delivery, so nothing else can start a turn.
 func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Session, anchor, reply string, cancel context.CancelFunc) {
-	if strutil.IsNoReply(reply) {
-		reply = ""
-	} else if stripped, had := strutil.StripNoReply(reply); had {
-		reply = strings.TrimSpace(stripped) // sentinel signs off; it never posts
-	}
 	if containsToolMarkup(reply) {
 		reply = malformedReplyNotice
 	}
@@ -222,15 +216,15 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 	c.mu.Unlock()
 
 	var sess *shell3.Session
-	if id, ok := c.currentThread(); ok {
+	if id, ok := c.currentSession(); ok {
 		if s, err := c.b.rt.Session(shell3.SessionOpts{
-			ResumeID: id, WorkDir: c.b.workDir, PromptSuffix: c.brief,
+			ResumeID: id, PromptSuffix: c.brief,
 		}); err == nil {
 			sess = s
 		}
 	}
 	if sess == nil {
-		s, err := c.b.rt.Session(shell3.SessionOpts{WorkDir: c.b.workDir, PromptSuffix: c.brief})
+		s, err := c.b.rt.Session(shell3.SessionOpts{PromptSuffix: c.brief})
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +240,7 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 	}
 	c.main = sess
 	c.mu.Unlock()
-	if err := c.setCurrentThread(sess.ID()); err != nil {
+	if err := c.setCurrentSession(sess.ID()); err != nil {
 		// The in-memory marker would still agree with sess, but a restart
 		// re-reads the STORE: a lost write here resumes a stale conversation
 		// on the next boot, so it must at least be visible.
@@ -265,45 +259,36 @@ func (c *conversation) setAnchor(msgID string) {
 	c.mu.Unlock()
 }
 
-// Thread-index access shares c.mu with migration's index swap. Holding it
+// Session-index access shares c.mu with migration's index swap. Holding it
 // through the store call prevents a writer that captured the old surface from
 // resurrecting its marker after migration cleared it.
-func (c *conversation) currentThread() (string, bool) {
+func (c *conversation) currentSession() (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.index.Current()
 }
 
-func (c *conversation) setCurrentThread(id string) error {
+func (c *conversation) setCurrentSession(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.index.SetCurrent(id)
 }
 
-// afterTurn is a wake turn's housekeeping: re-mark the current session,
-// release the slot, start the next queued work. The session never retires.
-func (c *conversation) afterTurn(ctx context.Context, sess *shell3.Session, cancel context.CancelFunc) {
-	c.markCurrent(sess)
-	c.releaseSlot(cancel)
-	c.b.startNextWorkAll(ctx, c)
-}
-
 // startNextWork starts this room's next queued unit once the slot frees: user
-// mail first, since the user outranks background mail, then a steer catch-up
-// for one that missed the last round boundary, then pending wakes.
+// messages first, since the user outranks background work, then a steer catch-up
+// for one that missed the last round boundary.
 func (c *conversation) startNextWork(ctx context.Context) {
-	if c.drainNextMail(ctx) {
+	if c.drainNextMessages(ctx) {
 		return
 	}
 	if c.startSteerCatchup(ctx) {
 		return
 	}
-	c.startNextWake(ctx)
 }
 
-// startSteerCatchup runs a POSTED turn over steering that landed after the
-// previous turn's final round boundary. Unlike a quiet wake its reply is
-// delivered — the queued text is the user talking.
+// startSteerCatchup runs a posted turn over steering that landed after the
+// previous turn's final round boundary. Its reply is delivered because the
+// queued text is the user talking.
 func (c *conversation) startSteerCatchup(ctx context.Context) bool {
 	c.mu.Lock()
 	if c.turnActive || c.main == nil || !c.main.HasQueuedSteer() {
@@ -333,11 +318,11 @@ func (c *conversation) takeSteerAnchorLocked() string {
 	return anchor
 }
 
-// drainNextMail runs the WHOLE backlog as one batch turn — it is all the same
-// conversation. False when the queue is empty or a turn is running.
-func (c *conversation) drainNextMail(ctx context.Context) bool {
+// drainNextMessages runs the WHOLE backlog as one batch turn — it is all the
+// same conversation. False when the queue is empty or a turn is running.
+func (c *conversation) drainNextMessages(ctx context.Context) bool {
 	c.mu.Lock()
-	if c.turnActive || len(c.mailQueue) == 0 {
+	if c.turnActive || len(c.pendingMessages) == 0 {
 		c.mu.Unlock()
 		return false
 	}
@@ -346,8 +331,8 @@ func (c *conversation) drainNextMail(ctx context.Context) bool {
 		c.mu.Unlock()
 		return false // capped: another room's turn end will come back for this
 	}
-	batch := c.mailQueue
-	c.mailQueue = nil
+	batch := c.pendingMessages
+	c.pendingMessages = nil
 	c.mu.Unlock()
 	go c.runUserTurn(ctx, turnCtx, cancel, batch)
 	return true
@@ -382,7 +367,7 @@ func (c *conversation) markCurrent(sess *shell3.Session) {
 	if id == "" {
 		return
 	}
-	if err := c.setCurrentThread(id); err != nil {
+	if err := c.setCurrentSession(id); err != nil {
 		c.b.log.Warn("current-session marker not persisted", "session", id, "err", err)
 	}
 }
@@ -396,58 +381,11 @@ func (c *conversation) runPostedQueuedTurn(ctx, turnCtx context.Context, cancel 
 	c.finishPostedTurn(ctx, sess, anchor, reply, cancel)
 }
 
-// startNextWake runs a pending wake turn if the slot is free. Queued user
-// steering upgrades it to a posted turn.
-func (c *conversation) startNextWake(ctx context.Context) bool {
-	c.mu.Lock()
-	if c.turnActive || !c.wakePending || c.main == nil {
-		c.mu.Unlock()
-		return false
-	}
-	c.wakePending = false
-	sess := c.main
-	if !sess.HasQueuedInput() {
-		c.mu.Unlock()
-		return false // already drained by the turn that just ran
-	}
-	return c.launchQueuedTurnLocked(ctx, sess)
-}
-
-// launchQueuedTurnLocked starts the turn draining sess's inbox and reports
-// whether one started. Steering in the inbox upgrades it to a POSTED turn, so
-// the reply is delivered and RunQueued drains the notices alongside it;
-// otherwise it is a quiet wake whose reply posts silently.
-//
-// The caller holds c.mu; this ALWAYS releases it. A full cap re-arms
-// wakePending, so the next turn end comes back for this room.
-func (c *conversation) launchQueuedTurnLocked(ctx context.Context, sess *shell3.Session) bool {
-	steer := sess.HasQueuedSteer()
-	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
-	if !ok {
-		c.wakePending = true
-		c.mu.Unlock()
-		return false
-	}
-	if steer {
-		anchor := c.takeSteerAnchorLocked()
-		c.mu.Unlock()
-		go c.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
-		return true
-	}
-	c.turnQuiet = true
-	c.mu.Unlock()
-	go func() {
-		c.runWakeTurn(ctx, turnCtx, sess)
-		c.afterTurn(ctx, sess, cancel)
-	}()
-	return true
-}
-
 // takeSlotLocked marks a turn active here and returns its ctx and cancel.
 // Caller holds c.mu.
 //
 // ok is false when the global cap is full, and the caller must queue instead.
-// A room queued by the cap has no waker of
+// A room queued by the cap has no trigger of
 // its own — startNextWorkAll, run when any room frees a slot, drains it.
 func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	if !c.b.claimTurn() {
@@ -456,56 +394,7 @@ func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, con
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.cancelTurn = cancel
 	c.turnActive = true
-	c.turnQuiet = false
 	return turnCtx, cancel, true
-}
-
-// runWakeTurn runs one queued mail turn. Its reply is the agent speaking to
-// the user as a silent host-triggered reply. NO_REPLY, or an empty final segment (no narration fallback: a
-// wake turn ending on a tool call said nothing), keeps it silent. The slot is
-// held on entry and stays held; afterTurn releases it, and /stop can cancel
-// through it. The pinned cron session is never woken.
-func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
-	reply, errText, _ := c.drainTurn(ctx, sess.RunQueued(turnCtx), nil, false)
-	c.postWakeReply(ctx, sess, reply, errText)
-}
-
-// postWakeReply delivers a wake turn's reply and reports whether the user saw
-// anything. Silent even on a provider hiccup: the error is in the transcript,
-// and posting it would make every flaky tick ring the chat — errors ride along
-// only when the agent was going to speak anyway.
-func (c *conversation) postWakeReply(ctx context.Context, sess *shell3.Session, reply, errText string) bool {
-	if strutil.IsNoReply(reply) {
-		return false
-	}
-	// A reply that says its piece AND signs off with the sentinel posts the
-	// piece, never the sentinel: leaving it on put the literal word NO_REPLY
-	// in the user's chat, mid-message, on 2026-08-25.
-	if stripped, had := strutil.StripNoReply(reply); had {
-		if strings.TrimSpace(stripped) == "" {
-			return false
-		}
-		reply = stripped
-	}
-	// Corrupt output never posts: the transcript keeps it for diagnosis.
-	if containsToolMarkup(reply) {
-		return false
-	}
-	if errText != "" {
-		reply += "\n" + errText
-	}
-	// An identical repeat carries no information, and a model stuck in a
-	// narration loop must not fill the chat with copies.
-	c.mu.Lock()
-	if reply == c.lastWakeReply {
-		c.mu.Unlock()
-		return false
-	}
-	c.lastWakeReply = reply
-	c.mu.Unlock()
-	// Host-triggered replies are always silent and never quote an old message.
-	c.postReply(ctx, sess, "", reply, SendOpt{Silent: true})
-	return true
 }
 
 // keepTyping refreshes the "typing…" action every 4s — it expires after
@@ -544,7 +433,7 @@ func (b *Bot) conv(chatID int64) *conversation {
 	c := &conversation{
 		b:      b,
 		chatID: chatID,
-		index:  b.threads.forSurface(roomSurface(b.threads.hostSurface(), chatID)),
+		index:  b.sessions.forSurface(roomSurface(b.sessions.hostSurface(), chatID)),
 	}
 	b.convs[chatID] = c
 	return c
@@ -570,7 +459,7 @@ func (b *Bot) allConvs() []*conversation {
 }
 
 // convFor finds the live room whose conversation is that store session, for
-// routing a completion back to where it was spawned.
+// routing host-tool output back to where it was requested.
 func (b *Bot) convFor(sessionID string) *conversation {
 	if sessionID == "" {
 		return nil
@@ -583,7 +472,7 @@ func (b *Bot) convFor(sessionID string) *conversation {
 	return nil
 }
 
-// homeConv is the room cron results and ownerless completions land in.
+// homeConv is the fallback room for host alerts and ownerless file sends.
 func (b *Bot) homeConv() *conversation {
 	b.mu.Lock()
 	id := b.homeChat
@@ -602,24 +491,6 @@ func (c *conversation) chatIDValue() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.chatID
-}
-
-// wake runs this room's queued completion turn. A wake that lands mid-turn
-// — or while the global cap is full — is marked pending and drained by the
-// next turn end.
-func (c *conversation) wake(ctx context.Context) {
-	c.mu.Lock()
-	sess := c.main
-	if sess == nil {
-		c.mu.Unlock()
-		return
-	}
-	if c.turnActive {
-		c.wakePending = true
-		c.mu.Unlock()
-		return
-	}
-	c.launchQueuedTurnLocked(ctx, sess)
 }
 
 // claimTurn takes one of the global turn slots, or reports false when the cap
@@ -649,7 +520,7 @@ func (b *Bot) freeTurn() {
 //
 // The sweep is not tidiness: with a global cap, a message can be queued
 // because the CAP was full rather than because its own room was busy, and
-// that room has no event of its own coming to wake it. Freeing a slot is the
+// that room has no event of its own coming to resume it. Freeing a slot is the
 // only signal it will ever get.
 func (b *Bot) startNextWorkAll(ctx context.Context, first *conversation) {
 	if first != nil {
@@ -667,7 +538,7 @@ func (b *Bot) startNextWorkAll(ctx context.Context, first *conversation) {
 // does when a group is converted to a supergroup.
 //
 // The room's session, anchors and queues are keyed by chat id, and so is its
-// thread marker; without this the old room would sit idle under an id nobody
+// current-session marker; without this the old room would sit idle under an id nobody
 // can post to again, and the new id would start an empty conversation. The
 // user experiences a rename, so the conversation should survive one.
 //
@@ -703,7 +574,7 @@ func (b *Bot) migrateRoom(from, to int64) {
 	delete(b.convs, from)
 	old.chatID = to
 	old.isGroup = true // a supergroup is a group whatever the old chat type said
-	old.index = b.threads.forSurface(roomSurface(b.threads.hostSurface(), to))
+	old.index = b.sessions.forSurface(roomSurface(b.sessions.hostSurface(), to))
 	newIndex := old.index
 	b.convs[to] = old
 	b.mu.Unlock()
@@ -718,8 +589,8 @@ func (b *Bot) migrateRoom(from, to int64) {
 			b.log.Warn("migrated room marker not persisted", "chat", to, "err", err)
 		}
 	}
-	if st := b.threads.currentStore(); st != nil {
-		if err := st.SetCurrentSession(roomSurface(b.threads.hostSurface(), from), ""); err != nil {
+	if st := b.sessions.currentStore(); st != nil {
+		if err := st.SetCurrentSession(roomSurface(b.sessions.hostSurface(), from), ""); err != nil {
 			b.log.Warn("old room marker not cleared", "chat", from, "err", err)
 		}
 	}

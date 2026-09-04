@@ -2,27 +2,13 @@ package shell3
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
-)
 
-func TestInterject_IdleEmitsWake(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Interject("ping while idle")
-	select {
-	case ev := <-rt.Events():
-		if ev.Kind != Wake || ev.Session != s.ID() {
-			t.Fatalf("want Wake for %s, got %+v", s.ID(), ev)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("idle Interject should emit Wake")
-	}
-}
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/llm/fakellm"
+)
 
 func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
@@ -38,24 +24,16 @@ func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 }
 
 func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("ok"))
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client} })
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Interject("do the queued thing")
-	select {
-	case <-rt.Events():
-	case <-time.After(time.Second):
-		t.Fatal("expected Wake after idle Interject")
-	}
 
-	sawReminder := false
 	terminal := false
 	for ev := range s.RunQueued(context.Background()) {
-		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "do the queued thing") {
-			sawReminder = true
-		}
 		if ev.Kind == Done || ev.Kind == Error {
 			terminal = true
 		}
@@ -63,7 +41,7 @@ func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 	if !terminal {
 		t.Fatal("RunQueued with queued items should run a turn (no terminal event)")
 	}
-	if !sawReminder {
+	if !callsContain(client.CallsSnapshot(), "do the queued thing") {
 		t.Fatal("queued text not surfaced to the model as a reminder")
 	}
 	if s.sess.HasInbox() {
@@ -110,7 +88,7 @@ func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
 	}
 }
 
-func TestInterject_BusyDoesNotWake(t *testing.T) {
+func TestInterject_BusyQueuesSteering(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -121,10 +99,8 @@ func TestInterject_BusyDoesNotWake(t *testing.T) {
 	s.mu.Unlock()
 
 	s.Interject("steer mid-turn")
-	select {
-	case ev := <-rt.Events():
-		t.Fatalf("busy Interject must not Wake, got %+v", ev)
-	case <-time.After(200 * time.Millisecond):
+	if !s.HasQueuedSteer() {
+		t.Fatal("busy Interject did not queue user steering")
 	}
 
 	s.mu.Lock()

@@ -30,7 +30,7 @@ func brandLine() string {
 func PrintHeader(w io.Writer) {
 	sub := lipgloss.NewStyle().Foreground(bannerFgDim)
 	fmt.Fprintln(w, brandLine())
-	fmt.Fprintln(w, sub.Render("minimal Unix-composable harness harness"))
+	fmt.Fprintln(w, sub.Render("minimal Unix-composable agent harness"))
 	fmt.Fprintln(w)
 }
 

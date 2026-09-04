@@ -25,7 +25,7 @@ type Msg struct {
 	ReplyToBot bool
 	// MigratedTo is the new chat id when the group became a supergroup
 	// (migrate_to_chat_id). Every id-keyed thing — the conversation, its
-	// thread marker — must follow or it is stranded under a dead id.
+	// current-session marker — must follow or it is stranded under a dead id.
 	MigratedTo int64
 	// ChatType is "private", "group", "supergroup" or "channel". Anything but
 	// private holds other people, so a message must be addressed to the bot

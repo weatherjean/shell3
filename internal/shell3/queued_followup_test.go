@@ -10,9 +10,8 @@ import (
 )
 
 // gateClient blocks mid-stream until release is closed, then finishes the turn
-// with a plain text response and NO tool calls (the turn's final round). This
-// lets a test interject while the turn is in flight (past the top-of-turn inbox
-// drain) and then let the turn end with the item still queued.
+// with a plain text response and no tool calls. This lets a test interject after
+// the top-of-turn inbox drain and leave the item queued at the final boundary.
 type gateClient struct {
 	started chan struct{}
 	release chan struct{}
@@ -33,10 +32,10 @@ func (c *gateClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDe
 	return nil
 }
 
-func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
+func TestEndOfTurn_QueuedInterjectRemainsForFollowUp(t *testing.T) {
 	gc := &gateClient{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newTestRuntime(t, func() chat.Config {
-		return chat.Config{LLM: gc, Agent: "code"}
+		return chat.Config{LLM: gc}
 	})
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -54,23 +53,17 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	for range ch {
 	}
 
-	if !s.HasQueuedInput() {
+	if !s.HasQueuedSteer() {
 		t.Fatal("interjected item should still be queued after the turn ended")
 	}
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == s.ID() {
-				return
-			}
-		case <-deadline:
-			t.Fatal("end-of-turn with queued inbox did not emit a Wake")
-		}
+	for range s.RunQueued(context.Background()) {
+	}
+	if s.HasQueuedSteer() {
+		t.Fatal("follow-up turn did not drain queued steering")
 	}
 }
 
-func TestEndOfTurn_EmptyInboxNoWake(t *testing.T) {
+func TestEndOfTurn_EmptyInboxStaysEmpty(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -78,9 +71,7 @@ func TestEndOfTurn_EmptyInboxNoWake(t *testing.T) {
 	}
 	for range s.Send(context.Background(), "go") {
 	}
-	select {
-	case ev := <-rt.Events():
-		t.Fatalf("normal completion must not emit a Wake, got %+v", ev)
-	case <-time.After(300 * time.Millisecond):
+	if s.HasQueuedInput() {
+		t.Fatal("normal completion left queued input")
 	}
 }

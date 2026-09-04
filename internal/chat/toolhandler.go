@@ -8,7 +8,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// ToolHandler is one built-in tool (bash, edit_file, bash_bg, …). Name is the
+// ToolHandler is one built-in tool (bash, bash_bg, …). Name is the
 // canonical name used in the JSON schema and the lookup map; Execute runs
 // synchronously and returns the tool result written back to the model — an
 // error is surfaced to the user, and the string is still recorded.
@@ -51,17 +51,8 @@ type TurnConfig struct {
 	// PromptSuffix appends per-session text to the system prompt (see
 	// Config.PromptSuffix). Nil appends nothing.
 	PromptSuffix func() string
-	// ModelID identifies the provider model for reminders and persisted runs.
+	// ModelID identifies the provider model in context reminders.
 	ModelID string
-	// ConfigDir is threaded into new store sessions — notably the compaction
-	// rollover, which starts one deep in the turn loop. '' if unknown.
-	ConfigDir string
-	// Agent, ParentID and CronJob mirror Config's fields of the same name,
-	// threaded into the compaction rollover so a rolled session keeps its
-	// cron attribution (see Config.CronJob).
-	Agent    string
-	ParentID string
-	CronJob  string
 	// Handlers maps tool name to built-in, built once and shared across turns.
 	Handlers map[string]ToolHandler
 	// HostTool dispatches a host-registered Go tool by name; names in

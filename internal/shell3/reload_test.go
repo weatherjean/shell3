@@ -9,6 +9,12 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
+func sessionConfigIdentity(s *Session) (model, prompt string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.ModelID, s.cfg.Profile.SystemPrompt
+}
+
 func TestReloadConfigReplacesIdleSessionsAndPreservesHostTools(t *testing.T) {
 	client := fakellm.New()
 	factory := func(model, prompt string) func(SessionOpts) (chat.Config, error) {
@@ -35,14 +41,15 @@ func TestReloadConfigReplacesIdleSessionsAndPreservesHostTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := sess.Snapshot()
-	if snap.Model != "new" || snap.SystemPrompt != "new prompt" || len(snap.Tools) != 2 || snap.Tools[1].Name != "telegram" {
+	model, prompt := sessionConfigIdentity(sess)
+	if model != "new" || prompt != "new prompt" || len(snap.Tools) != 2 || snap.Tools[1].Name != "telegram" {
 		t.Fatalf("reloaded snapshot = %+v", snap)
 	}
 	created, err := rt.Session(SessionOpts{Name: "after"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := created.Snapshot().Model; got != "new" {
+	if got, _ := sessionConfigIdentity(created); got != "new" {
 		t.Fatalf("new session model=%q", got)
 	}
 }
@@ -69,20 +76,20 @@ func TestReloadConfigDefersBusySessionUntilTurnEnds(t *testing.T) {
 	if err := rt.ReloadConfig(factory("new")); err != nil {
 		t.Fatal(err)
 	}
-	if got := sess.Snapshot().SystemPrompt; got != "old" {
+	if _, got := sessionConfigIdentity(sess); got != "old" {
 		t.Fatalf("busy session changed prompt to %q", got)
 	}
 	created, err := rt.Session(SessionOpts{Name: "after"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := created.Snapshot().SystemPrompt; got != "new" {
+	if _, got := sessionConfigIdentity(created); got != "new" {
 		t.Fatalf("new session prompt=%q", got)
 	}
 	cancel()
 	for range events {
 	}
-	if got := sess.Snapshot().SystemPrompt; got != "new" {
+	if _, got := sessionConfigIdentity(sess); got != "new" {
 		t.Fatalf("completed session prompt=%q", got)
 	}
 }

@@ -24,7 +24,6 @@ type consoleTheme struct {
 	output    lipgloss.Style
 	err       lipgloss.Style
 	toolBash  lipgloss.Style
-	toolEdit  lipgloss.Style
 	toolBG    lipgloss.Style
 	toolOther lipgloss.Style
 }
@@ -66,7 +65,6 @@ func newTheme(in io.Reader, out io.Writer) consoleTheme {
 		output:    lipgloss.NewStyle().Foreground(colors.dim),
 		err:       lipgloss.NewStyle().Foreground(colors.red).Bold(true),
 		toolBash:  lipgloss.NewStyle().Foreground(colors.cyan).Bold(true),
-		toolEdit:  lipgloss.NewStyle().Foreground(colors.green).Bold(true),
 		toolBG:    lipgloss.NewStyle().Foreground(colors.red).Bold(true),
 		toolOther: lipgloss.NewStyle().Foreground(colors.pink).Bold(true),
 	}
@@ -83,8 +81,6 @@ func (t consoleTheme) toolFor(name string) lipgloss.Style {
 		return t.toolBash
 	case "bash_bg":
 		return t.toolBG
-	case "edit_file":
-		return t.toolEdit
 	default:
 		return t.toolOther
 	}

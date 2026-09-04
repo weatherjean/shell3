@@ -7,32 +7,19 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-func TestEmitAssistantTokenAndMessage(t *testing.T) {
+func TestEmitAssistantToken(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
 	emitAssistantToken(s, "Hel")
 	emitAssistantToken(s, "lo")
-	emitAssistantMessage(s, "Hello")
 	got := c.all()
-	if len(got) != 3 {
-		t.Fatalf("got %d events, want 3", len(got))
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
 	}
 	if got[0].Kind != EventAssistantToken || got[0].Text != "Hel" {
 		t.Errorf("event[0]: %+v", got[0])
 	}
 	if got[1].Kind != EventAssistantToken || got[1].Text != "lo" {
 		t.Errorf("event[1]: %+v", got[1])
-	}
-	if got[2].Kind != EventAssistantMessage || got[2].Text != "Hello" {
-		t.Errorf("event[2]: %+v", got[2])
-	}
-}
-
-func TestEmitUserMessage(t *testing.T) {
-	s, c := newCollectorSession(SessionOpts{})
-	emitUserMessage(s, "hi")
-	got := c.all()
-	if len(got) != 1 || got[0].Kind != EventUserMessage || got[0].Text != "hi" {
-		t.Fatalf("user_message event mismatch: %+v", got)
 	}
 }
 
@@ -69,15 +56,6 @@ func TestEmitAssistantReasoning(t *testing.T) {
 	got := c.all()
 	if len(got) != 1 || got[0].Kind != EventAssistantReasoning || got[0].Text != "thinking..." {
 		t.Fatalf("assistant_reasoning event mismatch: %+v", got)
-	}
-}
-
-func TestEmitSystemReminder(t *testing.T) {
-	s, c := newCollectorSession(SessionOpts{})
-	emitSystemReminder(s, "ctx 50%")
-	got := c.all()
-	if len(got) != 1 || got[0].Kind != EventSystemReminder || got[0].Text != "ctx 50%" {
-		t.Fatalf("system_reminder mismatch: %+v", got)
 	}
 }
 

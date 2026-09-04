@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 func TestDrainTurnKeepsAllPostedSegments(t *testing.T) {
@@ -23,7 +22,7 @@ func TestDrainTurnKeepsAllPostedSegments(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, true)
+	got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil)
 	want := "Let me check what completed.\n\nNo tasks running. Checking history.\n\nThat notice means a job finished."
 	if got != want {
 		t.Fatalf("posted turn lost an assistant segment:\n got %q\nwant %q", got, want)
@@ -38,22 +37,8 @@ func TestDrainTurnKeepsPreToolSegmentWhenNoFinalMessage(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	if got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, true); got != "Done — files updated." {
+	if got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil); got != "Done — files updated." {
 		t.Fatalf("want fallback to last non-empty segment, got %q", got)
-	}
-}
-
-func TestDrainWakeTurnKeepsOnlyFinalSegment(t *testing.T) {
-	ch := make(chan shell3.Event, 6)
-	ch <- shell3.Event{Kind: shell3.Token, Text: "Checking the job."}
-	ch <- shell3.Event{Kind: shell3.ToolCall, ToolName: "bash"}
-	ch <- shell3.Event{Kind: shell3.ToolResult, ToolName: "bash"}
-	ch <- shell3.Event{Kind: shell3.Token, Text: "The job needs attention."}
-	close(ch)
-
-	b := &Bot{}
-	if got, _, _ := tconv(b).drainTurn(context.Background(), ch, nil, false); got != "The job needs attention." {
-		t.Fatalf("quiet wake turn should keep only its final message, got %q", got)
 	}
 }
 
@@ -64,7 +49,7 @@ func TestDrainTurnAppendsErrors(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	got, errText, _ := tconv(b).drainTurn(context.Background(), ch, nil, true)
+	got, errText, _ := tconv(b).drainTurn(context.Background(), ch, nil)
 	if !strings.Contains(got, "Trying.") || !strings.Contains(errText, "boom") {
 		t.Fatalf("want text and error, got %q / %q", got, errText)
 	}
@@ -92,18 +77,5 @@ func TestChunkCountsUTF16(t *testing.T) {
 	}
 	if got := chunk(strings.Repeat("a", tgMaxMessage)); len(got) != 1 {
 		t.Fatalf("ASCII at exactly the cap must stay one chunk, got %d", len(got))
-	}
-}
-
-func TestIsNoReplyMangledTails(t *testing.T) {
-	for _, s := range []string{"NO_REPLY", "no_reply.", "NO_REPLY!", "`NO_REPLY`", "_REPLY", "O_REPLY", "REPLY", ""} {
-		if !strutil.IsNoReply(s) {
-			t.Errorf("IsNoReply(%q) = false, want true", s)
-		}
-	}
-	for _, s := range []string{"PLY", "the reply is ready", "NO_REPLY needed here, sending anyway", "All done — see summary"} {
-		if strutil.IsNoReply(s) {
-			t.Errorf("IsNoReply(%q) = true, want false", s)
-		}
 	}
 }

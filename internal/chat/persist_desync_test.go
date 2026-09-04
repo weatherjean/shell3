@@ -13,7 +13,7 @@ func TestSaveHistory_AfterResume_DoesNotReflushSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open runs store: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

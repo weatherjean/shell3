@@ -297,12 +297,6 @@ func (s Store) Archive(delivery Delivery) error {
 	return s.moveClaim(delivery, StatusArchived, "archive")
 }
 
-// Release returns an unsuccessfully handled claim to the pending queue without
-// changing its contents. A future wake or process restart can claim it again.
-func (s Store) Release(delivery Delivery) error {
-	return s.moveClaim(delivery, StatusNew, "release")
-}
-
 func (s Store) moveClaim(delivery Delivery, status NoticeStatus, action string) error {
 	if delivery.path == "" {
 		return errors.New("inbox: delivery has no claim path")

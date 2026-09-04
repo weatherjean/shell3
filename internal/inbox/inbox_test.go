@@ -255,28 +255,7 @@ func TestReadRejectsTraversalMessageID(t *testing.T) {
 	}
 }
 
-func TestReleaseReturnsClaimToNewQueue(t *testing.T) {
-	store := Store{Root: t.TempDir()}
-	if _, err := store.Notify(Request{To: "main", Source: "test", Event: "cancel", Body: "try later"}); err != nil {
-		t.Fatal(err)
-	}
-	delivery, ok, err := store.Claim("main")
-	if err != nil || !ok {
-		t.Fatalf("claim: ok=%v err=%v", ok, err)
-	}
-	if err := store.Release(delivery); err != nil {
-		t.Fatal(err)
-	}
-	notice, err := store.Read("main", delivery.Message.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if notice.Status != StatusNew {
-		t.Fatalf("released status = %s", notice.Status)
-	}
-}
-
-func TestReadProgressRequiresSequentialCompleteReadAndResetsOnRelease(t *testing.T) {
+func TestReadProgressRequiresSequentialCompleteRead(t *testing.T) {
 	store := Store{Root: t.TempDir()}
 	if _, err := store.Notify(Request{To: "main", Source: "test", Event: "read", Body: "abcdefghij"}); err != nil {
 		t.Fatal(err)
@@ -302,16 +281,6 @@ func TestReadProgressRequiresSequentialCompleteReadAndResetsOnRelease(t *testing
 	}
 	if full, err := store.FullyRead(delivery); err != nil || !full {
 		t.Fatalf("complete full=%v err=%v", full, err)
-	}
-	if err := store.Release(delivery); err != nil {
-		t.Fatal(err)
-	}
-	delivery, ok, err = store.Claim("main")
-	if err != nil || !ok {
-		t.Fatalf("reclaim: ok=%v err=%v", ok, err)
-	}
-	if offset, err := store.ReadOffset("main", delivery.Message.ID); err != nil || offset != 0 {
-		t.Fatalf("reset offset=%d err=%v", offset, err)
 	}
 }
 

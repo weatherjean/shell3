@@ -1,7 +1,4 @@
-// Package strutil holds the rune-safe string truncation helpers shared by the
-// runtime and front-ends. Byte-cap helpers (Truncate, Tail) bound storage and
-// context budgets; the rune-count helper (CutRunes) bounds display columns and
-// injected-summary lengths.
+// Package strutil holds rune-safe byte truncation helpers.
 package strutil
 
 import "unicode/utf8"
@@ -48,24 +45,4 @@ func Tail(s string, max int) string {
 		cut++
 	}
 	return "…" + s[cut:]
-}
-
-// CutRunes returns s truncated to at most n runes and whether it was cut. No
-// ellipsis is added — for callers that append their own truncation marker.
-func CutRunes(s string, n int) (string, bool) {
-	r := []rune(s)
-	if len(r) <= n {
-		return s, false
-	}
-	return string(r[:n]), true
-}
-
-// Ellipsize clamps s to at most n runes, marking a cut with an ellipsis. For
-// display budgets counted in columns rather than bytes.
-func Ellipsize(s string, n int) string {
-	cut, trimmed := CutRunes(s, n)
-	if trimmed {
-		return cut + ellipsis
-	}
-	return cut
 }

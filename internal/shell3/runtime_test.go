@@ -2,8 +2,6 @@ package shell3
 
 import (
 	"context"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/chat"
@@ -14,8 +12,8 @@ import (
 
 // newTestRuntime builds a Runtime around fakellm-backed configs, bypassing
 // runtime assembly the same way newTestSession does for single sessions. It opens a
-// real runs.Store in a temp dir so sessions (including in-process subagents)
-// can persist messages, and initialises rt.jobs for background-job tests.
+// real runs.Store in a temp dir so sessions can persist messages, and
+// initialises rt.jobs for background-job tests.
 func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
 	store, err := runs.Open(t.TempDir())
@@ -27,22 +25,18 @@ func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			cfg := mk()
 			cfg.Headless = o.Headless
-			if o.WorkDir != "" {
-				cfg.WorkDir = o.WorkDir
-			}
 			if cfg.Store == nil {
 				cfg.Store = store
 			}
 			return cfg, nil
 		},
-		events:    make(chan HostEvent, 64),
-		jobEvents: make(chan JobProgress, 256),
-		workDir:   t.TempDir(),
-		store:     store,
-		ctx:       ctx,
-		cancel:    cancel,
-		cleanup:   func() {},
-		sessions:  map[string]*Session{},
+		jobCompletions: make(chan struct{}, defaultMaxConcurrent),
+		workDir:        t.TempDir(),
+		store:          store,
+		ctx:            ctx,
+		cancel:         cancel,
+		cleanup:        func() {},
+		sessions:       map[string]*Session{},
 	}
 	rt.jobs = newJobManager(rt, 0)
 	t.Cleanup(func() { _ = rt.Close() })
@@ -56,7 +50,6 @@ func fakeCfg(text string) func() chat.Config {
 				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: text}}},
 				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: text}}},
 			),
-			Agent: "code",
 		}
 	}
 }
@@ -74,11 +67,16 @@ func TestRuntime_SessionsAreIndependent(t *testing.T) {
 
 	for range a.Send(context.Background(), "first") {
 	}
-	if a.MessageCount() == 0 {
+	msgsA, err := rt.store.LoadMessages(a.ID())
+	if err != nil || len(msgsA) == 0 {
 		t.Fatal("session a has no history after a turn")
 	}
-	if b.MessageCount() != 0 {
-		t.Fatalf("session b inherited a's history: %d messages", b.MessageCount())
+	msgsB, err := rt.store.LoadMessages(b.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(msgsB); got != 0 {
+		t.Fatalf("session b inherited a's history: %d messages", got)
 	}
 }
 
@@ -125,42 +123,5 @@ func TestRuntime_CloseClosesSessions(t *testing.T) {
 	}
 	if cleanups != 1 {
 		t.Fatalf("second Close re-ran cleanup (%d)", cleanups)
-	}
-}
-
-func TestRuntime_PerSessionWorkdir(t *testing.T) {
-	dirA, dirB := t.TempDir(), t.TempDir()
-	mk := func() chat.Config {
-		return chat.Config{
-			LLM: fakellm.New(
-				fakellm.Script{Events: []llm.StreamEvent{
-					{ToolCall: &llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"pwd"}`}},
-				}},
-				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
-			),
-			Agent: "code",
-			Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{
-				Name: "bash", Parameters: map[string]any{"type": "object"},
-			}}},
-		}
-	}
-	rt := newTestRuntime(t, mk)
-	a, _ := rt.Session(SessionOpts{WorkDir: dirA})
-	b, _ := rt.Session(SessionOpts{WorkDir: dirB})
-
-	got := map[*Session]string{}
-	for _, s := range []*Session{a, b} {
-		for ev := range s.Send(context.Background(), "where am I?") {
-			if ev.Kind == ToolResult && ev.ToolName == "bash" {
-				got[s] = strings.TrimSpace(ev.ToolOutput)
-			}
-		}
-	}
-	wantA, _ := filepath.EvalSymlinks(dirA)
-	wantB, _ := filepath.EvalSymlinks(dirB)
-	gotA, _ := filepath.EvalSymlinks(got[a])
-	gotB, _ := filepath.EvalSymlinks(got[b])
-	if gotA != wantA || gotB != wantB {
-		t.Fatalf("bash cwd: a=%q (want %q) b=%q (want %q)", gotA, wantA, gotB, wantB)
 	}
 }

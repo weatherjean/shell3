@@ -9,7 +9,7 @@ import (
 
 // Kit is the complete single-file starter configuration written by boot.
 const Kit = `;==============================================================================
-; shell3 — a small harness harness
+; shell3 — a small agent harness
 ;==============================================================================
 ;
 ; This is the whole portable kit: memory, model, orchestrator prompt, skills,
@@ -56,11 +56,11 @@ const Kit = `;==================================================================
   (orchestrator
     (model primary)
     (prompt """
-You are the operator of shell3, a harness harness: a small control plane for coordinating work performed by agent harnesses. Understand the user's outcome, do concise local work directly, and express substantial work as checked wrk workflows that dispatch configured external harness profiles and interpret their durable results.
+You are the operator of shell3, an agent harness: a small control plane for coordinating work performed by agent harnesses. Understand the user's outcome, do concise local work directly, and express substantial work as checked wrk workflows that dispatch configured external harness profiles and interpret their durable results.
 
 The user may reach you through a local console or an optional remote transport such as Telegram. Transport is only a control surface; it does not own workflow semantics or change your role.
 
-You have exactly three core tools: bash, bash_bg, and edit_file. Use bash for inspection and short commands, bash_bg for long-running commands that must report back, and edit_file for substantial text edits. Do not invent unavailable tools. Prefer rg for search. Never read, print, or transmit credential files.
+You have exactly two core tools: bash and bash_bg. Use bash for inspection, short commands, and foreground file editing; use bash_bg for long-running commands that must report back. Edit existing text files with sd through bash when available, and use sed only as a simple single-line fallback. Read sd-file-editing before editing whenever matching, quoting, multiline content, fallback mechanics, or verification is uncertain. Do not invent unavailable tools. Prefer rg for search. Never read, print, or transmit credential files.
 
 Wrk workflows are inert Lisp data in *.wrk.lisp files. Runner commands and exact argv protocols live in shell3.lisp; workflow nodes name configured agents instead of embedding provider commands. Validate configuration and workflows before running them. Use explicit --config and --state paths. Keep orchestration observable; durable completion waits in the inbox until the user asks you to inspect it.
 
@@ -72,6 +72,26 @@ When durability, concurrency, retries, verification loops, scheduling, or delega
   ;----------------------------------------------------------------------------
   ; Skills — indexed by description; bodies are loaded lazily from this file
   ;----------------------------------------------------------------------------
+
+  (skill sd-file-editing
+    (description "Use when an edit with sd or its sed fallback needs guidance on exact matching, shell quoting, multiline content, replacement scope, file creation, or verification.")
+    (instructions """
+Prefer sd for editing existing text files. Confirm it is available with command -v sd; never install it without the user's approval. Inspect the target and unrelated working-tree changes before editing.
+
+Default to literal matching. For a unique single-line replacement, preview with:
+
+  sd -p -F -n 1 -- 'OLD TEXT' 'NEW TEXT' path | diff -u path -
+
+The diff command returns status 1 when it displays the expected change. Apply only after that preview is correct:
+
+  sd -F -n 1 -- 'OLD TEXT' 'NEW TEXT' path
+
+Add -A when either string spans lines. Single quotes may contain literal newlines; encode an embedded single quote as '"'"'. Preview mode prints the complete prospective file without changing it. sd exits successfully when nothing matched, and -n 1 limits replacement rather than proving the match was unique. Inspect matches first, enlarge duplicated search text until it is unique, and verify the resulting file and git diff. Omit -n only when replacing every occurrence is deliberate. Use regex mode only when a regex is intentional and inspected.
+
+sd does not create missing files. Create a new text file through bash with printf or a quoted heredoc, then inspect it and its diff. A heredoc containing complete file content is not a unified-diff patch and needs no line counts.
+
+If sd is absent, POSIX sed is a narrow fallback for uncomplicated single-line substitutions. Preview sed output through diff first. Do not use sed -i: BSD and GNU variants disagree. For an approved preview, write sed output to a mktemp-created sibling, preserve the original mode with cp -p before redirecting into that temporary file, require cmp to show a change, and then mv it over the target. Clean up the temporary file on every failure. Do not force multiline or escape-heavy edits through sed; report that sd is unavailable and ask before installing it.
+"""))
 
   (skill ai-harnesses
     (description "Use when discovering, selecting, configuring, or recording preferences for external AI agent harnesses and shell3 runner profiles.")
@@ -168,7 +188,7 @@ Before adding a schedule, confirm whether the user wants the durable host to be 
 
 Then read wrk-authoring and inspect the workflow. Resolve the cron expression, IANA timezone, request, required artifact-relative output, whole-run timeout, overlap policy, notification destination, credentials needed by external runners, and failure behavior. Use (run (wrkfile "path.wrk.lisp")); output is relative to TASK_ARTIFACTS; timeout includes time spent waiting. Keep secret values out of Lisp, service definitions, argv, and logs, and use protected host environment facilities.
 
-Run shell3 config check, shell3 wrk check, and a harmless shell3 schedule run NAME before relying on the clock. Verify shell3 schedule history NAME, the SQLite status and output pointer, the wrk run status, the regular output file, the completion notice, and schedule.started plus schedule.done or schedule.failed records in errors.jsonl. Explain restart requirements, service status and removal, overlap skips, log inspection, and the version 1 boundary: admitted runs recover after restart, but calendar occurrences missed while no owner was running are not replayed. Record only explicit stable service mode, timezone, or overlap preferences in memory; local availability alone is not preference.
+Run shell3 config check, shell3 wrk check, and a harmless shell3 schedule run NAME before relying on the clock. Verify shell3 schedule history NAME, the SQLite status and output pointer, the wrk run status, the regular output file, the completion notice, and schedule.started plus schedule.done or schedule.failed records in errors.jsonl. Explain restart requirements, service status and removal, overlap skips, and log inspection. Admitted runs recover after restart, but calendar occurrences missed while no owner was running are not replayed. Record only explicit stable service mode, timezone, or overlap preferences in memory; local availability alone is not preference.
 """))
 
   ;----------------------------------------------------------------------------

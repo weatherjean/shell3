@@ -28,8 +28,8 @@ func defaultClient(m lispconfig.Model, key string) llm.Streamer {
 	return client
 }
 
-// Open builds a native runtime whose only model-facing tools are bash,
-// bash_bg, and edit_file. The Lisp file is parsed before any secret is read.
+// Open builds a native runtime whose only model-facing tools are bash and
+// bash_bg. The Lisp file is parsed before any secret is read.
 func Open(ctx context.Context, configPath, workDir string) (*shell3.Runtime, error) {
 	return openWithClient(ctx, configPath, workDir, defaultClient)
 }
@@ -142,7 +142,7 @@ func sessionFactory(cfg *lispconfig.Config, configPath, workDir string, telegram
 		return nil, fmt.Errorf("%s: missing orchestrator form", configPath)
 	}
 	model := cfg.Models[cfg.Main.Model]
-	apiKey, err := lispconfig.ResolveSecret(configPath, model.APIKeyEnv)
+	apiKey, err := lispconfig.ResolveSecret(model.APIKeyEnv)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", configPath, err)
 	}
@@ -151,23 +151,13 @@ func sessionFactory(cfg *lispconfig.Config, configPath, workDir string, telegram
 		return nil, fmt.Errorf("resolve shell3 executable: %w", err)
 	}
 	local := paths.NewLocal(workDir)
-	configDir := filepath.Dir(configPath)
 	prompt := renderPrompt(cfg, configPath, workDir, executable, telegram)
 	defs := coreToolDefinitions()
 	factory := func(opts shell3.SessionOpts) (chat.Config, error) {
-		wd := opts.WorkDir
-		if wd == "" {
-			wd = workDir
-		}
-		activeSkills := make([]string, 0, len(cfg.Skills))
-		for _, skill := range cfg.Skills {
-			activeSkills = append(activeSkills, skill.Name)
-		}
 		return chat.Config{
 			LLM:          makeClient(model, apiKey),
 			Store:        store,
-			WorkDir:      wd,
-			ConfigDir:    configDir,
+			WorkDir:      workDir,
 			PromptSuffix: opts.PromptSuffix,
 			RenderEnvironment: func(sessionID string) string {
 				return fmt.Sprintf("<system-reminder>\nEnvironment:\n- shell3 config: %s\n- embedded skills: %d (use shell3 config skill to read one)\n- runs: %s\n- model: %s\n- session: %s\n</system-reminder>",
@@ -177,12 +167,10 @@ func sessionFactory(cfg *lispconfig.Config, configPath, workDir string, telegram
 				SystemPrompt: prompt,
 				Tools:        defs,
 			},
-			Agent:        "orchestrator",
-			ModelID:      model.ID,
-			ActiveSkills: activeSkills,
-			AgentKnobs:   contextPolicy(model.ContextWindow),
-			Log:          log,
-			Headless:     opts.Headless,
+			ModelID:    model.ID,
+			AgentKnobs: contextPolicy(model.ContextWindow),
+			Log:        log,
+			Headless:   opts.Headless,
 		}, nil
 	}
 	return factory, nil

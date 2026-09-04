@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
@@ -45,12 +44,13 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		}
 		ask := m
 		ask.Text = q
-		c.dispatchMail(ctx, []inMail{{m: ask, text: q}})
+		c.dispatchMessages(ctx, []inboundMessage{{m: ask, text: q}})
 	case "/help":
 		c.sendReply(ctx, c.helpText())
 	case "/stop":
 		// Turn-only. Background jobs are NEVER killed here: they keep running
-		// and wake their session on completion. /superstop kills those too.
+		// and write passive inbox notices on completion. /superstop kills
+		// those too.
 		c.mu.Lock()
 		cancel := c.cancelTurn
 		c.mu.Unlock()
@@ -94,10 +94,7 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 	if turnStopped {
 		cancel()
 	}
-	var killed []shell3.KilledJob
-	if sess := c.b.LiveSession(); sess != nil {
-		killed = sess.KillAllForStop()
-	}
+	killed := c.b.rt.KillAllForStop()
 	if !turnStopped && len(killed) == 0 {
 		c.sendReply(ctx, "nothing was running")
 		return
@@ -109,19 +106,19 @@ func (c *conversation) handleSuperstop(ctx context.Context) {
 	}
 	fmt.Fprintf(&sb, " killed %d job(s)", len(killed))
 	for _, k := range killed {
-		fmt.Fprintf(&sb, "\n- `%s` %s — %s (ran %s)", k.ID, k.Kind, strutil.Truncate(k.Title, 80), k.Runtime)
+		fmt.Fprintf(&sb, "\n- `%s` command — %s (ran %s)", k.ID, strutil.Truncate(k.Title, 80), k.Runtime)
 	}
 	summary := sb.String()
 	c.sendReply(ctx, summary)
 	if main != nil {
-		main.NotifyTextNoWake("[superstop] the user stopped everything. " +
+		main.QueueHostNotice("[superstop] the user stopped everything. " +
 			"Do not resume or retry the killed work unless asked.\n" + summary)
 	}
 }
 
 // handleNewCommand starts a fresh conversation: detach the current session,
-// closing it when no jobs are running (they keep going and re-route to the new
-// one), clear the marker, and let the next message create the replacement.
+// closing it when no jobs are running, clear the marker, and let the next
+// message create the replacement.
 // Refused mid-turn — /stop first.
 func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.mu.Lock()
@@ -133,7 +130,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.mu.Unlock()
 	// Clear the marker before detaching so a restart cannot resurrect the
 	// conversation being replaced.
-	if err := c.setCurrentThread(""); err != nil {
+	if err := c.setCurrentSession(""); err != nil {
 		c.b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
 	}
 	c.mu.Lock()
@@ -141,16 +138,14 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	c.main = nil
 	c.mainAnchor = ""
 	c.steerAnchor = ""
-	c.lastWakeReply = ""
 	c.contextMilestone = 0
-	c.wakePending = false
 	c.mu.Unlock()
-	// Close only a fully-idle session: running jobs keep it open, and undrained
-	// mail stays durable and searchable rather than torn down undelivered.
-	if old != nil && !c.b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
+	// Close only a fully-idle session: running jobs and undrained messages still
+	// need their owning session.
+	if old != nil && old.RunningJobs() == 0 && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
-	c.sendReply(ctx, "🧵 fresh conversation — the old one stays searchable in history")
+	c.sendReply(ctx, "🧵 fresh conversation — the old conversation remains stored")
 }
 
 // helpText covers what the command list cannot show: that each chat is its own

@@ -17,9 +17,9 @@ func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
-	for i, m := range sess.Messages() {
+	for i, m := range sess.messages {
 		if m.Role == llm.RoleUser && m.Content == "" {
-			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.Messages())
+			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.messages)
 		}
 	}
 }
@@ -43,7 +43,7 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("queued text did not reach the wire on the wake turn; msgs=%+v", calls[0].Msgs)
+		t.Fatalf("queued text did not reach the wire on the follow-up turn; msgs=%+v", calls[0].Msgs)
 	}
 }
 
@@ -56,11 +56,11 @@ func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	if calls := fake.CallsSnapshot(); len(calls) != 0 {
-		t.Fatalf("whitespace-only wake turn sent %d provider call(s); want 0: %+v", len(calls), calls)
+		t.Fatalf("whitespace-only queued turn sent %d provider call(s); want 0: %+v", len(calls), calls)
 	}
-	for i, m := range sess.Messages() {
+	for i, m := range sess.messages {
 		if m.Role == llm.RoleUser && m.Content == "" {
-			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.Messages())
+			t.Fatalf("empty user message persisted at index %d: %+v", i, sess.messages)
 		}
 	}
 }
@@ -73,12 +73,12 @@ func TestNormalTurn_PersistsUserMessage(t *testing.T) {
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hello"}, nil)
 
 	var found bool
-	for _, m := range sess.Messages() {
+	for _, m := range sess.messages {
 		if m.Role == llm.RoleUser && m.Content == "hello" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("normal turn dropped its user message; msgs=%+v", sess.Messages())
+		t.Fatalf("normal turn dropped its user message; msgs=%+v", sess.messages)
 	}
 }

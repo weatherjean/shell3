@@ -15,6 +15,7 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
 
 func testStore(t *testing.T) func() *runs.Store {
@@ -27,8 +28,8 @@ func testStore(t *testing.T) func() *runs.Store {
 	return func() *runs.Store { return st }
 }
 
-func TestThreadIndexRoundtrip(t *testing.T) {
-	idx := NewThreadIndex(testStore(t), "telegram")
+func TestSessionIndexRoundtrip(t *testing.T) {
+	idx := NewSessionIndex(testStore(t), "telegram")
 	if err := idx.SetCurrent("sess-abc"); err != nil {
 		t.Fatal(err)
 	}
@@ -38,30 +39,30 @@ func TestThreadIndexRoundtrip(t *testing.T) {
 	}
 }
 
-func TestThreadIndexPersistence(t *testing.T) {
+func TestSessionIndexPersistence(t *testing.T) {
 	st := testStore(t)
-	idx := NewThreadIndex(st, "telegram")
+	idx := NewSessionIndex(st, "telegram")
 	if err := idx.SetCurrent("s1"); err != nil {
 		t.Fatal(err)
 	}
 
-	idx2 := NewThreadIndex(st, "telegram")
+	idx2 := NewSessionIndex(st, "telegram")
 	got, ok := idx2.Current()
 	if !ok || got != "s1" {
 		t.Fatalf("Current() after restart = %q, %v; want s1, true", got, ok)
 	}
 }
 
-func TestThreadIndexUnknown(t *testing.T) {
-	idx := NewThreadIndex(testStore(t), "telegram")
+func TestSessionIndexUnknown(t *testing.T) {
+	idx := NewSessionIndex(testStore(t), "telegram")
 	if got, ok := idx.Current(); ok {
 		t.Fatalf("Current() = %q, true; want _, false", got)
 	}
 }
 
-func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
+func TestSessionIndexClearedMarkerReadsAbsent(t *testing.T) {
 	st := testStore(t)
-	idx := NewThreadIndex(st, "telegram")
+	idx := NewSessionIndex(st, "telegram")
 	if err := idx.SetCurrent("s1"); err != nil {
 		t.Fatal(err)
 	}
@@ -71,25 +72,25 @@ func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
 	if got, ok := idx.Current(); ok {
 		t.Fatalf("Current() after clear = %q, true; want _, false", got)
 	}
-	if got, ok := NewThreadIndex(st, "telegram").Current(); ok {
+	if got, ok := NewSessionIndex(st, "telegram").Current(); ok {
 		t.Fatalf("Current() after clear + restart = %q, true; want _, false", got)
 	}
 }
 
-func TestThreadIndexSurfaceIsolation(t *testing.T) {
+func TestSessionIndexSurfaceIsolation(t *testing.T) {
 	st := testStore(t)
-	tg := NewThreadIndex(st, "telegram")
-	sv := NewThreadIndex(st, "other")
+	tg := NewSessionIndex(st, "telegram")
+	sv := NewSessionIndex(st, "other")
 	if err := tg.SetCurrent("tg-sess"); err != nil {
 		t.Fatal(err)
 	}
 	if err := sv.SetCurrent("other-sess"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := NewThreadIndex(st, "telegram").Current(); got != "tg-sess" {
+	if got, _ := NewSessionIndex(st, "telegram").Current(); got != "tg-sess" {
 		t.Fatalf("telegram Current() = %q", got)
 	}
-	if got, _ := NewThreadIndex(st, "other").Current(); got != "other-sess" {
+	if got, _ := NewSessionIndex(st, "other").Current(); got != "other-sess" {
 		t.Fatalf("other Current() = %q", got)
 	}
 }
@@ -102,19 +103,19 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+	rt := shell3test.NewRuntimeForTestConfig(t, func(o shell3.SessionOpts) (chat.Config, error) {
 		scripts := make([]fakellm.Script, 8)
 		for i := range scripts {
 			scripts[i] = fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}}
 		}
 		return chat.Config{
-			LLM: fakellm.New(scripts...), Agent: "code",
+			LLM:   fakellm.New(scripts...),
 			Store: st, Headless: o.Headless,
 		}, nil
 	})
 	t.Cleanup(func() { _ = rt.Close() })
 
-	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	idx := NewSessionIndex(func() *runs.Store { return st }, "telegram")
 	b := NewBot(newFakeClient(), rt, 42, idx)
 	b.debounce = time.Millisecond
 	return b, st
@@ -148,7 +149,7 @@ func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
+	reread := NewSessionIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("persisted marker = %q, want the resumed session %q (stale marker forks the conversation)", got, second.ID())
@@ -169,7 +170,7 @@ func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
+	reread := NewSessionIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("marker %q != live session %q after reload", got, second.ID())
@@ -202,16 +203,16 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 		{Usage: &llm.Usage{PromptTokens: 50, TotalTokens: 50}},
 	}})
 
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+	rt := shell3test.NewRuntimeForTestConfig(t, func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: fakellm.New(scripts...), Agent: "code",
+			LLM:   fakellm.New(scripts...),
 			Store: st, Headless: o.Headless,
 			AgentKnobs: chat.AgentKnobs{CompactAt: 100, KeepRecent: 50},
 		}, nil
 	})
 	t.Cleanup(func() { _ = rt.Close() })
 
-	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	idx := NewSessionIndex(func() *runs.Store { return st }, "telegram")
 	fc := newFakeClient()
 	b := NewBot(fc, rt, 42, idx)
 	b.debounce = time.Millisecond
@@ -240,15 +241,15 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 		t.Fatal("compaction did not roll the store id; this test proves nothing — fix the setup")
 	}
 
-	reread := NewThreadIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
+	reread := NewSessionIndex(func() *runs.Store { return st }, roomSurface("telegram", b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != after {
 		t.Fatalf("marker = %q, want the post-compaction session %q — a restart would resume the stale one and orphan the conversation", got, after)
 	}
 }
 
-func TestThreadIndexConcurrentSetCurrent(t *testing.T) {
-	idx := NewThreadIndex(testStore(t), "telegram")
+func TestSessionIndexConcurrentSetCurrent(t *testing.T) {
+	idx := NewSessionIndex(testStore(t), "telegram")
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)

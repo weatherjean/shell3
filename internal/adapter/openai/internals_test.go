@@ -172,7 +172,7 @@ func TestToMessagesThinkingModeEchoesEmptyReasoning(t *testing.T) {
 		{Role: llm.RoleTool, Content: "ok", ToolCallID: "1"},
 		{
 			Role:      llm.RoleAssistant,
-			ToolCalls: []llm.ToolCall{{ID: "2", Name: "edit_file", RawArgs: `{}`}},
+			ToolCalls: []llm.ToolCall{{ID: "2", Name: "other_tool", RawArgs: `{}`}},
 		},
 	}
 	out := toMessages(msgs)

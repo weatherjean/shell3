@@ -21,10 +21,9 @@ func (m *jobManager) output(id string) string {
 func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 	m.mu.Lock()
 	j := m.jobs[id]
-	if j != nil && suppressCompletion && !j.finished {
+	if j != nil && suppressCompletion {
 		j.suppress = true
 	}
-	finished := j != nil && j.finished
 	var cancelFn context.CancelFunc
 	if j != nil {
 		cancelFn = j.cancel
@@ -33,7 +32,7 @@ func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 	if j == nil {
 		return fmt.Errorf("no such task %q", id)
 	}
-	if !finished && cancelFn != nil {
+	if cancelFn != nil {
 		cancelFn()
 	}
 	return nil
@@ -41,16 +40,22 @@ func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
+	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "0.1"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	if got := m.list(); len(got) != 1 || got[0].ID != id || got[0].Kind != JobCommand {
-		t.Fatalf("list = %+v, want one JobCommand id=%s", got, id)
+	m.mu.Lock()
+	running := m.runningCount()
+	m.mu.Unlock()
+	if running != 1 {
+		t.Fatalf("running count = %d, want 1", running)
 	}
 	m.wg.Wait()
-	if !strings.Contains(m.output(id), "hi") {
-		t.Fatalf("output never contained 'hi': %q", m.output(id))
+	m.mu.Lock()
+	running = m.runningCount()
+	m.mu.Unlock()
+	if running != 0 {
+		t.Fatalf("running count after completion = %d, want 0", running)
 	}
 }
 
@@ -76,81 +81,6 @@ func TestJobManagerRejectsNewWorkAfterShutdownStarts(t *testing.T) {
 		t.Fatal("startCommand admitted work after cancelAll")
 	}
 	m.wait()
-}
-
-func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
-	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil)
-	if err != nil {
-		t.Fatalf("startCommand: %v", err)
-	}
-
-	m.wg.Wait()
-	if !strings.Contains(m.output(id), "retained") {
-		t.Fatalf("output never contained 'retained': %q", m.output(id))
-	}
-
-	jobs := m.list()
-	if len(jobs) != 1 {
-		t.Fatalf("list() should retain 1 done job, got %d", len(jobs))
-	}
-	if !jobs[0].Done {
-		t.Fatalf("finished command job should have Done=true, got %+v", jobs[0])
-	}
-	if jobs[0].Exit == nil {
-		t.Fatal("finished command job should have non-nil Exit")
-	}
-}
-
-func TestJobManagerDoneCap(t *testing.T) {
-	m := newJobManager(nil, maxDoneJobs+10)
-
-	for i := 0; i < maxDoneJobs+1; i++ {
-		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
-		if err != nil {
-			t.Fatalf("startCommand %d: %v", i, err)
-		}
-	}
-
-	m.wg.Wait()
-
-	jobs := m.list()
-	if len(jobs) > maxDoneJobs {
-		t.Fatalf("done-job cap: got %d jobs, want at most %d", len(jobs), maxDoneJobs)
-	}
-	for _, j := range jobs {
-		if !j.Done {
-			t.Fatalf("non-done job found after wg.Wait(): %+v", j)
-		}
-	}
-}
-
-func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
-	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil)
-	if err != nil {
-		t.Fatalf("startCommand: %v", err)
-	}
-	m.wg.Wait() // wait for the job goroutine to finish
-	if err := m.cancel(id, false); err != nil {
-		t.Fatalf("cancel on done job should return nil, got %v", err)
-	}
-}
-
-func TestCommandRealExitCode(t *testing.T) {
-	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil)
-	if err != nil {
-		t.Fatalf("startCommand: %v", err)
-	}
-	m.wg.Wait()
-	jobs := m.list()
-	if len(jobs) != 1 || jobs[0].ID != id {
-		t.Fatalf("list = %+v, want one job %s", jobs, id)
-	}
-	if jobs[0].Exit == nil || *jobs[0].Exit != 7 {
-		t.Fatalf("Exit = %v, want 7", jobs[0].Exit)
-	}
 }
 
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {

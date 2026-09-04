@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // Compile renders an executable Bash workflow. Bash owns graph scheduling and
@@ -58,7 +60,7 @@ func Compile(def *Definition, configPath string) (string, error) {
 	b.WriteString("REQUEST=${1:-}\n")
 	b.WriteString("RUN_ID=${SHELL3_WRK_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}\n")
 	b.WriteString("case $RUN_ID in ''|*[!A-Za-z0-9_.-]*) printf 'invalid run id: %s\\n' \"$RUN_ID\" >&2; exit 2;; esac\n")
-	b.WriteString("STATE_BASE=${SHELL3_WRK_STATE:-$WORKDIR/.shell3_project/wrk}\n")
+	fmt.Fprintf(&b, "STATE_BASE=${SHELL3_WRK_STATE:-$WORKDIR/%s/wrk}\n", paths.ProjectDirName)
 	b.WriteString("RUN_DIR=$STATE_BASE/$TASK_NAME/$RUN_ID\n")
 	b.WriteString("ARTIFACTS=$RUN_DIR/artifacts\n")
 	b.WriteString("export TASK_ID=$TASK_NAME TASK_RUN=$RUN_ID TASK_ROOT=$WORKDIR TASK_ARTIFACTS=$ARTIFACTS\n")

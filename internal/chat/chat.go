@@ -46,10 +46,8 @@ type Config struct {
 	LLM LLMClient
 	// Store persists history; nil keeps the session in-memory.
 	Store *runs.Store
-	// RenderEnvironment optionally replaces the legacy kit-oriented host
-	// reminder. It receives the durable session id. Nil keeps the legacy
-	// renderer; replacement config paths use this to state only paths and
-	// capabilities they actually provide.
+	// RenderEnvironment builds the per-session host reminder. It receives the
+	// durable session id; nil omits the reminder.
 	RenderEnvironment func(sessionID string) string
 	// Profile is the resolved agent's system prompt and allowed tools.
 	Profile AgentProfile
@@ -60,18 +58,6 @@ type Config struct {
 	WorkDir string
 	// ModelID is the provider model identifier used by this agent.
 	ModelID string
-	// ConfigDir is recorded per session so a resume reloads the right config.
-	// Agent-independent: set once at assembly.
-	ConfigDir string
-	// Agent, ParentID and CronJob identify this session in runs.Meta terms.
-	// Set once at assembly and carried onto every runs session this
-	// conversation rolls onto — notably the compaction rollover, so a session
-	// that compacts mid-run keeps its cron attribution.
-	Agent    string
-	ParentID string
-	CronJob  string
-	// ActiveSkills lists skill names enabled for this agent.
-	ActiveSkills []string
 	// AgentKnobs are copied wholesale into each turn.
 	AgentKnobs
 	// Log is the application logger. Nil is allowed; LogOrNoop wraps it.
@@ -89,7 +75,6 @@ func NewHandlers() map[string]ToolHandler {
 	handlers := []ToolHandler{
 		BashHandler{},
 		BashBgHandler{},
-		EditHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
@@ -105,17 +90,13 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 			Store:              cfg.Store,
 			WorkDir:            cfg.WorkDir,
 			Headless:           cfg.Headless,
-			TrustedUserContext: !cfg.Headless && cfg.ParentID == "" && cfg.CronJob == "",
+			TrustedUserContext: !cfg.Headless,
 			Log:                LogOrNoop(cfg.Log),
 		},
 		LLM:          cfg.LLM,
 		Profile:      cfg.Profile,
 		PromptSuffix: cfg.PromptSuffix,
 		ModelID:      cfg.ModelID,
-		ConfigDir:    cfg.ConfigDir,
-		Agent:        cfg.Agent,
-		ParentID:     cfg.ParentID,
-		CronJob:      cfg.CronJob,
 		Handlers:     handlers,
 		HostTool:     cfg.HostTool,
 		AgentKnobs:   cfg.AgentKnobs,

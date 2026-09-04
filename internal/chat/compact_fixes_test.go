@@ -35,7 +35,7 @@ func TestCompactInto_ResetsReminderLog(t *testing.T) {
 	sess.reminderLog = []runs.ReminderLine{{Seq: 1, Text: "old reminder"}, {Seq: 3, Text: "old reminder 2"}}
 	tail := sess.messages[2:]
 
-	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "", "", "", "", "")
+	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{})
 
 	if len(sess.reminderLog) != 0 {
 		t.Fatalf("reminderLog must be reset after compaction (stale anchors break History), got %+v", sess.reminderLog)
@@ -48,7 +48,7 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open runs store: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	ok := compactInto(CompactSummary{Summary: "should not apply"}, st, sess, sess.messages[1:], applog.Noop{}, "", "", "", "", "", "")
+	ok := compactInto(CompactSummary{Summary: "should not apply"}, st, sess, sess.messages[1:], applog.Noop{})
 	if ok {
 		t.Fatal("compactInto should report failure when the session roll fails")
 	}
@@ -130,21 +130,5 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	if sess.reminders.lastContextPct != 0 || sess.reminders.lastTokens != 0 {
 		t.Fatalf("context gauge must reset after compaction, got pct=%d tokens=%d",
 			sess.reminders.lastContextPct, sess.reminders.lastTokens)
-	}
-}
-
-func TestAddUsage_KeepsPromptWhenRoundOmitsIt(t *testing.T) {
-	got := addUsage(
-		llm.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110},
-		llm.Usage{PromptTokens: 0, CompletionTokens: 5, TotalTokens: 5},
-	)
-	if got.PromptTokens != 100 {
-		t.Errorf("PromptTokens = %d, want 100 (kept from prior round)", got.PromptTokens)
-	}
-	if got.CompletionTokens != 15 {
-		t.Errorf("CompletionTokens = %d, want 15", got.CompletionTokens)
-	}
-	if got.TotalTokens != 115 {
-		t.Errorf("TotalTokens = %d, want 115", got.TotalTokens)
 	}
 }

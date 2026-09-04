@@ -81,19 +81,10 @@ func TestSuperstopKillsJobsAndSummarizes(t *testing.T) {
 	}
 	for range sess.Send(context.Background(), "start a background job") {
 	}
-	var id string
-	waitFor(t, func() bool {
-		for _, job := range sess.Jobs() {
-			if !job.Done {
-				id = job.ID
-				return true
-			}
-		}
-		return false
-	})
+	waitFor(t, func() bool { return sess.RunningJobs() > 0 })
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "superstop") || !strings.Contains(all, id) {
+	if !strings.Contains(all, "superstop") || !strings.Contains(all, "bg1") {
 		t.Fatalf("superstop summary = %v", fc.sentTexts())
 	}
 }

@@ -22,10 +22,11 @@ import (
 
 	"github.com/weatherjean/shell3/internal/inbox"
 	"github.com/weatherjean/shell3/internal/lispconfig"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/procutil"
 )
 
-const runVersion = 2
+const runVersion = 1
 
 // ErrBeatOwned means another process or goroutine is already advancing the
 // run. Callers may safely leave it for the current owner or a later retry.
@@ -94,7 +95,7 @@ func Start(configPath, definitionPath string, opts StartOptions) (string, error)
 		return "", fmt.Errorf("wrk: resolve task root: %w", err)
 	}
 	if opts.StateRoot == "" {
-		opts.StateRoot = filepath.Join(workdir, ".shell3_project", "wrk")
+		opts.StateRoot = paths.NewLocal(workdir).Wrk
 	}
 	opts.StateRoot, err = filepath.Abs(opts.StateRoot)
 	if err != nil {
@@ -518,10 +519,11 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 		}
 		procutil.ConfigureGroupCancel(cmd, 2*time.Second)
 		runErr := cmd.Run()
-		_ = os.WriteFile(filepath.Join(nodeDir, fmt.Sprintf("result-%d.md", attempt)), []byte(output.String()), 0o600)
+		if err := writeNodeResult(nodeDir, attempt, output.String()); err != nil {
+			return transitionNode(nodeDir, "failed", err)
+		}
 		if ctx.Err() != nil {
-			_ = writeStatus(nodeDir, "pending")
-			return "pending", ctx.Err()
+			return transitionNode(nodeDir, "pending", ctx.Err())
 		}
 		if runErr != nil {
 			return retryOrFail(nodeDir, node, attempt, fmt.Errorf("node %s agent attempt %d: %w", node.Name, attempt, runErr))
@@ -537,26 +539,22 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 				if node.Kind == LoopNode {
 					return retryOrFail(nodeDir, node, attempt, err)
 				}
-				_ = writeStatus(nodeDir, "failed")
-				return "failed", err
+				return transitionNode(nodeDir, "failed", err)
 			}
 		}
 	case CommandNode:
 		ok, err := runShell(nodeCtx, manifest.WorkDir, taskEnv(runDir, manifest, 1), node.Run, filepath.Join(nodeDir, "command.log"), progress)
 		if ctx.Err() != nil {
-			_ = writeStatus(nodeDir, "pending")
-			return "pending", ctx.Err()
+			return transitionNode(nodeDir, "pending", ctx.Err())
 		}
 		if err != nil || !ok {
-			_ = writeStatus(nodeDir, "failed")
-			return "failed", err
+			return transitionNode(nodeDir, "failed", err)
 		}
 		if node.Accept != nil {
 			progressf(progress, "[wrk] %s: verifying\n", node.Name)
 			ok, err = runCheck(nodeCtx, runDir, manifest, nodeDir, node.Accept, "accept.log", 1, progress)
 			if err != nil || !ok {
-				_ = writeStatus(nodeDir, "failed")
-				return "failed", err
+				return transitionNode(nodeDir, "failed", err)
 			}
 		}
 	}
@@ -571,11 +569,26 @@ func retryOrFail(nodeDir string, node Node, attempt int, err error) (string, err
 	if node.Kind == LoopNode && attempt < node.Max {
 		state = "pending"
 	}
-	_ = writeStatus(nodeDir, state)
 	if state == "pending" {
-		return state, nil
+		err = nil
 	}
-	return state, err
+	return transitionNode(nodeDir, state, err)
+}
+
+func writeNodeResult(nodeDir string, attempt int, result string) error {
+	path := filepath.Join(nodeDir, fmt.Sprintf("result-%d.md", attempt))
+	if err := atomicWrite(path, []byte(result)); err != nil {
+		return fmt.Errorf("wrk: persist node %s result: %w", filepath.Base(nodeDir), err)
+	}
+	return nil
+}
+
+func transitionNode(nodeDir, state string, cause error) (string, error) {
+	if err := writeStatus(nodeDir, state); err != nil {
+		persistErr := fmt.Errorf("wrk: persist node %s status %s: %w", filepath.Base(nodeDir), state, err)
+		return state, errors.Join(cause, persistErr)
+	}
+	return state, cause
 }
 
 func runCheck(ctx context.Context, runDir string, manifest Manifest, nodeDir string, check *Check, logName string, attempt int, progress io.Writer) (bool, error) {
@@ -695,7 +708,7 @@ func notifyTerminal(runDir string, manifest Manifest, status string) error {
 	}
 	root := manifest.NotifyState
 	if root == "" {
-		root = filepath.Join(manifest.WorkDir, ".shell3_project")
+		root = paths.NewLocal(manifest.WorkDir).Root
 	}
 	event := "wrk.completed"
 	switch status {

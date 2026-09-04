@@ -9,7 +9,7 @@ import "regexp"
 var reminderTag = regexp.MustCompile(`(?i)<(/?)(system-reminder)`)
 
 // NeutralizeReminderTags defangs <system-reminder> envelope tags embedded in
-// untrusted text (tool output, subagent summaries, user interjections) before
+// untrusted text (tool output, inbox notices, user interjections) before
 // that text is interpolated INTO a real <system-reminder> block. The leading
 // "<" is HTML-escaped so the model still sees the original text's intent but
 // cannot close the host's envelope or forge a new one.

@@ -29,10 +29,8 @@ func findReminder(s *Session, sub string) string {
 func hostRemindersCfg() func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
-			LLM:       fakellm.New(fakellm.Script{}),
-			Agent:     "code",
-			ModelID:   "gpt-x",
-			ConfigDir: "/cfg",
+			LLM:     fakellm.New(fakellm.Script{}),
+			ModelID: "gpt-x",
 			RenderEnvironment: func(sessionID string) string {
 				return "<system-reminder>\nEnvironment:\n- session: " + sessionID + "\n</system-reminder>"
 			},
@@ -66,11 +64,4 @@ func TestHostReminders_Environment(t *testing.T) {
 		t.Errorf("system prompt must not contain the host Environment section:\n%s", prompt)
 	}
 
-	shown := s.Snapshot().SystemPrompt
-	if !strings.Contains(shown, "Host reminders") {
-		t.Errorf("Snapshot prompt missing the Host reminders section:\n%s", shown)
-	}
-	if !strings.Contains(shown, "Environment") {
-		t.Errorf("Snapshot prompt must surface the Environment standing reminder:\n%s", shown)
-	}
 }

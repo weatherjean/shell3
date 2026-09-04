@@ -16,10 +16,10 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.jobs.wait()
 	rt.jobs.mu.Lock()
 	logPath := rt.jobs.jobs[id].logPath
 	rt.jobs.mu.Unlock()
+	rt.jobs.wait()
 	if logPath == "" {
 		t.Fatal("no logPath recorded on the job")
 	}
@@ -43,10 +43,10 @@ func TestCommandJobLogCapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.jobs.wait()
 	rt.jobs.mu.Lock()
 	logPath := rt.jobs.jobs[id].logPath
 	rt.jobs.mu.Unlock()
+	rt.jobs.wait()
 	fi, err := os.Stat(logPath)
 	if err != nil {
 		t.Fatal(err)
@@ -62,10 +62,11 @@ func TestCommandJobNoParentNoLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.wg.Wait()
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.jobs[id].logPath != "" {
-		t.Fatalf("unexpected logPath %q", m.jobs[id].logPath)
+	logPath := m.jobs[id].logPath
+	m.mu.Unlock()
+	m.wg.Wait()
+	if logPath != "" {
+		t.Fatalf("unexpected logPath %q", logPath)
 	}
 }

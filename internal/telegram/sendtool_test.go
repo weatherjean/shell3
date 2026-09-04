@@ -59,13 +59,12 @@ func TestOrchestratorDecoratorRegistersOnlyTelegramTransportTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.DecorateOrchestratorSession(sess)
-	if !hasTool(sess, "telegram") {
-		t.Fatal("telegram should be registered in the schema")
+	var names []string
+	for _, tool := range sess.Snapshot().Tools {
+		names = append(names, tool.Name)
 	}
-	for _, legacy := range []string{"send_media_telegram", "send_record_telegram", "reload_shell3", "shell3_status"} {
-		if hasTool(sess, legacy) {
-			t.Fatalf("legacy host tool %s leaked into orchestrator session", legacy)
-		}
+	if got, want := strings.Join(names, ","), "telegram"; got != want {
+		t.Fatalf("tools = %q, want %q", got, want)
 	}
 }
 

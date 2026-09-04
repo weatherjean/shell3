@@ -14,8 +14,14 @@ func TestLocal(t *testing.T) {
 	if l.Runs != "/work/project/.shell3_project/runs" {
 		t.Fatalf("Runs: got %q", l.Runs)
 	}
+	if l.Wrk != "/work/project/.shell3_project/wrk" {
+		t.Fatalf("Wrk: got %q", l.Wrk)
+	}
 	if l.Errors != "/work/project/.shell3_project/errors.jsonl" {
 		t.Fatalf("Errors: got %q", l.Errors)
+	}
+	if l.ScheduleLock != "/work/project/.shell3_project/schedule.lock" {
+		t.Fatalf("ScheduleLock: got %q", l.ScheduleLock)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 // syncBuffer is a goroutine-safe io.Writer sink for the console client, whose
-// writes come off the bot's turn/wake goroutines.
+// writes come off the bot's turn goroutines.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -36,7 +36,7 @@ func TestConsoleDrivesBotLoop(t *testing.T) {
 	pr, pw := io.Pipe()
 	out := &syncBuffer{}
 	cc := NewConsoleClient(pr, out, ConsoleChatID)
-	b := NewBot(cc, rt, ConsoleChatID, mkThreads(t))
+	b := NewBot(cc, rt, ConsoleChatID, mkSessionIndex(t))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -11,23 +10,13 @@ import (
 type EventKind int
 
 const (
-	// EventSessionStart is the zero value. Nothing emits it; it stays so a
-	// zero Event is never mistaken for a real one.
-	EventSessionStart EventKind = iota
-	// EventSessionEnd fires at teardown; Meta["status"] is "ok" or an error.
-	EventSessionEnd
-	// EventUserMessage fires on user input. Role, Text.
-	EventUserMessage
 	// EventAssistantToken fires per streamed token, Text the delta.
 	// High-volume.
-	EventAssistantToken
-	// EventAssistantMessage fires once streaming completes, Text the whole
-	// message.
-	EventAssistantMessage
-	// EventToolCall fires on invocation. ToolName, ToolInput, ToolCallID.
+	EventAssistantToken EventKind = iota
+	// EventToolCall fires on invocation. ToolName and ToolInput are populated.
 	EventToolCall
-	// EventToolResult fires on return. ToolName, ToolOutput, ToolCallID,
-	// ToolError.
+	// EventToolResult fires on return. ToolName, ToolOutput, and ToolError are
+	// populated.
 	EventToolResult
 	// EventError fires on a non-fatal error (stream failure, gate denial),
 	// Text the message.
@@ -40,9 +29,6 @@ const (
 	// EventTurnDone fires once a whole turn, tool rounds included, completes.
 	// Usage carries cumulative totals.
 	EventTurnDone
-	// EventSystemReminder fires on an injected <system-reminder>, Text the
-	// rendered block.
-	EventSystemReminder
 	// EventRetry fires before a transient failure is retried, Text the reason
 	// and attempt count.
 	EventRetry
@@ -52,129 +38,63 @@ const (
 	EventCompacted
 )
 
-func (k EventKind) String() string {
-	switch k {
-	case EventSessionStart:
-		return "session_start"
-	case EventSessionEnd:
-		return "session_end"
-	case EventUserMessage:
-		return "user_message"
-	case EventAssistantToken:
-		return "assistant_token"
-	case EventAssistantMessage:
-		return "assistant_message"
-	case EventToolCall:
-		return "tool_call"
-	case EventToolResult:
-		return "tool_result"
-	case EventError:
-		return "error"
-	case EventUsage:
-		return "usage"
-	case EventAssistantReasoning:
-		return "assistant_reasoning"
-	case EventTurnDone:
-		return "turn_done"
-	case EventSystemReminder:
-		return "system_reminder"
-	case EventRetry:
-		return "retry"
-	case EventCompacted:
-		return "compacted"
-	}
-	return "unknown"
-}
-
 // Event is one observable occurrence, delivered through SessionOpts.Sink.
 // Most fields are set only for certain Kinds — see the EventKind constants.
 type Event struct {
 	Kind EventKind
-	Time time.Time
-	// SessionID is the runs session id, "" with no store.
-	SessionID string
 
-	// Text is the payload for token, message, reasoning, error and reminder.
+	// Text is the payload for token, reasoning, error and reminder.
 	Text string
 	// Err is the typed error on EventError, for errors.Is/As; Text holds its
 	// message. Not serialized.
-	Err      error `json:"-"`
-	Role     string
+	Err      error
 	ToolName string
 	// ToolInput is the raw JSON args.
 	ToolInput  string
 	ToolOutput string
 	ToolError  bool
-	// ToolCallID links a tool_call to its tool_result.
-	ToolCallID string
 	Usage      *llm.Usage
-	// Meta carries small extras, such as session_end's status.
-	Meta map[string]string
 }
 
-func emitSessionEnd(s *Session, status string) {
+func emitToolCall(s *Session, name, input string) {
 	emit(s, Event{
-		Kind:      EventSessionEnd,
-		Time:      time.Now(),
-		SessionID: s.id,
-		Meta:      map[string]string{"status": status},
+		Kind:      EventToolCall,
+		ToolName:  name,
+		ToolInput: input,
 	})
 }
 
-func emitToolCall(s *Session, callID, name, input string) {
-	emit(s, Event{
-		Kind:       EventToolCall,
-		Time:       time.Now(),
-		SessionID:  s.id,
-		ToolName:   name,
-		ToolInput:  input,
-		ToolCallID: callID,
-	})
-}
-
-func emitToolResult(s *Session, callID, name, output string, isErr bool) {
+func emitToolResult(s *Session, name, output string, isErr bool) {
 	emit(s, Event{
 		Kind:       EventToolResult,
-		Time:       time.Now(),
-		SessionID:  s.id,
 		ToolName:   name,
 		ToolOutput: output,
 		ToolError:  isErr,
-		ToolCallID: callID,
 	})
 }
 
 func emitAssistantToken(s *Session, text string) {
-	emit(s, Event{Kind: EventAssistantToken, Time: time.Now(), SessionID: s.id, Text: text})
-}
-
-func emitAssistantMessage(s *Session, text string) {
-	emit(s, Event{Kind: EventAssistantMessage, Time: time.Now(), SessionID: s.id, Role: "assistant", Text: text})
-}
-
-func emitUserMessage(s *Session, text string) {
-	emit(s, Event{Kind: EventUserMessage, Time: time.Now(), SessionID: s.id, Role: "user", Text: text})
+	emit(s, Event{Kind: EventAssistantToken, Text: text})
 }
 
 // emitError emits the terminal error event. err must be non-nil: Text carries
 // its message, Err the value itself.
 func emitError(s *Session, err error) {
-	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
+	emit(s, Event{Kind: EventError, Text: err.Error(), Err: err})
 }
 
 func emitUsage(s *Session, u llm.Usage) {
-	emit(s, Event{Kind: EventUsage, Time: time.Now(), SessionID: s.id, Usage: &u})
+	emit(s, Event{Kind: EventUsage, Usage: &u})
 }
 
 func emitAssistantReasoning(s *Session, text string) {
-	emit(s, Event{Kind: EventAssistantReasoning, Time: time.Now(), SessionID: s.id, Text: text})
+	emit(s, Event{Kind: EventAssistantReasoning, Text: text})
 }
 
-func emitSystemReminder(s *Session, text string) {
-	// Record before emitting, so History() can interleave the reminder as a
-	// system-role entry; a live front-end consumes the event instead.
+func recordSystemReminder(s *Session, text string) {
+	// Record so persisted history can interleave the reminder in the exact
+	// provider-visible order.
 	s.recordReminder(text)
-	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
 }
 
 // emitCompacted announces an auto-compaction: prevTokens tripped the
@@ -182,21 +102,19 @@ func emitSystemReminder(s *Session, text string) {
 // its context meter before the next usage report lands.
 func emitCompacted(s *Session, prevTokens, newTokens int) {
 	emit(s, Event{
-		Kind:      EventCompacted,
-		Time:      time.Now(),
-		SessionID: s.id,
-		Text:      fmt.Sprintf("context auto-compacted at %d tokens", prevTokens),
-		Usage:     &llm.Usage{PromptTokens: newTokens, TotalTokens: newTokens},
+		Kind:  EventCompacted,
+		Text:  fmt.Sprintf("context auto-compacted at %d tokens", prevTokens),
+		Usage: &llm.Usage{PromptTokens: newTokens, TotalTokens: newTokens},
 	})
 }
 
 func emitRetry(s *Session, n *llm.RetryNotice) {
 	text := fmt.Sprintf("stream failed (%s), retrying (%d/%d)", n.Reason, n.Attempt, n.Max)
-	emit(s, Event{Kind: EventRetry, Time: time.Now(), SessionID: s.id, Text: text})
+	emit(s, Event{Kind: EventRetry, Text: text})
 }
 
 func emitTurnDone(s *Session, u llm.Usage) {
-	emit(s, Event{Kind: EventTurnDone, Time: time.Now(), SessionID: s.id, Usage: &u})
+	emit(s, Event{Kind: EventTurnDone, Usage: &u})
 }
 
 // emit delivers an event to the session sink. Delivery is synchronous and

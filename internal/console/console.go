@@ -83,11 +83,6 @@ func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, s
 				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 				continue
 			}
-			if line == "/test_output" {
-				renderTestOutput(out, theme)
-				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-				continue
-			}
 			printInboxStatus(out, theme, store, rt)
 			if err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
 				return sess.Send(turnCtx, line)
@@ -96,19 +91,10 @@ func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, s
 					return ctx.Err()
 				}
 			}
-			for sess.HasQueuedInput() {
+			for sess.HasQueuedSteer() {
 				if err := runInteractiveTurn(ctx, out, input, sess.RunQueued, theme); err != nil && ctx.Err() != nil {
 					return ctx.Err()
 				}
-			}
-			fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-		case wake := <-rt.Events():
-			if wake.Kind != shell3.Wake || wake.Session != sess.ID() || !sess.HasQueuedInput() {
-				continue
-			}
-			fmt.Fprintln(out, "\n\n"+theme.info.Render("background report"))
-			if err := runInteractiveTurn(ctx, out, input, sess.RunQueued, theme); err != nil && ctx.Err() != nil {
-				return ctx.Err()
 			}
 			fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 		}

@@ -19,15 +19,12 @@ const tgMaxMessage = 4000
 // separates provider assistant messages. Posted turns keep every non-empty
 // message in order: a model can put the actual answer before a late tool call,
 // and dropping that text makes a later aside look like the whole reply.
-// Quiet wake turns pass keepSegments=false and retain only the final message,
-// where an empty final segment means silence and stale narration must not post
-// as mail. Errors return separately so the caller decides whether they surface
-// — otherwise every flaky cron wake posts noise.
+// Errors return separately so the caller decides how they surface.
 // Channel close is the authoritative end-of-turn signal.
 //
 // A non-nil p is driven as the progress bubble and resolved at the end, kept
 // as a breadcrumb only if the turn errored; nil drains with no bubble.
-func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p *progressBubble, keepSegments bool) (reply, errText string, sawError bool) {
+func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p *progressBubble) (reply, errText string, sawError bool) {
 	var seg strings.Builder // current assistant message
 	var completed []string  // non-empty messages before tool calls
 	var errs strings.Builder
@@ -36,10 +33,8 @@ func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p 
 		case shell3.Token:
 			seg.WriteString(ev.Text)
 		case shell3.ToolCall:
-			if keepSegments {
-				if s := strings.TrimSpace(seg.String()); s != "" {
-					completed = append(completed, s)
-				}
+			if s := strings.TrimSpace(seg.String()); s != "" {
+				completed = append(completed, s)
 			}
 			seg.Reset()
 			if p != nil {
@@ -68,12 +63,10 @@ func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p 
 		p.finish(ctx, sawError)
 	}
 	reply = strings.TrimSpace(seg.String())
-	if keepSegments {
-		if reply != "" {
-			completed = append(completed, reply)
-		}
-		reply = strings.Join(completed, "\n\n")
+	if reply != "" {
+		completed = append(completed, reply)
 	}
+	reply = strings.Join(completed, "\n\n")
 	return reply, strings.TrimSpace(errs.String()), sawError
 }
 
@@ -153,22 +146,22 @@ const replyMaxChunks = 2
 // long reply always looks the same in the message list.
 const overflowDocName = "reply.html"
 
-func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {
+func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string) {
 	if text == "" {
 		text = "(no output)"
 	}
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
-		_ = c.postChunk(ctx, sess, replyTo, chunks[0], opts...)
+		_ = c.postChunk(ctx, sess, replyTo, chunks[0])
 		page := mdpage.Render("shell3 — full reply", text)
-		if id, err := c.b.client.SendDocument(ctx, c.chatIDValue(), overflowDocName, page, "full reply", opts...); err == nil {
+		if id, err := c.b.client.SendDocument(ctx, c.chatIDValue(), overflowDocName, page, "full reply"); err == nil {
 			c.recordSent(sess, id)
 			return
 		}
 		chunks = chunks[1:] // document failed: degrade to posting the rest
 	}
 	for _, part := range chunks {
-		_ = c.postChunk(ctx, sess, replyTo, part, opts...)
+		_ = c.postChunk(ctx, sess, replyTo, part)
 	}
 }
 

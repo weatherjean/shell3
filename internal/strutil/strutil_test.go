@@ -67,12 +67,3 @@ func TestTruncate_RuneSafety(t *testing.T) {
 		t.Errorf("Truncate result %d bytes, exceeds max 6", len(got))
 	}
 }
-
-func TestCutRunes(t *testing.T) {
-	if got, cut := CutRunes("hello", 3); got != "hel" || !cut {
-		t.Errorf("CutRunes(hello,3) = %q,%v", got, cut)
-	}
-	if got, cut := CutRunes("hi", 3); got != "hi" || cut {
-		t.Errorf("CutRunes(hi,3) = %q,%v", got, cut)
-	}
-}

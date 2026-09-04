@@ -7,7 +7,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -161,15 +160,12 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session) (before, a
 		return before, before, errors.New("compaction produced an empty summary")
 	}
 
-	modified := extractFileManifest(head)
-	summaryArgs := CompactSummary{Summary: summary, ImportantFiles: modified}
+	summaryArgs := CompactSummary{Summary: summary}
 
 	// compactInto rewrites sess.messages in place and rolls the store session;
 	// RunTurn rebuilds its own allMsgs after maybeCompact returns.
 	prevTokens := sess.lastPromptTokens
-	// Same Meta the front-ends write on a fresh session, so the rolled one
-	// keeps its model recorded.
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, cfg.ModelID, cfg.Agent, cfg.ParentID, cfg.CronJob) {
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log) {
 		// Roll failed, history untouched: do not reset the gauge or emit a
 		// misleading compacted event.
 		return before, before, errors.New("runs-session roll failed; history untouched")
@@ -271,11 +267,9 @@ func compactionCut(msgs []llm.Message, keepRecent int) int {
 	return cut
 }
 
-// CompactSummary is one compaction's product: the narrative plus the file
-// pointers derived from the compacted head's tool calls.
+// CompactSummary is one compaction's narrative product.
 type CompactSummary struct {
-	Summary        string
-	ImportantFiles []string // files modified (edit_file) in the compacted head
+	Summary string
 }
 
 // compactInto replaces history with the summary plus tail (the sub-slice of
@@ -286,7 +280,7 @@ type CompactSummary struct {
 // rewriting memory to the short slice while the outgoing session's record
 // still holds the full history would let the next saveHistory duplicate the
 // tail into it. Aborting keeps the stored history coherent.
-func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configDir, model, agent, parentID, cronJob string) bool {
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger) bool {
 	prevSessionID := sess.id
 	// Published into sess.id atomically with sess.messages under msgMu, so a
 	// concurrent ID() reader never sees a torn id/messages pairing.
@@ -297,7 +291,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// failed NewSession leaves the outgoing session intact and still
 	// persistable, rather than ending one we keep writing to.
 	if st != nil {
-		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigDir: configDir, Model: model, Agent: agent, ParentID: parentID, CronJob: cronJob})
+		newID, err := st.NewSession()
 		if err != nil {
 			lg.Warn("start session failed during compact; skipping compaction", "error", err)
 			return false
@@ -315,20 +309,13 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nRecall the prior session with the history tool: {\"session\": \"%s\"}.\n</system-reminder>\n\n", prevSessionID, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\n</system-reminder>\n\n", prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
-	if len(args.ImportantFiles) > 0 {
-		b.WriteString("\n\n<modified-files>\n")
-		for _, f := range args.ImportantFiles {
-			b.WriteString("- " + f + "\n")
-		}
-		b.WriteString("</modified-files>")
-	}
 
 	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
 
 	// Build in a local, publish under msgMu: this runs on the turn goroutine
-	// but replaces the slice a concurrent Messages() reader may be copying.
+	// but replaces the slice a concurrent persistence read may be copying.
 	newMsgs := make([]llm.Message, 0, 1+len(tail))
 	newMsgs = append(newMsgs, continuationMsg)
 	newMsgs = append(newMsgs, tail...)
@@ -354,37 +341,6 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 		sess.persistedLen = 0
 	}
 	return true
-}
-
-// manifestCap bounds the file list so a long head does not bloat the
-// continuation message.
-const manifestCap = 20
-
-// extractFileManifest collects edit_file.file_path from the head's tool
-// calls, skipping malformed args, capped at manifestCap in first-seen order.
-func extractFileManifest(head []llm.Message) (modified []string) {
-	seen := map[string]bool{}
-	for _, m := range head {
-		if m.Role != llm.RoleAssistant {
-			continue
-		}
-		for _, tc := range m.ToolCalls {
-			if tc.Name != "edit_file" || len(modified) >= manifestCap {
-				continue
-			}
-			var args struct {
-				FilePath string `json:"file_path"`
-			}
-			if err := json.Unmarshal([]byte(tc.RawArgs), &args); err != nil {
-				continue
-			}
-			if p := args.FilePath; p != "" && !seen[p] {
-				seen[p] = true
-				modified = append(modified, p)
-			}
-		}
-	}
-	return modified
 }
 
 // pruneMinBytes is the smallest tool result worth pruning. A ~30-byte stub is

@@ -16,3 +16,17 @@ func TestKitPinsFreshInboxAndScheduleInventoryChecks(t *testing.T) {
 		}
 	}
 }
+
+func TestKitUsesLazySDFileEditingGuidance(t *testing.T) {
+	for _, contract := range []string{
+		"exactly two core tools: bash and bash_bg",
+		"Read sd-file-editing before editing whenever",
+		"(skill sd-file-editing",
+		"sd exits successfully when nothing matched",
+		"Do not use sed -i",
+	} {
+		if !strings.Contains(Kit, contract) {
+			t.Fatalf("starter kit missing editing contract %q", contract)
+		}
+	}
+}

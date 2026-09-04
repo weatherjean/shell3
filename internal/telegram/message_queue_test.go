@@ -14,6 +14,7 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
 
 // gatedFirstClient blocks its FIRST Stream call until Release is closed
@@ -63,9 +64,9 @@ func gatedRuntime(t *testing.T, g *gatedFirstClient) *shell3.Runtime {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+	rt := shell3test.NewRuntimeForTestConfig(t, func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: g, Agent: "code",
+			LLM:      g,
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
@@ -74,7 +75,7 @@ func gatedRuntime(t *testing.T, g *gatedFirstClient) *shell3.Runtime {
 	return rt
 }
 
-func TestMailQueueDrainsAfterTurn(t *testing.T) {
+func TestMessageQueueDrainsAfterTurn(t *testing.T) {
 	fc := newFakeClient()
 	g := newGatedFirst("first reply", "second reply")
 	rt := gatedRuntime(t, g)
@@ -99,7 +100,7 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	})
 }
 
-func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
+func TestMessageQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	fc := newFakeClient()
 	g := newGatedFirst("first reply", "batched reply")
 	rt := gatedRuntime(t, g)
@@ -129,51 +130,57 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 		all.WriteString("\n")
 	}
 	if !strings.Contains(all.String(), "also this") || !strings.Contains(all.String(), "and this") {
-		t.Fatalf("batch turn input missing a queued mail:\n%s", all.String())
+		t.Fatalf("batch turn input missing a queued message:\n%s", all.String())
 	}
 }
 
-func TestInboxView(t *testing.T) {
+func TestSuperstopNoticeWaitsForNextUserTurn(t *testing.T) {
 	fc := newFakeClient()
-	rt := storeRuntime(t, "unused")
+	g := newGatedFirst("next reply")
+	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	if got := b.Inbox(); !strings.Contains(got, "inbox empty") {
-		t.Fatalf("idle inbox = %q, want empty", got)
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	select {
+	case <-g.Started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first turn never started")
 	}
-
 	c := tconv(b)
 	c.mu.Lock()
-	c.turnActive = true
+	sess := c.main
 	c.mu.Unlock()
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "9", Text: "later please"})
-	waitFor(t, func() bool {
-		tconv(b).mu.Lock()
-		defer tconv(b).mu.Unlock()
-		return len(tconv(b).mailQueue) == 1
-	})
-	if got := b.Inbox(); !strings.Contains(got, "later please") || !strings.Contains(got, "from you") {
-		t.Fatalf("inbox = %q, want the queued mail listed", got)
+	if sess == nil {
+		t.Fatal("no live session")
 	}
-	tconv(b).mu.Lock()
-	tconv(b).turnActive = false
-	tconv(b).mailQueue = nil
-	tconv(b).mu.Unlock()
-}
 
-func TestRunUserTurn_NoReplySentinelNotPosted(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "NO_REPLY.")
-	b := newBot(t, fc, rt)
+	c.handleSuperstop(context.Background())
+	waitIdle(t, b)
+	g.mu.Lock()
+	calls := g.calls
+	g.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("superstop started %d model calls, want only the cancelled user turn", calls)
+	}
+	if !sess.HasQueuedInput() || sess.HasQueuedSteer() {
+		t.Fatal("superstop must leave one host notice queued without user steering")
+	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
-	})
-	for _, txt := range fc.sentTexts() {
-		if strings.Contains(txt, "NO_REPLY") {
-			t.Fatalf("the sentinel leaked into the chat: %q", txt)
-		}
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "continue"})
+	if !waitForReply(t, fc, "next reply") {
+		t.Fatalf("next user turn produced no reply: %v", fc.sentTexts())
+	}
+	wire := g.inner.CallsSnapshot()
+	if len(wire) != 1 {
+		t.Fatalf("provider calls after next user turn = %d, want 1", len(wire))
+	}
+	var prompt strings.Builder
+	for _, msg := range wire[0].Msgs {
+		prompt.WriteString(msg.Content)
+		prompt.WriteByte('\n')
+	}
+	if !strings.Contains(prompt.String(), "superstop") || !strings.Contains(prompt.String(), "continue") {
+		t.Fatalf("next turn did not receive host notice and user input:\n%s", prompt.String())
 	}
 }
 
@@ -190,35 +197,6 @@ func TestRunUserTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	for _, txt := range fc.sentTexts() {
 		if strings.Contains(txt, "<tool_call") {
 			t.Fatalf("raw markup leaked into the chat: %q", txt)
-		}
-	}
-}
-
-func TestRunPostedQueuedTurn_NoReplySentinelNotPosted(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "NO_REPLY.")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
-	})
-	c := tconv(b)
-	c.mu.Lock()
-	sess := c.main
-	c.mu.Unlock()
-	before := len(fc.sentTexts())
-
-	sess.Interject("one more thing")
-	b.dispatchWake(context.Background(), sess.ID())
-
-	waitFor(t, func() bool { return len(fc.sentTexts()) > before })
-	if sess.HasQueuedSteer() {
-		t.Fatal("posted wake turn must drain the steer")
-	}
-	for _, txt := range fc.sentTexts() {
-		if strings.Contains(txt, "NO_REPLY") {
-			t.Fatalf("the sentinel leaked into the chat: %q", txt)
 		}
 	}
 }
@@ -240,11 +218,11 @@ func TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	before := len(fc.sentTexts())
 
 	sess.Interject("one more thing")
-	b.dispatchWake(context.Background(), sess.ID())
+	c.startNextWork(context.Background())
 
 	waitFor(t, func() bool { return len(fc.sentTexts()) > before })
 	if sess.HasQueuedSteer() {
-		t.Fatal("posted wake turn must drain the steer")
+		t.Fatal("posted catch-up turn must drain the steer")
 	}
 	for _, txt := range fc.sentTexts() {
 		if strings.Contains(txt, "<tool_call") {

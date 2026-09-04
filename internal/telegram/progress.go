@@ -5,7 +5,7 @@
 // (throttled for Telegram's flood limits), and deleted once the turn's real
 // reply is delivered — mid-turn you see that the agent is working, afterwards
 // the chat history stays clean. A turn that ends in an error keeps the bubble
-// as a breadcrumb. Wake (quiet) turns show no bubble.
+// as a breadcrumb.
 package telegram
 
 import (
@@ -145,7 +145,7 @@ func toolLine(name, rawArgs string) string {
 func (c *conversation) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (reply string, sawError bool) {
 	p := &progressBubble{c: c}
 	p.start(ctx)
-	reply, errText, sawError := c.drainTurn(ctx, ch, p, true)
+	reply, errText, sawError := c.drainTurn(ctx, ch, p)
 	if errText != "" {
 		reply = strings.TrimSpace(reply + "\n" + errText)
 	}

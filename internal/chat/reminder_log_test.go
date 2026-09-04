@@ -21,7 +21,7 @@ func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	s := NewSession(SessionOpts{})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
 
-	emitSystemReminder(s, "<system-reminder>context: 10%</system-reminder>")
+	recordSystemReminder(s, "<system-reminder>context: 10%</system-reminder>")
 	s.append(llm.Message{Role: llm.RoleAssistant, Content: "hello"})
 
 	rems := reminderSnapshot(s)
