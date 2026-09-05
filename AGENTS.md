@@ -1,17 +1,16 @@
 # shell3
 
-Minimal Unix-composable harness harness written in Go.
+Minimal Unix-composable agent harness written in Go.
 
-This replacement contract supersedes every legacy section below. Read the
-relevant part of `docs/internals.md` before changing a subsystem. Keep code,
-tests, and public documentation aligned.
+Read the relevant part of `docs/internals.md` before changing a subsystem. Keep
+code, tests, and public documentation aligned.
 
-## Replacement contract
+## Project contract
 
-- Configuration is one strict inert `shell3.lisp`; there is no shell-kit or
-  compatibility parser.
-- The attached main agent is an orchestrator. Its only core tools are `bash`,
-  `bash_bg`, and `edit_file`.
+- Configuration is one strict inert `shell3.lisp`.
+- The attached main agent is an orchestrator. Its only core tools are `bash`
+  and `bash_bg`; file editing uses project commands through `bash` and
+  lazily-loaded skill guidance.
 - Multi-agent work belongs in checked `*.wrk.lisp` workflows that dispatch
   typed external runners. Workers are leaves and may not launch workflows.
 - Bare `shell3` is the primary local line-oriented interface. Telegram is an
@@ -72,9 +71,6 @@ Core invariants:
   lifecycle events also enter the rotating application log. Schedule changes
   require restarting their persistent owner.
 - Message and chat IDs remain opaque strings across transports and storage.
-- The SQLite store has one current base schema. A version mismatch discards
-  the database and sidecars and creates it fresh; there are no migrations or
-  compatibility backups. Filesystem inbox and wrk state remain separate.
 
 Verification:
 
