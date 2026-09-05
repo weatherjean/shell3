@@ -12,7 +12,7 @@ func TestJobLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}

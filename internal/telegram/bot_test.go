@@ -22,9 +22,9 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+	rt := shell3test.NewRuntimeForTestConfig(t, func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, Agent: "code",
+			LLM:      client,
 			Headless: o.Headless, Store: st,
 			Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{
 				Name: "bash_bg",
@@ -155,11 +155,11 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 	}
 	waitFor(t, func() bool { return sess.HasQueuedSteer() })
 	tconv(b).mu.Lock()
-	queued := len(tconv(b).mailQueue)
+	queued := len(tconv(b).pendingMessages)
 	anchor := tconv(b).mainAnchor
 	tconv(b).mu.Unlock()
 	if queued != 0 {
-		t.Fatalf("steered text must not also queue (mailQueue=%d)", queued)
+		t.Fatalf("steered text must not also queue (pendingMessages=%d)", queued)
 	}
 	if anchor != "2" {
 		t.Fatalf("anchor = %q, want the steering message id", anchor)
@@ -189,11 +189,11 @@ func TestContract4_MidTurnMediaQueues(t *testing.T) {
 	waitFor(t, func() bool {
 		tconv(b).mu.Lock()
 		defer tconv(b).mu.Unlock()
-		return len(tconv(b).mailQueue) == 1
+		return len(tconv(b).pendingMessages) == 1
 	})
 	c := tconv(b)
 	c.mu.Lock()
-	c.mailQueue = nil
+	c.pendingMessages = nil
 	c.mu.Unlock()
 	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
@@ -253,20 +253,13 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	rt := storeRuntimeClient(t, client)
 	b := newBot(t, fc, rt)
 
-	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
+	sess, err := rt.Session(shell3.SessionOpts{})
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
 	for range sess.Send(context.Background(), "start background work") {
 	}
-	waitFor(t, func() bool {
-		for _, job := range sess.Jobs() {
-			if !job.Done {
-				return true
-			}
-		}
-		return false
-	})
+	waitFor(t, func() bool { return sess.RunningJobs() > 0 })
 
 	ctx := context.Background()
 	c := tconv(b)
@@ -282,73 +275,12 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 		t.Fatalf("stop reply must state background jobs keep running, got %v", fc.sentTexts())
 	}
 	waitFor(t, func() bool { return true })
-	if !b.sessionHasRunningJob(sess) {
+	if sess.RunningJobs() == 0 {
 		t.Fatal("/stop must not cancel a background job — it should still be running")
 	}
 }
 
-func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "queued reply")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
-	if !waitForReply(t, fc, "queued reply") {
-		t.Fatal("first turn produced no reply")
-	}
-	c := tconv(b)
-	c.mu.Lock()
-	sess := c.main
-	c.mu.Unlock()
-
-	c.mu.Lock()
-	c.turnActive = true
-	c.mu.Unlock()
-
-	sess.NotifyText("bg result")
-	b.dispatchWake(context.Background(), sess.ID())
-	c.mu.Lock()
-	pending := c.wakePending
-	c.mu.Unlock()
-	if !pending {
-		t.Fatal("a Wake arriving mid-turn must mark wakePending")
-	}
-
-	c.mu.Lock()
-	c.turnActive = false
-	c.mu.Unlock()
-	tconv(b).startNextWork(context.Background())
-
-	waitFor(t, func() bool {
-		tconv(b).mu.Lock()
-		defer tconv(b).mu.Unlock()
-		return !tconv(b).turnActive && !tconv(b).wakePending && !sess.HasQueuedInput()
-	})
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "queued reply")
-	})
-}
-
-func TestContract7_ForeignWakeDropped(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "unused")
-	b := newBot(t, fc, rt)
-
-	cron, err := rt.Session(shell3.SessionOpts{Name: "cron", Headless: true})
-	if err != nil {
-		t.Fatalf("Session: %v", err)
-	}
-	b.dispatchWake(context.Background(), cron.ID())
-	c := tconv(b)
-	c.mu.Lock()
-	active, pending := c.turnActive, tconv(b).wakePending
-	c.mu.Unlock()
-	if active || pending {
-		t.Fatal("a wake for the cron parent must be dropped, not run or pended")
-	}
-}
-
-func TestContract8_NewStartsFreshConversation(t *testing.T) {
+func TestContract6_NewStartsFreshConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "r")
 	b := newBot(t, fc, rt)
@@ -392,7 +324,7 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	}
 }
 
-func TestContract9_RestartResumesTheConversation(t *testing.T) {
+func TestContract7_RestartResumesTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
@@ -402,17 +334,17 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "one"}}},
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "two"}}},
 	)
-	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+	rt := shell3test.NewRuntimeForTestConfig(t, func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, Agent: "code",
+			LLM:      client,
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
 	})
 	t.Cleanup(func() { _ = rt.Close() })
-	threads := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	sessions := NewSessionIndex(func() *runs.Store { return st }, "telegram")
 
-	b1 := NewBot(fc, rt, 42, threads)
+	b1 := NewBot(fc, rt, 42, sessions)
 	b1.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
 	if !waitForReply(t, fc, "one") {
 		t.Fatal("first bot produced no reply")
@@ -422,7 +354,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	first := c.main.ID()
 	c.mu.Unlock()
 
-	b2 := NewBot(fc, rt, 42, threads)
+	b2 := NewBot(fc, rt, 42, sessions)
 	b2.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "still there?"})
 	if !waitForReply(t, fc, "two") {
 		t.Fatal("second bot produced no reply")
@@ -435,7 +367,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	}
 }
 
-func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
+func TestContract8_BurstMergesIntoOneTurn(t *testing.T) {
 	fc := newFakeClient()
 	rec := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "merged"}}})
 	rt := storeRuntimeClient(t, rec)
@@ -455,63 +387,5 @@ func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
 	last := calls[0].Msgs[len(calls[0].Msgs)-1]
 	if !strings.Contains(last.Content, "part one") || !strings.Contains(last.Content, "part two") {
 		t.Fatalf("merged turn missing a fragment: %q", last.Content)
-	}
-}
-
-func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "answered")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
-	if !waitForReply(t, fc, "answered") {
-		t.Fatal("first turn produced no reply")
-	}
-	waitIdle(t, b)
-
-	tconv(b).mu.Lock()
-	tconv(b).turnActive = true
-	tconv(b).turnQuiet = true
-	tconv(b).mu.Unlock()
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "are you there?"})
-	waitFor(t, func() bool {
-		tconv(b).mu.Lock()
-		defer tconv(b).mu.Unlock()
-		return len(tconv(b).mailQueue) == 1
-	})
-	c := tconv(b)
-	c.mu.Lock()
-	live := c.main
-	c.mu.Unlock()
-	if live.HasQueuedSteer() {
-		t.Fatal("text must not steer a quiet turn")
-	}
-	c.mu.Lock()
-	c.turnActive, tconv(b).turnQuiet, tconv(b).mailQueue = false, false, nil
-	c.mu.Unlock()
-}
-
-func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "steered answer")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
-	if !waitForReply(t, fc, "steered answer") {
-		t.Fatal("first turn produced no reply")
-	}
-	c := tconv(b)
-	c.mu.Lock()
-	sess := c.main
-	c.mu.Unlock()
-	before := len(fc.sentReplies())
-
-	sess.Interject("and one more thing")
-	b.dispatchWake(context.Background(), sess.ID())
-
-	waitFor(t, func() bool { return len(fc.sentReplies()) > before })
-	if sess.HasQueuedSteer() {
-		t.Fatal("posted wake turn must drain the steer")
 	}
 }

@@ -23,7 +23,7 @@ func newRootCommand() *cobra.Command {
 	var here bool
 	cmd := &cobra.Command{
 		Use:   "shell3",
-		Short: "Minimal Unix-composable harness harness",
+		Short: "Minimal Unix-composable agent harness",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolved, err := resolveRuntimePaths(cmd, configPath, workDir, here)
@@ -61,7 +61,7 @@ func newRootCommand() *cobra.Command {
 			if err := console.RunOne(cmd.Context(), cmd.OutOrStdout(), sess, prompt); err != nil {
 				return err
 			}
-			return cli.FollowAskJobs(cmd.Context(), cmd.OutOrStdout(), rt, sess)
+			return cli.WaitForBackgroundJobs(cmd.Context(), cmd.OutOrStdout(), rt, sess)
 		},
 	}
 	cmd.AddCommand(newTelegramCommand())

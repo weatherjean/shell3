@@ -65,7 +65,7 @@ func TestCapQueuesAndDrains(t *testing.T) {
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		return len(c.mailQueue) == 1
+		return len(c.pendingMessages) == 1
 	})
 
 	a.releaseSlot(cancelA)

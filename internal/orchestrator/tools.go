@@ -29,20 +29,5 @@ func coreToolDefinitions() []llm.ToolDefinition {
 				"additionalProperties": false,
 			},
 		},
-		{
-			Name: "edit_file",
-			Description: "Edit a file by exact string replacement, or create/overwrite it when old_string is empty. " +
-				"This tool writes only; inspect files with bash. An empty new_string deletes the matched text.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"file_path":   map[string]any{"type": "string", "description": "Absolute path or path relative to the project root"},
-					"old_string":  map[string]any{"type": "string", "description": "Text to replace; empty creates or overwrites the file"},
-					"new_string":  map[string]any{"type": "string", "description": "Replacement text; empty deletes the match"},
-					"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence"},
-				},
-				"required": []string{"file_path", "old_string", "new_string"},
-			},
-		},
 	}
 }

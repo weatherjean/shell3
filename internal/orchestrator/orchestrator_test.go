@@ -26,7 +26,7 @@ func TestLispTurnRunsOnlyCoreToolsEndToEnd(t *testing.T) {
     (context-window 64000))
   (orchestrator
     (model primary)
-    (prompt "You are shell3, a harness harness. The transport is only a control surface. Author *.wrk.lisp files containing (task \"checked-change\") and (loop implement). Local test instruction."))
+    (prompt "You are shell3, an agent harness. The transport is only a control surface. Author *.wrk.lisp files containing (task \"checked-change\") and (loop implement). Local test instruction."))
   (memory "Remember the operator preference.")
   (skill weather
     (description "Search current weather.")
@@ -53,7 +53,7 @@ func TestLispTurnRunsOnlyCoreToolsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "test", WorkDir: dir, Headless: true})
+	sess, err := rt.Session(shell3.SessionOpts{Name: "test", Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,24 +75,17 @@ func TestLispTurnRunsOnlyCoreToolsEndToEnd(t *testing.T) {
 		t.Fatalf("result/answer = %q / %q", result, answer)
 	}
 	call := fake.CallsSnapshot()[0]
-	var contextText strings.Builder
-	for _, msg := range call.Msgs {
-		contextText.WriteString(msg.Content)
-	}
-	if strings.Contains(contextText.String(), "projects/<agent>/skills") {
-		t.Fatalf("replacement reminder advertised a legacy skill path: %q", contextText.String())
-	}
 	var names []string
 	for _, def := range call.Tools {
 		names = append(names, def.Name)
 	}
-	if strings.Join(names, ",") != "bash,bash_bg,edit_file" {
+	if strings.Join(names, ",") != "bash,bash_bg" {
 		t.Fatalf("tools = %v", names)
 	}
 	if !strings.Contains(call.Msgs[0].Content, "(task \"checked-change\"") ||
 		!strings.Contains(call.Msgs[0].Content, "(loop implement") ||
 		strings.Contains(call.Msgs[0].Content, "(wrk\n") ||
-		!strings.Contains(call.Msgs[0].Content, "shell3, a harness harness") ||
+		!strings.Contains(call.Msgs[0].Content, "shell3, an agent harness") ||
 		!strings.Contains(call.Msgs[0].Content, "transport is only a control surface") ||
 		!strings.Contains(call.Msgs[0].Content, "*.wrk.lisp") || !strings.Contains(call.Msgs[0].Content, "Local test instruction") ||
 		!strings.Contains(call.Msgs[0].Content, "weather: Search current weather.") ||

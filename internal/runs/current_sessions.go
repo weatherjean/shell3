@@ -8,7 +8,7 @@ package runs
 // SetCurrentSession records id as surface's current conversation session.
 // Last write wins.
 func (s *Store) SetCurrentSession(surface, id string) error {
-	_, err := s.db.Exec(`INSERT INTO threads (surface, session_id)
+	_, err := s.db.Exec(`INSERT INTO current_sessions (surface, session_id)
 		VALUES (?,?)
 		ON CONFLICT (surface) DO UPDATE SET session_id=excluded.session_id`,
 		surface, id)
@@ -18,7 +18,7 @@ func (s *Store) SetCurrentSession(surface, id string) error {
 // CurrentSession returns the session id recorded for surface, if any.
 func (s *Store) CurrentSession(surface string) (string, bool) {
 	var id string
-	err := s.db.QueryRow(`SELECT session_id FROM threads WHERE surface=?`, surface).Scan(&id)
+	err := s.db.QueryRow(`SELECT session_id FROM current_sessions WHERE surface=?`, surface).Scan(&id)
 	if err != nil {
 		return "", false
 	}
@@ -36,7 +36,7 @@ func (s *Store) CurrentSession(surface string) (string, bool) {
 // the answer.
 func (s *Store) SurfaceForSession(sessionID string) (string, bool) {
 	var surface string
-	err := s.db.QueryRow(`SELECT surface FROM threads WHERE session_id=? LIMIT 1`, sessionID).Scan(&surface)
+	err := s.db.QueryRow(`SELECT surface FROM current_sessions WHERE session_id=? LIMIT 1`, sessionID).Scan(&surface)
 	if err != nil {
 		return "", false
 	}

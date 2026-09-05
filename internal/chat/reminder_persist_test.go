@@ -9,11 +9,11 @@ import (
 
 func TestReminderPersistAndRestore(t *testing.T) {
 	st, _ := runs.Open(t.TempDir() + "/shell3_project")
-	id, _ := st.NewSession(runs.Meta{Workdir: "/w", ConfigDir: "/c"})
+	id, _ := st.NewSession()
 
 	s := NewSession(SessionOpts{Store: st, StoreID: id})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
-	emitSystemReminder(s, "<system-reminder>subagent x finished</system-reminder>")
+	recordSystemReminder(s, "<system-reminder>subagent x finished</system-reminder>")
 
 	s2 := NewSession(SessionOpts{Store: st, StoreID: id})
 	if err := s2.RestoreReminders(); err != nil {

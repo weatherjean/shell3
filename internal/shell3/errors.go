@@ -8,8 +8,8 @@ import "errors"
 var ErrBusy = errors.New("shell3: a turn is in flight; drain the Send channel before calling this")
 
 // ErrClosed reports a Send on a closed session: the channel emits one Error
-// event and closes. A host event (a Wake-driven drain) can still hold the
-// session, and must not run a turn against the ended store record.
+// event and closes. A queued-input drain can still hold the session and must
+// not run a turn against the ended store record.
 var ErrClosed = errors.New("shell3: session is closed")
 
 // ErrRuntimeClosed reports an operation on a Runtime whose Close has already

@@ -13,7 +13,7 @@ func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open runs store: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{})
+	id, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: "old 2"},
 	}
 
-	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, nil, applog.Noop{}, "", "", "", "", "", "")
+	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, nil, applog.Noop{})
 
 	got, err := st.LoadMessages(sess.id)
 	if err != nil {

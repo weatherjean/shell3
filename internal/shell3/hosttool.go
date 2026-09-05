@@ -10,7 +10,7 @@ import (
 )
 
 // HostTool is a Go-implemented tool the host registers on a Session so the
-// model can call it (e.g. the Telegram front-end's send_media_telegram).
+// model can call it (for example, Telegram's file-send tool).
 type HostTool struct {
 	Name        string
 	Description string
@@ -25,9 +25,8 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 	if t.Name == "" || t.Handler == nil {
 		return errors.New("shell3: host tool requires a Name and Handler")
 	}
-	// Guard the cfg mutations against a concurrent Snapshot read (the Status view polls it)
-	// (reads Profile.Tools under s.mu). Between turns by contract, enforced
-	// by the busy check below.
+	// Guard the config mutation against a concurrent Snapshot read. Registration
+	// is between turns by contract, enforced by the busy check below.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.busy {

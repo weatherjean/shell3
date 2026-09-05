@@ -17,40 +17,27 @@ func TestTranslate(t *testing.T) {
 	cases := []struct {
 		name string
 		in   chat.Event
-		want *Event
+		want Event
 	}{
-		{"token", chat.Event{Kind: chat.EventAssistantToken, Text: "hi"}, &Event{Kind: Token, Text: "hi"}},
-		{"reasoning", chat.Event{Kind: chat.EventAssistantReasoning, Text: "think"}, &Event{Kind: Reasoning, Text: "think"}},
-		{"tool call", chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}, &Event{Kind: ToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}},
-		{"tool result", chat.Event{Kind: chat.EventToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}, &Event{Kind: ToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}},
-		{"system reminder", chat.Event{Kind: chat.EventSystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}, &Event{Kind: SystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}},
-		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, &Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
-		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &llm.Usage{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, &Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
-		{"retry", chat.Event{Kind: chat.EventRetry, Text: "retrying"}, &Event{Kind: Retry, Text: "retrying"}},
-		{"compacted", chat.Event{Kind: chat.EventCompacted, Text: "context auto-compacted at 100000 tokens", Usage: &llm.Usage{PromptTokens: 1200, TotalTokens: 1200}}, &Event{Kind: Compacted, Text: "context auto-compacted at 100000 tokens", PromptTokens: 1200, TotalTokens: 1200}},
-		{"error", chat.Event{Kind: chat.EventError, Text: "boom"}, &Event{Kind: Error}},
-		{"session start dropped", chat.Event{Kind: chat.EventSessionStart}, nil},
-		{"user message dropped", chat.Event{Kind: chat.EventUserMessage}, nil},
-		{"assistant message dropped", chat.Event{Kind: chat.EventAssistantMessage}, nil},
+		{"token", chat.Event{Kind: chat.EventAssistantToken, Text: "hi"}, Event{Kind: Token, Text: "hi"}},
+		{"reasoning", chat.Event{Kind: chat.EventAssistantReasoning, Text: "think"}, Event{Kind: Reasoning, Text: "think"}},
+		{"tool call", chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolInput: `{"cmd":"ls"}`}, Event{Kind: ToolCall, ToolName: "bash", ToolInput: `{"cmd":"ls"}`}},
+		{"tool result", chat.Event{Kind: chat.EventToolResult, ToolName: "bash", ToolOutput: "ok"}, Event{Kind: ToolResult, ToolName: "bash", ToolOutput: "ok"}},
+		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
+		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &llm.Usage{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
+		{"retry", chat.Event{Kind: chat.EventRetry, Text: "retrying"}, Event{Kind: Retry, Text: "retrying"}},
+		{"compacted", chat.Event{Kind: chat.EventCompacted, Text: "context auto-compacted at 100000 tokens", Usage: &llm.Usage{PromptTokens: 1200, TotalTokens: 1200}}, Event{Kind: Compacted, Text: "context auto-compacted at 100000 tokens", PromptTokens: 1200, TotalTokens: 1200}},
+		{"error", chat.Event{Kind: chat.EventError, Text: "boom"}, Event{Kind: Error}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := translate(tc.in)
-			if tc.want == nil {
-				if ok {
-					t.Fatalf("expected drop, got %+v", got)
-				}
-				return
-			}
-			if !ok {
-				t.Fatal("expected event, got drop")
-			}
+			got := translate(tc.in)
 			if got.Kind != tc.want.Kind || got.Text != tc.want.Text ||
-				got.ToolName != tc.want.ToolName || got.ToolCallID != tc.want.ToolCallID ||
+				got.ToolName != tc.want.ToolName ||
 				got.ToolInput != tc.want.ToolInput ||
 				got.ToolOutput != tc.want.ToolOutput || got.PromptTokens != tc.want.PromptTokens ||
 				got.CompletionTokens != tc.want.CompletionTokens || got.TotalTokens != tc.want.TotalTokens {
-				t.Fatalf("translate(%+v) = %+v, want %+v", tc.in, got, *tc.want)
+				t.Fatalf("translate(%+v) = %+v, want %+v", tc.in, got, tc.want)
 			}
 			if tc.want.Kind == Error && (got.Err == nil || got.Err.Error() != tc.in.Text) {
 				t.Fatalf("error: got Err=%v want %q", got.Err, tc.in.Text)
@@ -61,12 +48,19 @@ func TestTranslate(t *testing.T) {
 
 func TestTranslateErrorPassesTypedErrThrough(t *testing.T) {
 	sentinel := errors.New("typed boom")
-	got, ok := translate(chat.Event{Kind: chat.EventError, Text: sentinel.Error(), Err: sentinel})
-	if !ok || got.Kind != Error {
-		t.Fatalf("translate error event: got %+v ok=%v", got, ok)
+	got := translate(chat.Event{Kind: chat.EventError, Text: sentinel.Error(), Err: sentinel})
+	if got.Kind != Error {
+		t.Fatalf("translate error event: got %+v", got)
 	}
 	if !errors.Is(got.Err, sentinel) {
 		t.Fatalf("typed error not preserved through translate: %v", got.Err)
+	}
+}
+
+func TestTranslateUnknownKindBecomesError(t *testing.T) {
+	got := translate(chat.Event{Kind: chat.EventKind(999)})
+	if got.Kind != Error || got.Err == nil || !strings.Contains(got.Err.Error(), "unknown chat event kind") {
+		t.Fatalf("unknown event translation = %+v", got)
 	}
 }
 
@@ -108,17 +102,26 @@ func TestSend_AfterCloseReturnsErrClosed(t *testing.T) {
 }
 
 func TestSession_History_CarriesReasoning(t *testing.T) {
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
-		{ReasoningDelta: "let me think about 42"},
-		{TextDelta: "the answer"},
-	}})
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ReasoningDelta: "let me think about 42"},
+			{TextDelta: "the answer"},
+		}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "followed up"}}},
+	)
 	s := newTestSession(t, client, chat.Config{})
 	defer s.Close()
 
 	for range s.Send(context.Background(), "question") {
 	}
+	for range s.Send(context.Background(), "follow up") {
+	}
+	calls := client.CallsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(calls))
+	}
 	var got string
-	for _, m := range s.sess.Messages() {
+	for _, m := range calls[1].Msgs {
 		if m.Role == llm.RoleAssistant && m.ReasoningContent != "" {
 			got = m.ReasoningContent
 		}
@@ -156,8 +159,9 @@ func TestSession_MultiTurn_HistoryCarries(t *testing.T) {
 	if t2 != "second" || !d2 {
 		t.Fatalf("turn 2: text=%q done=%v", t2, d2)
 	}
-	if got := len(s.sess.Messages()); got < 4 {
-		t.Fatalf("history has %d messages, want >= 4 (2 turns)", got)
+	calls := client.CallsSnapshot()
+	if len(calls) != 2 || len(calls[1].Msgs) < 4 {
+		t.Fatalf("second model call did not carry prior history: %+v", calls)
 	}
 }
 
@@ -296,42 +300,11 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 	}
 }
 
-func TestRoute_SetsIsHostTool(t *testing.T) {
-	s := newTestSession(t, fakellm.New(), chat.Config{
-		AgentKnobs: chat.AgentKnobs{HostToolNames: map[string]bool{"my_tool": true}},
-	})
-	defer s.Close()
-
-	got := make(chan Event, 4)
-	done := make(chan struct{})
-	s.mu.Lock()
-	s.cur = got
-	s.curDone = done
-	s.mu.Unlock()
-
-	s.route(chat.Event{Kind: chat.EventToolCall, ToolName: "my_tool", ToolCallID: "1"})
-	s.route(chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "2"})
-
-	custom := <-got
-	if custom.Kind != ToolCall || custom.ToolName != "my_tool" || !custom.IsHostTool {
-		t.Fatalf("host tool event = %+v, want IsHostTool=true", custom)
-	}
-	if custom.ToolCallID != "1" {
-		t.Fatalf("ToolCallID = %q, want 1", custom.ToolCallID)
-	}
-	builtin := <-got
-	if builtin.IsHostTool {
-		t.Fatalf("builtin tool wrongly flagged custom: %+v", builtin)
-	}
-}
-
-func TestSnapshot_PopulatesFromConfig(t *testing.T) {
+func TestSnapshot_PopulatesRuntimeFields(t *testing.T) {
 	client := fakellm.New()
 	cfg := chat.Config{
-		Agent:        "code",
-		ModelID:      "gpt-x",
-		AgentKnobs:   chat.AgentKnobs{ContextWindow: 4096},
-		ActiveSkills: []string{"a", "b"},
+		ModelID:    "gpt-x",
+		AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 	}
 	cfg.Profile.SystemPrompt = "be helpful"
 	cfg.Profile.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}
@@ -339,17 +312,11 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	defer s.Close()
 
 	snap := s.Snapshot()
-	if snap.Agent != "code" || snap.Model != "gpt-x" {
-		t.Fatalf("snapshot header wrong: %+v", snap)
-	}
 	if snap.ContextWindow != 4096 {
 		t.Fatalf("snapshot status/window wrong: %+v", snap)
 	}
-	if snap.SystemPrompt != "be helpful" {
-		t.Fatalf("SystemPrompt = %q", snap.SystemPrompt)
-	}
-	if len(snap.Skills) != 2 || snap.Skills[0] != "a" {
-		t.Fatalf("Skills = %v", snap.Skills)
+	if len(snap.Tools) != 1 || snap.Tools[0].Name != "bash" {
+		t.Fatalf("snapshot tools = %+v", snap.Tools)
 	}
 }
 
@@ -370,9 +337,6 @@ func TestSend_TextPath(t *testing.T) {
 	}
 	if text != "reply" || !done {
 		t.Fatalf("Send text path: text=%q done=%v", text, done)
-	}
-	if len(s.sess.Messages()) < 2 {
-		t.Fatalf("history not carried: %d messages", len(s.sess.Messages()))
 	}
 }
 
@@ -420,14 +384,10 @@ func TestSession_InterjectMidTurn(t *testing.T) {
 	s = newTestSession(t, client, cfg)
 	defer s.Close()
 
-	var sawReminder bool
-	for ev := range s.Send(context.Background(), "go") {
-		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "change of plans") {
-			sawReminder = true
-		}
+	for range s.Send(context.Background(), "go") {
 	}
-	if !sawReminder {
-		t.Fatal("mid-turn Interject should surface as a SystemReminder event in the same turn")
+	if !callsContain(client.CallsSnapshot(), "change of plans") {
+		t.Fatal("mid-turn Interject was not included in the next provider round")
 	}
 }
 
@@ -437,27 +397,33 @@ func TestSession_InterjectWhileIdle(t *testing.T) {
 	defer s.Close()
 
 	s.Interject("remember the deadline")
-	var sawReminder bool
-	for ev := range s.Send(context.Background(), "hi") {
-		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "remember the deadline") {
-			sawReminder = true
-		}
+	for range s.Send(context.Background(), "hi") {
 	}
-	if !sawReminder {
+	if !callsContain(client.CallsSnapshot(), "remember the deadline") {
 		t.Fatal("idle Interject should be injected at the start of the next turn")
 	}
 }
 
-func TestSessionJobsFromManager(t *testing.T) {
+func callsContain(calls []fakellm.Call, text string) bool {
+	for _, call := range calls {
+		for _, msg := range call.Msgs {
+			if strings.Contains(msg.Content, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestSessionRunningJobsFromManager(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil)
-	jobs := s.Jobs()
-	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
-		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)
+	if got := s.RunningJobs(); got != 1 {
+		t.Fatalf("Session.RunningJobs = %d, want 1", got)
 	}
 }
 

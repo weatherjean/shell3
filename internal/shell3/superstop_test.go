@@ -1,27 +1,28 @@
 package shell3
 
 import (
+	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/inbox"
 )
 
-func TestNotifyTextNoWake(t *testing.T) {
+func TestQueueHostNoticeWaitsForUserTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	s.NotifyTextNoWake("[superstop] everything was stopped")
+	s.QueueHostNotice("[superstop] everything was stopped")
 	if !s.HasQueuedInput() {
 		t.Fatal("notice not queued")
 	}
-	select {
-	case ev := <-rt.Events():
-		t.Fatalf("unexpected host event %+v (want no wake)", ev)
-	case <-time.After(100 * time.Millisecond):
+	for ev := range s.RunQueued(context.Background()) {
+		t.Fatalf("host notice started an unexpected turn: %+v", ev)
+	}
+	if !s.HasQueuedInput() {
+		t.Fatal("host notice should wait for the next ordinary user turn")
 	}
 }
 
@@ -35,8 +36,8 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	killed := parent.KillAllForStop()
-	if len(killed) != 1 || killed[0].ID != id || killed[0].Kind != "command" {
+	killed := rt.KillAllForStop()
+	if len(killed) != 1 || killed[0].ID != id {
 		t.Fatalf("killed = %+v, want the one sleep job", killed)
 	}
 	if !strings.Contains(killed[0].Title, "sleep 30") {
@@ -50,7 +51,7 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	if total != 0 || len(notices) != 0 {
 		t.Fatalf("suppressed kill persisted notices: total=%d notices=%+v", total, notices)
 	}
-	if again := parent.KillAllForStop(); len(again) != 0 {
+	if again := rt.KillAllForStop(); len(again) != 0 {
 		t.Fatalf("second KillAllForStop = %+v, want empty", again)
 	}
 }

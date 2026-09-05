@@ -7,7 +7,6 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/alecthomas/participle/v2 v2.1.4
-	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/go-telegram/bot v1.23.0
 	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/openai/openai-go/v3 v3.52.0

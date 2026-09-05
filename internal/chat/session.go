@@ -27,23 +27,17 @@ type Session struct {
 	// ones; see turn.go's allocToolCallID call site for why.
 	nextToolCallID int
 	reminders      reminderTracker
-	// reminderLog anchors each emitted <system-reminder> to the message index
-	// it precedes, so a reader can interleave them into History(). In-memory
-	// only. Guarded by msgMu.
+	// reminderLog anchors each emitted <system-reminder> to the message index it
+	// precedes so replay can reconstruct provider-visible order. Guarded by
+	// msgMu.
 	reminderLog      []runs.ReminderLine
 	lastPromptTokens int // accurate token count from most recent streamOnce response
 
 	// warnedFixedOverhead throttles warnFixedOverhead to one line per session:
 	// once true the condition holds every turn, and would bury the log.
 	warnedFixedOverhead bool
-	// turnUsage sums every round's usage within the current turn, unlike
-	// lastPromptTokens, which is the LAST round's prompt count — a
-	// context-fullness gauge, not a sum. RunTurn zeroes it before the round
-	// loop so a zero-round turn cannot re-add a stale value; saveHistory
-	// reads it once at turn end for the store's cumulative ledger.
-	turnUsage llm.Usage
-	id        string      // runs session id; "" if no store configured
-	store     *runs.Store // optional; nil → no sidecar persistence
+	id                  string      // runs session id; "" if no store configured
+	store               *runs.Store // optional; nil → no sidecar persistence
 	// persistedLen is how many messages already reached the store under the
 	// current sess.id. Touched only on the turn goroutine, so it needs no lock.
 	persistedLen int
@@ -91,7 +85,7 @@ func (s *Session) HasInbox() bool {
 
 // HasSteer reports queued USER steering, not host notices. A front-end uses
 // it to catch a steer that landed after the final round boundary, so the
-// message gets an answered turn instead of riding a later quiet one.
+// message gets an answered follow-up instead of remaining queued.
 func (s *Session) HasSteer() bool {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
@@ -155,8 +149,8 @@ func hostNoticeTrace(notices []string) string {
 
 // reminderBlock formats queued inbox items as one system-reminder block, ""
 // when nothing survives trimming. Every item goes through
-// NeutralizeReminderTags: they carry untrusted text — command output, subagent
-// summaries — and an embedded </system-reminder> must not close this envelope
+// NeutralizeReminderTags: they carry untrusted text — command output and inbox
+// notices — and an embedded </system-reminder> must not close this envelope
 // and forge system or user text.
 func reminderBlock(header string, items []string) string {
 	var b strings.Builder
@@ -257,15 +251,6 @@ func (s *Session) recordReminder(text string) {
 	}
 }
 
-// SetStore swaps the persistence handle on a /reload: the session keeps its
-// history and id but must write through the NEW generation's handle, since
-// the old one closes when the parked generation drains. nil is legal.
-func (s *Session) SetStore(store *runs.Store) {
-	s.msgMu.Lock()
-	s.store = store
-	s.msgMu.Unlock()
-}
-
 // RestoreReminders reloads reminderLog from the persisted sidecar (resume path).
 func (s *Session) RestoreReminders() error {
 	if s.store == nil || s.id == "" {
@@ -349,12 +334,11 @@ func (r *reminderTracker) check(model string, contextWindow, promptTokens int) s
 }
 
 // injectReminder appends a <system-reminder> to the LAST message when the
-// user just spoke. On a wake turn, where the conversation does not end on a
-// user message, it becomes a fresh trailing user message instead. It must NOT
-// graft onto an earlier user message: that one is already answered, so the
-// graft files the newest information above the assistant's own last reply,
-// where its instruction ("reply NO_REPLY if this needs nothing") is
-// positionally weakest. Later reminders coalesce onto that carrier.
+// user just spoke. If the context does not end on a user message, it becomes a
+// fresh trailing user message instead. It must NOT graft onto an earlier user
+// message: that one is already answered, so the graft files the newest
+// information above the assistant's own last reply. Later reminders coalesce
+// onto that carrier.
 //
 // Operates on allMsgs only, never sess.messages.
 func injectReminder(msgs []llm.Message, reminder string) []llm.Message {

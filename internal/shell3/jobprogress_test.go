@@ -6,12 +6,8 @@ import (
 )
 
 func TestJobSink(t *testing.T) {
-	var chunks []string
 	ring := newRingBuffer(1024)
-	sink := &jobSink{
-		ring: ring,
-		emit: func(c string) { chunks = append(chunks, c) },
-	}
+	sink := &jobSink{ring: ring}
 
 	if _, err := sink.Write([]byte("hello")); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -23,38 +19,32 @@ func TestJobSink(t *testing.T) {
 	if got := sink.String(); got != "hello world" {
 		t.Errorf("String() = %q, want %q", got, "hello world")
 	}
-	if len(chunks) != 2 || chunks[0] != "hello" || chunks[1] != " world" {
-		t.Errorf("chunks = %v, want [\"hello\" \" world\"]", chunks)
-	}
 }
 
-func TestJobEventsNonNil(t *testing.T) {
+func TestJobCompletionsNonNil(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	if rt.JobEvents() == nil {
-		t.Fatal("JobEvents() returned nil channel")
+	if rt.JobCompletions() == nil {
+		t.Fatal("JobCompletions() returned nil channel")
 	}
 }
 
-func TestEmitJobNeverBlocks(t *testing.T) {
+func TestEmitJobCompletionNeverBlocks(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i <= 256; i++ {
-			rt.emitJob(JobProgress{
-				JobID: "bg1", Parent: "s1", Kind: JobCommand,
-				Title: "test", Chunk: "x",
-			})
+		for i := 0; i <= defaultMaxConcurrent; i++ {
+			rt.emitJobCompletion()
 		}
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("emitJob blocked on a full channel (deadlock)")
+		t.Fatal("emitJobCompletion blocked on a full channel")
 	}
 }
 
-func TestJobProgressIntegration(t *testing.T) {
+func TestJobCompletionIntegration(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("done"))
 
 	sess, err := rt.Session(SessionOpts{})
@@ -62,38 +52,14 @@ func TestJobProgressIntegration(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 
-	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil)
+	_, err = rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	var chunks []JobProgress
-	var done []JobProgress
-	deadline := time.After(5 * time.Second)
-loop:
-	for {
-		select {
-		case ev := <-rt.JobEvents():
-			if ev.JobID != id {
-				continue
-			}
-			if ev.Done {
-				done = append(done, ev)
-				break loop
-			}
-			chunks = append(chunks, ev)
-		case <-deadline:
-			t.Fatalf("timed out waiting for Done event (chunks=%d)", len(chunks))
-		}
-	}
-
-	if len(chunks) < 1 {
-		t.Errorf("want ≥1 chunk events, got %d", len(chunks))
-	}
-	if len(done) != 1 {
-		t.Errorf("want exactly 1 Done event, got %d", len(done))
-	}
-	if d := done[0]; d.JobID == "" || d.Parent == "" {
-		t.Errorf("Done event missing JobID or Parent: %+v", d)
+	select {
+	case <-rt.JobCompletions():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for job completion")
 	}
 }

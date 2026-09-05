@@ -24,7 +24,7 @@ func TestBootWritesOneCompleteKitAndRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Main == nil || len(cfg.Skills) != 9 || cfg.Skills[4].Name != "shell3-inbox" || cfg.Memory != "" {
+	if cfg.Main == nil || len(cfg.Skills) != 10 || cfg.Skills[0].Name != "sd-file-editing" || cfg.Skills[5].Name != "shell3-inbox" || cfg.Memory != "" {
 		t.Fatalf("generated kit = main:%+v skills:%d memory:%q", cfg.Main, len(cfg.Skills), cfg.Memory)
 	}
 	entries, err := os.ReadDir(dir)

@@ -40,20 +40,15 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 	defer cancel()
 	sess.Run(ctx, cfg, "say hi")
 
-	sess.End("ok")
-
 	kinds := make([]chat.EventKind, 0, len(collected))
 	for _, e := range collected {
 		kinds = append(kinds, e.Kind)
 	}
 
 	want := map[chat.EventKind]int{
-		chat.EventUserMessage:      1,
-		chat.EventAssistantToken:   2,
-		chat.EventAssistantMessage: 1,
-		chat.EventUsage:            1,
-		chat.EventTurnDone:         1,
-		chat.EventSessionEnd:       1,
+		chat.EventAssistantToken: 2,
+		chat.EventUsage:          1,
+		chat.EventTurnDone:       1,
 	}
 	for k, n := range want {
 		got := 0

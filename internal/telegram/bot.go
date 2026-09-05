@@ -4,9 +4,6 @@ package telegram
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,20 +18,20 @@ import (
 type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime
-	// homeChat takes cron results and ownerless completions. NOT an access
+	// homeChat takes host alerts and ownerless file sends. NOT an access
 	// rule — rooms are authorized by who speaks in them.
 	homeChat int64
 	// allow decides WHO may drive the agent, whatever the chat. Never nil
 	// after NewBot — a nil allowlist denies everyone.
 	allow *senderAllowlist
 
-	workDir string // resolves relative paths for send_media_telegram
-	// configDir is what send_media_telegram refuses to send from, media dir
+	workDir string // resolves relative paths for the telegram tool
+	// configDir is what the telegram tool refuses to send from, media dir
 	// excepted — by path AND inode, so no symlink or hardlink launders a
 	// credential out. "" disables only those two checks.
 	configDir string
-	// threads is the thread index every room derives its own surface from.
-	threads *ThreadIndex
+	// sessions is the process-wide index every room derives its own surface from.
+	sessions *SessionIndex
 
 	mu sync.Mutex // guards the room registry and the mutable wiring below
 	// convs holds one conversation per chat id, created the first time an
@@ -74,16 +71,16 @@ type Bot struct {
 const defaultMaxTurns = 4
 
 // NewBot wires a Bot over the runtime. homeChat receives host-owned inbox
-// alerts; threads is the process-wide index each room derives its own surface
+// alerts; sessions is the process-wide index each room derives its own surface
 // from, kept across /reload.
-func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, threads *ThreadIndex) *Bot {
+func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, sessions *SessionIndex) *Bot {
 	// Default allowlist: the home chat's owner.
 	allow, _ := newSenderAllowlist(homeChat, nil)
 	return &Bot{
 		client:   client,
 		rt:       rt,
 		homeChat: homeChat,
-		threads:  threads,
+		sessions: sessions,
 		convs:    make(map[int64]*conversation),
 		maxTurns: defaultMaxTurns,
 		allow:    allow,
@@ -93,23 +90,6 @@ func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, threads *Thread
 
 // SetMaxConcurrentTurns bounds rooms holding a slot; non-positive keeps the
 // default.
-// SetConvoLog records every message in and out to w, as JSONL. Call it before
-// Run: it swaps the transport for a logging wrapper, so anything sent through
-// the client this Bot was built with is covered — host command replies and
-// inbox alerts included, which is traffic no other record holds.
-//
-// The "/" command registration is sent through the concrete API client and is
-// not in the log. Lifecycle and inbox notices use Bot methods and are logged
-// when this wrapper is installed.
-func (b *Bot) SetConvoLog(w io.Writer) {
-	if w == nil {
-		return
-	}
-	b.mu.Lock()
-	b.client = newConvoLogClient(b.client, w)
-	b.mu.Unlock()
-}
-
 func (b *Bot) SetMaxConcurrentTurns(n int) {
 	if n <= 0 {
 		return
@@ -170,21 +150,19 @@ func (b *Bot) allowlist() *senderAllowlist {
 }
 
 // SetWorkDir sets the directory used to resolve relative paths passed to
-// send_media_telegram (the agent's session workdir).
+// the telegram tool (the orchestrator's workdir).
 func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
 
-// SetConfigDir sets the directory send_media_telegram refuses to send from.
+// SetConfigDir sets the directory the telegram tool refuses to send from.
 // Unset skips the path and inode checks, so every front-end must supply it.
 func (b *Bot) SetConfigDir(dir string) { b.configDir = dir }
 
-// Run consumes inbound messages and the wake bus until ctx is cancelled.
+// Run consumes inbound messages until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
-	go b.consumeWakes(ctx)
 	// Subscribe ONCE. Calling Updates per iteration only worked because the
-	// clients happened to hand back a stored field; a client that builds its
-	// stream on demand (the --convo-log wrapper did) then gets a fresh
-	// subscriber every loop, each competing for the same upstream, and the
-	// abandoned ones silently eat messages.
+	// clients happen to hand back a stored field. A client may instead build a
+	// fresh subscription on demand, in which case repeated calls compete for
+	// the same upstream and silently lose messages.
 	updates := b.client.Updates(ctx)
 	for {
 		select {
@@ -199,9 +177,9 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 }
 
-// inMail is one received user message, attachments already saved, waiting for
+// inboundMessage is one received user message, attachments already saved, waiting for
 // (or entering) its turn.
-type inMail struct {
+type inboundMessage struct {
 	m     Msg
 	text  string
 	saved []savedFile
@@ -287,7 +265,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		}
 	}
 
-	mail := inMail{m: m, text: text, saved: saved}
+	incoming := inboundMessage{m: m, text: text, saved: saved}
 
 	// Text rides a short debounce: Telegram splits a long message into
 	// back-to-back updates, and the burst merges them into ONE turn. Media
@@ -295,7 +273,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// needs the session resolved on a turn goroutine.
 	if len(saved) == 0 {
 		c.mu.Lock()
-		c.burst = append(c.burst, mail)
+		c.burst = append(c.burst, incoming)
 		if c.burstTimer == nil {
 			window := b.debounce
 			if window <= 0 {
@@ -307,7 +285,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return
 	}
 	c.flushBurst(ctx)
-	c.dispatchMail(ctx, []inMail{mail})
+	c.dispatchMessages(ctx, []inboundMessage{incoming})
 }
 
 // roomAddressed answers the trigger question for a room that may not exist
@@ -362,51 +340,6 @@ func (b *Bot) username(ctx context.Context) string {
 // burstWindow is the default text-message debounce.
 const burstWindow = 400 * time.Millisecond
 
-// runningJobs counts sess's live background jobs. Session.Jobs() lists ALL
-// runtime jobs, so filter by JobInfo.ParentID.
-func runningJobs(sess *shell3.Session) int {
-	n := 0
-	for _, j := range sess.Jobs() {
-		if j.ParentID == sess.Name() && !j.Done {
-			n++
-		}
-	}
-	return n
-}
-
-// sessionHasRunningJob reports any live background job under sess.
-func (b *Bot) sessionHasRunningJob(sess *shell3.Session) bool {
-	return runningJobs(sess) > 0
-}
-
-// consumeWakes routes queued session input to its conversation.
-func (b *Bot) consumeWakes(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok := <-b.rt.Events():
-			if !ok {
-				return
-			}
-			if ev.Kind != shell3.Wake {
-				continue
-			}
-			b.dispatchWake(ctx, ev.Session)
-		}
-	}
-}
-
-// dispatchWake runs queued input in the room that owns the session. Input for
-// a detached session is left in its persisted transcript.
-func (b *Bot) dispatchWake(ctx context.Context, id string) {
-	c := b.convFor(id)
-	if c == nil {
-		return
-	}
-	c.wake(ctx)
-}
-
 // containsToolMarkup spots the raw <tool_call> wrapper several open-model
 // chat templates use. No legitimate reply contains it: its presence means the
 // provider failed to parse its own template and a tool call arrived as text.
@@ -441,7 +374,7 @@ func (b *Bot) roomForOwner(ownerID string) *conversation {
 	if c := b.convFor(ownerID); c != nil {
 		return c
 	}
-	st := b.threads.currentStore()
+	st := b.sessions.currentStore()
 	if st == nil {
 		return nil
 	}
@@ -449,7 +382,7 @@ func (b *Bot) roomForOwner(ownerID string) *conversation {
 	if !ok {
 		return nil
 	}
-	chatID, ok := chatIDFromSurface(b.threads.hostSurface(), surface)
+	chatID, ok := chatIDFromSurface(b.sessions.hostSurface(), surface)
 	if !ok {
 		return nil
 	}
@@ -462,69 +395,4 @@ func (b *Bot) roomOrHome(ownerID string) *conversation {
 		return c
 	}
 	return b.homeConv()
-}
-
-// Inbox is every room's pending user mail and undrained session input:
-// zero-token, deterministic, and included in /status.
-func (b *Bot) Inbox() string { return b.renderInbox() }
-
-func (b *Bot) renderInbox() string {
-	type roomInbox struct {
-		chatID      int64
-		mail        []inMail
-		queuedInput bool
-		active      bool
-	}
-	var rooms []roomInbox
-	anyQueued, anyActive := false, false
-	for _, c := range b.allConvs() {
-		c.mu.Lock()
-		r := roomInbox{
-			chatID:      c.chatID,
-			mail:        append([]inMail{}, c.mailQueue...),
-			queuedInput: c.main != nil && c.main.HasQueuedInput(),
-			active:      c.turnActive,
-		}
-		c.mu.Unlock()
-		anyQueued = anyQueued || len(r.mail) > 0 || r.queuedInput
-		anyActive = anyActive || r.active
-		rooms = append(rooms, r)
-	}
-	sort.Slice(rooms, func(i, j int) bool { return rooms[i].chatID < rooms[j].chatID })
-
-	if !anyQueued {
-		if anyActive {
-			return "📥 inbox empty — a turn is running, nothing queued behind it"
-		}
-		return "📥 inbox empty"
-	}
-	var sb strings.Builder
-	sb.WriteString("📥 inbox\n")
-	for _, r := range rooms {
-		if len(r.mail) == 0 && !r.queuedInput {
-			continue
-		}
-		fmt.Fprintf(&sb, "· chat %d\n", r.chatID)
-		for _, m := range r.mail {
-			text := strings.TrimSpace(m.text)
-			if text == "" {
-				text = "(attachment)"
-			}
-			fmt.Fprintf(&sb, "  · from you: %s\n", strutil.Truncate(text, 80))
-		}
-		if r.queuedInput {
-			sb.WriteString("  · queued session input waiting for its turn\n")
-		}
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-// LiveSession is any room's live conversation, if one exists.
-func (b *Bot) LiveSession() *shell3.Session {
-	for _, c := range b.allConvs() {
-		if s := c.session(); s != nil {
-			return s
-		}
-	}
-	return nil
 }

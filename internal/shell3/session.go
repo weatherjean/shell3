@@ -31,8 +31,8 @@ type Session struct {
 	// opts is the SessionOpts this session was built from.
 	opts SessionOpts
 
-	// closeOnce makes Close concurrency-safe: a subagent goroutine may call
-	// child.Close() while Runtime.Close closes the same child from its map.
+	// closeOnce makes Close concurrency-safe when a session and its runtime
+	// shut down at the same time.
 	closeOnce sync.Once
 	closeErr  error
 
@@ -49,8 +49,8 @@ type Session struct {
 	// pendingCfg is a validated reload generation queued while a turn is busy.
 	// The active turn keeps its captured TurnConfig; the next turn sees this one.
 	pendingCfg *chat.Config
-	// closed is set by doClose so a late Send — a Wake-driven drain racing
-	// teardown — is rejected rather than run against the ended store record.
+	// closed is set by doClose so a late queued-input drain racing teardown is
+	// rejected rather than run against the ended store record.
 	closed bool
 }
 
@@ -62,7 +62,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	var seedTokens int     // persisted provider-reported prompt tokens for a resumed session
 	var resumedFrom string // non-empty when this session reattached to an existing run
 	if cfg.Store != nil {
-		// A front-end resolves the id from its OWN thread marker: "newest
+		// A front-end resolves the id from its OWN current-session marker: "newest
 		// session matching this workdir" is not a conversation identity, and
 		// with two front-ends live it follows whichever spoke last.
 		resumeID := opts.ResumeID
@@ -81,25 +81,13 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		default:
 			// Best-effort: a failed NewSession leaves storeID "" and no
 			// persistence, logged so it is observable rather than silent.
-			if id, err := cfg.Store.NewSession(runs.Meta{
-				Workdir:   cfg.WorkDir,
-				ConfigDir: cfg.ConfigDir,
-				Model:     cfg.ModelID,
-				ParentID:  opts.ParentID,
-				Agent:     cfg.Agent,
-				CronJob:   opts.CronJob,
-			}); err == nil {
+			if id, err := cfg.Store.NewSession(); err == nil {
 				storeID = id
 			} else {
 				chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
 			}
 		}
 	}
-	// Carry the dispatch identity into cfg so a compaction rollover, which
-	// runs mid-turn from cfg alone, stamps the rolled session with the same
-	// attribution instead of losing it at the boundary.
-	cfg.ParentID = opts.ParentID
-	cfg.CronJob = opts.CronJob
 	s := &Session{
 		cfg:      cfg,
 		handlers: chat.NewHandlers(),
@@ -122,7 +110,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 // route is the chat.Session sink, running on the turn goroutine, so every
 // forward to a Send channel happens-before that goroutine closes it. The
 // curDone select unblocks a send to a channel the caller stopped reading.
-// Events with no public equivalent are dropped.
 //
 // NOTE: curDone is the turn ctx's Done, closed by an ordinary cancel as well
 // as by Close, so a cancelled turn MAY drop whatever this was delivering —
@@ -134,14 +121,7 @@ func (s *Session) route(ev chat.Event) {
 		s.sawError = true
 		s.mu.Unlock()
 	}
-	pub, ok := translate(ev)
-	if !ok {
-		return
-	}
-	// translate has no config, so IsHostTool resolves here.
-	if pub.Kind == ToolCall && s.cfg.HostToolNames[pub.ToolName] {
-		pub.IsHostTool = true
-	}
+	pub := translate(ev)
 	s.mu.Lock()
 	cur, done := s.cur, s.curDone
 	s.mu.Unlock()
@@ -162,21 +142,6 @@ func (s *Session) route(ev chat.Event) {
 // mid-turn waits for the next turn rather than injecting mid-flight.
 func (s *Session) Interject(text string) {
 	s.sess.Interject(text)
-	// Idle steering must prod the host; a running turn drains the inbox
-	// itself. The TOCTOU is benign: worst case a missed wake (the next Send
-	// drains it anyway) or a spurious one (RunQueued no-ops when drained).
-	if !s.isBusy() {
-		s.wake()
-	}
-}
-
-// wake emits a Wake on the runtime bus, no-op without a runtime. Reachable
-// from any goroutine, so it snapshots s.runtime under s.mu to avoid racing
-// doClose's nil of it; the lock is not held across emit.
-func (s *Session) wake() {
-	if rt := s.runtimeHandle(); rt != nil {
-		rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
-	}
 }
 
 // closedEvents is the shape every rejected or no-op turn request returns: a
@@ -190,11 +155,11 @@ func closedEvents(err error) <-chan Event {
 	return ch
 }
 
-// RunQueued answers a Wake by running one turn over the queued inbox. An
-// empty inbox, or a turn already in flight (which drains it itself), starts
-// no turn and returns a closed channel. Otherwise Send's ErrBusy contract.
+// RunQueued runs one follow-up turn over queued user steering. Host notices
+// alone wait for the next ordinary user turn. A turn already in flight starts
+// no follow-up and returns a closed channel. Otherwise Send's ErrBusy contract.
 func (s *Session) RunQueued(ctx context.Context) <-chan Event {
-	if s.isBusy() || !s.sess.HasInbox() {
+	if s.isBusy() || !s.sess.HasSteer() {
 		return closedEvents(nil)
 	}
 	// The turn loop drains the inbox at its top, so an empty-prompt turn
@@ -202,8 +167,9 @@ func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 	return s.Send(ctx, "")
 }
 
-// HasQueuedInput reports interjected items waiting — steering that arrived
-// during a turn's final round. RunQueued consumes them.
+// HasQueuedInput reports whether any interjected item is waiting. RunQueued
+// consumes the queue when user steering is present; host notices alone wait
+// for the next ordinary Send.
 func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 
 // HasQueuedSteer reports whether queued USER steering (not host notices) is
@@ -211,7 +177,7 @@ func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 func (s *Session) HasQueuedSteer() bool { return s.sess.HasSteer() }
 
 // Headless reports that no human is attached to this session.
-// Registrars skip tools that need one: send_media_telegram has nowhere to
+// Registrars skip tools that need one: telegram has nowhere to
 // send a file without a live chat session.
 func (s *Session) Headless() bool { return s.opts.Headless }
 
@@ -243,9 +209,6 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	s.curDone = turnCtx.Done()
 	s.turnCancel = cancel
 	s.turnDone = done
-	// Capture under the busy gate so the turn goroutine never reads s.runtime:
-	// doClose nils it once `done` closes.
-	rt := s.runtime
 	// Snapshot the turn config still holding s.mu, so "busy set" and "cfg
 	// read" are atomic against RegisterHostTool and reload:
 	// one that slipped past its isBusy check lands wholly before or after.
@@ -266,13 +229,6 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 			}
 			s.mu.Unlock()
 			close(out)
-			// Steering or a host notice that arrived in the final round
-			// queued with no boundary left to drain it. The session is idle
-			// with a non-empty inbox, so Wake the host for a follow-up turn —
-			// after busy clears, or RunQueued would bounce off ErrBusy.
-			if rt != nil && s.sess.HasInbox() {
-				rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
-			}
 			cancel() // release the child ctx
 		}()
 		defer close(done)
@@ -289,9 +245,7 @@ func (s *Session) runtimeHandle() *Runtime {
 	return s.runtime
 }
 
-// sessionStore returns the Parts-generation store bound to s. Subagent
-// sessions deliberately keep that generation across reloads, so child jobs
-// must not reach through Runtime.store for a newer handle.
+// sessionStore returns the store captured by the session configuration.
 func sessionStore(s *Session) *runs.Store {
 	if s == nil {
 		return nil
@@ -318,8 +272,6 @@ func (s *Session) reloadConfigLocked(cfg chat.Config) {
 	}
 	cfg.HostTool = s.cfg.HostTool
 	cfg.HostToolNames = s.cfg.HostToolNames
-	cfg.ParentID = s.cfg.ParentID
-	cfg.CronJob = s.cfg.CronJob
 	s.cfg = cfg
 	s.applyHostReminders()
 }
@@ -362,14 +314,12 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
-	s.sess.End(chat.StatusOK)
 	var endErr error
 	if s.cfg.Store != nil {
 		endErr = s.cfg.Store.EndSession(s.sess.ID())
 	}
-	// Nil s.runtime under s.mu so a concurrent WakeEvents() reader never races
-	// the write. Only the field access is locked — holding s.mu across
-	// rt.forget could deadlock against the runtime's own locking.
+	// Nil s.runtime under s.mu. Only the field access is locked — holding s.mu
+	// across rt.forget could deadlock against the runtime's own locking.
 	s.mu.Lock()
 	rt := s.runtime
 	s.runtime = nil
@@ -419,13 +369,3 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	}
 	return tc
 }
-
-// ActiveAgent returns the name of the currently active agent.
-func (s *Session) ActiveAgent() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cfg.Agent
-}
-
-// Name is the session's runtime key, which front-ends use as a label.
-func (s *Session) Name() string { return s.name }

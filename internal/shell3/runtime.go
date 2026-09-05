@@ -17,17 +17,8 @@ type SessionOpts struct {
 	// Name keys the session on the runtime; "" generates one. An existing
 	// live name returns that session.
 	Name string
-	// Agent selects the initial agent ("" → first declared).
-	Agent string
-	// WorkDir roots tool execution for this session ("" → runtime root).
-	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
-	// ParentID groups a child transcript under the session that spawned it.
-	ParentID string
-	// CronJob names the cron job that started this session, recorded in its
-	// meta so a job's runs are findable without guessing from duration.
-	CronJob string
 	// PromptSuffix appends per-session text to the system prompt every turn;
 	// the Telegram front-end gives each chat its own brief with it.
 	PromptSuffix func() string
@@ -36,30 +27,6 @@ type SessionOpts struct {
 	// "resume the newest session", which with two front-ends live reattaches
 	// to whichever spoke last.
 	ResumeID string
-}
-
-// HostEventKind discriminates out-of-turn runtime events.
-type HostEventKind int
-
-const (
-	// Wake: an idle session's inbox gained an item. The host answers with
-	// Session.RunQueued, which runs a model turn.
-	Wake HostEventKind = iota
-)
-
-// String returns the event name ("wake") for logs and diagnostics.
-func (k HostEventKind) String() string {
-	if k == Wake {
-		return "wake"
-	}
-	return fmt.Sprintf("HostEventKind(%d)", int(k))
-}
-
-// HostEvent is one out-of-turn event, carrying the session's store id so a
-// host can match it against what it is watching.
-type HostEvent struct {
-	Session string
-	Kind    HostEventKind
 }
 
 // Runtime hosts N sessions over one shared build, safe for concurrent Session
@@ -71,16 +38,12 @@ type Runtime struct {
 	cleanup       func()
 	log           applog.Logger
 
-	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
-	events chan HostEvent
-	// jobEvents is the job-progress bus, buffered and dropping on full so a
-	// slow consumer never stalls a job. Never closed — a late emit from an
-	// unwinding job goroutine must not panic.
-	jobEvents chan JobProgress
+	// jobCompletions wakes the one-shot CLI after a background command exits.
+	// It carries no output: durable results live in the filesystem inbox.
+	jobCompletions chan struct{}
 	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
-	// store is the shared runs store, nil if unavailable: front-end session
-	// lists and replay, plus the job runtime's transcript reads.
+	// store is the shared conversation store, nil if persistence is unavailable.
 	store *runs.Store
 	// ctx is the runtime's base context. A watcher calls
 	// Close when the parent fires, and Close cancels ctx, so the watcher and
@@ -127,18 +90,21 @@ func NewConfiguredRuntime(ctx context.Context, workDir string, store *runs.Store
 	if cleanup == nil {
 		cleanup = func() {}
 	}
+	completionBuffer := maxConcurrent
+	if completionBuffer <= 0 {
+		completionBuffer = defaultMaxConcurrent
+	}
 	runtimeCtx, cancel := context.WithCancel(parent)
 	rt := &Runtime{
-		sessionConfig: sessionConfig,
-		cleanup:       cleanup,
-		log:           applog.Noop{},
-		store:         store,
-		events:        make(chan HostEvent, 64),
-		jobEvents:     make(chan JobProgress, 256),
-		workDir:       workDir,
-		ctx:           runtimeCtx,
-		cancel:        cancel,
-		sessions:      map[string]*Session{},
+		sessionConfig:  sessionConfig,
+		cleanup:        cleanup,
+		log:            applog.Noop{},
+		store:          store,
+		jobCompletions: make(chan struct{}, completionBuffer),
+		workDir:        workDir,
+		ctx:            runtimeCtx,
+		cancel:         cancel,
+		sessions:       map[string]*Session{},
 	}
 	rt.jobs = newJobManager(rt, maxConcurrent)
 	go func() {
@@ -169,14 +135,9 @@ func (rt *Runtime) Logger() applog.Logger {
 	return rt.log
 }
 
-// Events is the out-of-turn bus; one receiver drives N sessions. Buffered,
-// dropping on full — the host re-checks inboxes on its next turn anyway.
-func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
-
-// JobEvents is the job-progress bus: a Chunk per write to a job's output tee,
-// a Done at completion. Buffered, dropping on full so a slow consumer never
-// stalls a job, and never closed.
-func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
+// JobCompletions reports background-command exits. The channel is never
+// closed; consume it only while the Runtime is live.
+func (rt *Runtime) JobCompletions() <-chan struct{} { return rt.jobCompletions }
 
 // Store returns the runtime's durable conversation store.
 func (rt *Runtime) Store() *runs.Store {
@@ -254,18 +215,10 @@ func (rt *Runtime) ReloadConfig(factory func(SessionOpts) (chat.Config, error)) 
 	}
 }
 
-func (rt *Runtime) emit(ev HostEvent) {
+// emitJobCompletion wakes a waiter without making command teardown block.
+func (rt *Runtime) emitJobCompletion() {
 	select {
-	case rt.events <- ev:
-	default: // bus full: drop (Wake is a hint, not a queue)
-	}
-}
-
-// emitJob sends a JobProgress event on the job bus. Non-blocking: if the
-// buffer is full the event is dropped so a slow consumer never stalls a job.
-func (rt *Runtime) emitJob(ev JobProgress) {
-	select {
-	case rt.jobEvents <- ev:
+	case rt.jobCompletions <- struct{}{}:
 	default: // bus full: drop
 	}
 }
@@ -290,7 +243,7 @@ func (rt *Runtime) SetSessionDecorator(fn func(*Session)) {
 	}
 }
 
-// Session creates a session on this runtime, root or subagent child. A closed
+// Session creates a session on this runtime. A closed
 // runtime returns an error.
 func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock: the
@@ -383,8 +336,7 @@ func (rt *Runtime) Close() error {
 	}
 	rt.cleanup()
 	// Cancel the runtime base ctx so anything scoped to the runtime's lifetime
-	// unwinds. Do NOT close rt.events: a late emit from an unwinding goroutine
-	// must not panic.
+	// unwinds.
 	if rt.cancel != nil {
 		rt.cancel()
 	}

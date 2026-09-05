@@ -14,8 +14,7 @@ func TestSession_ConcurrentReadsRaceTurn(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{
-			LLM:   block,
-			Agent: "code",
+			LLM: block,
 
 			Profile: chat.AgentProfile{
 				SystemPrompt: "you are a test agent",
@@ -23,7 +22,7 @@ func TestSession_ConcurrentReadsRaceTurn(t *testing.T) {
 			},
 		}
 	})
-	s, err := rt.Session(SessionOpts{WorkDir: rt.workDir})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +38,6 @@ func TestSession_ConcurrentReadsRaceTurn(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					_ = s.MessageCount()
 					_ = s.Snapshot()
 				}
 			}

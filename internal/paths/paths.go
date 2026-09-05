@@ -5,25 +5,29 @@ import (
 	"strings"
 )
 
-// ProjectDirName is the per-project runtime directory created under a workdir
-// (conversation history under runs/). The single source of this name —
+// ProjectDirName is the per-project runtime directory created under a workdir.
+// It is the single source of this name —
 // route every path through the helpers here rather than rebuilding the literal.
 const ProjectDirName = ".shell3_project"
 
 // Local holds project-scoped runtime paths under ./.shell3_project/.
 type Local struct {
-	Root   string // ./.shell3_project/
-	Runs   string // ./.shell3_project/runs/
-	Errors string // ./.shell3_project/errors.jsonl
+	Root         string // ./.shell3_project/
+	Runs         string // ./.shell3_project/runs/
+	Wrk          string // ./.shell3_project/wrk/
+	Errors       string // ./.shell3_project/errors.jsonl
+	ScheduleLock string // ./.shell3_project/schedule.lock
 }
 
 // NewLocal returns a Local path set rooted at cwd/.shell3_project/.
 func NewLocal(cwd string) Local {
 	root := filepath.Join(cwd, ProjectDirName)
 	return Local{
-		Root:   root,
-		Runs:   filepath.Join(root, "runs"),
-		Errors: filepath.Join(root, "errors.jsonl"),
+		Root:         root,
+		Runs:         filepath.Join(root, "runs"),
+		Wrk:          filepath.Join(root, "wrk"),
+		Errors:       filepath.Join(root, "errors.jsonl"),
+		ScheduleLock: filepath.Join(root, "schedule.lock"),
 	}
 }
 

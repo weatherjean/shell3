@@ -131,9 +131,6 @@ func writePrivateAtomic(path string, data []byte) (err error) {
 // Session.Run persists history there, so terminal observers always see the
 // completed durable state.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
-	// Reset first: a turn returning via the early skip path below must not let
-	// saveHistory re-add a previous turn's usage to the cumulative ledger.
-	sess.turnUsage = llm.Usage{}
 	// terminalEmit is emitted from the defer below, after beforeDone, so
 	// persistence happens-before the signal the front-end reacts to.
 	var terminalEmit func()
@@ -180,12 +177,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage)
-			// totalUsage's PromptTokens is "latest round wins" — right for the
-			// context gauge, wrong for cost: a tool-heavy turn's later rounds
-			// re-send and pay for the whole growing prompt again. The ledger
-			// therefore sums each round raw rather than reusing the merge.
-			sess.turnUsage.PromptTokens += usage.PromptTokens
-			sess.turnUsage.CompletionTokens += usage.CompletionTokens
 		}
 		if usage.PromptTokens > 0 {
 			sess.lastPromptTokens = usage.PromptTokens
@@ -207,10 +198,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			emitAssistantToken(sess, truncationNotice)
 			text += truncationNotice
 		}
-		if text != "" {
-			emitAssistantMessage(sess, text)
-		}
-
 		// Replace provider ids with sequential decimal ones. Native ids like
 		// "web_fetch:0" get truncated by models when echoed back, breaking
 		// id-based addressing; a bare integer has no separator to chop at.
@@ -270,7 +257,7 @@ func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast
 	} else {
 		*allMsgs = injectReminder(*allMsgs, r)
 	}
-	emitSystemReminder(sess, r)
+	recordSystemReminder(sess, r)
 }
 
 // assembleTurnContext builds one turn's provider-bound context: system prompt
@@ -288,7 +275,6 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	// the disk NOW; otherwise a long-lived conversation serves the
 	// session-creation snapshot until /new or a restart.
 	sysPrompt := renderSystemPrompt(cfg)
-	recordTurnPrompt(cfg, sess, sysPrompt, len(msgs))
 	allMsgs = make([]llm.Message, 0, len(msgs)+1)
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: sysPrompt})
 	allMsgs = append(allMsgs, msgs...)
@@ -352,7 +338,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			return *st, ctx.Err()
 		}
 
-		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
+		emitToolCall(sess, tc.Name, tc.RawArgs)
 		res, invalid := validateCall(toolSchemas, tc)
 		// On a validation failure res already carries the reason. Otherwise
 		// resolve host tools first, then built-ins.
@@ -389,7 +375,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 // to both the in-flight slice and the session. Every tool_call needs exactly
 // one, so this is the single append site for the normal and cancelled paths.
 func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res toolResult) {
-	emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
+	emitToolResult(sess, tc.Name, res.output, res.isError)
 	// Prepend the tool_call_id: without it the handle lives only in structured
 	// metadata, invisible in the rendered transcript.
 	content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
@@ -496,16 +482,6 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 			lg.Warn("persist prompt tokens failed", "session_id", sessionID, "error", err)
 		}
 	}
-	// Accumulate this turn's total usage onto the store's cumulative ledger
-	// (the gauge above and the ledger here update from the same totalUsage
-	// source, so they can never drift apart). Guarded on non-zero like the
-	// gauge write: a turn that made no LLM call (pure inbox drain, an early
-	// error before any round) has nothing to add.
-	if sess.turnUsage.PromptTokens > 0 || sess.turnUsage.CompletionTokens > 0 {
-		if err := st.AddUsage(sessionID, sess.turnUsage.PromptTokens, sess.turnUsage.CompletionTokens); err != nil {
-			lg.Warn("persist cumulative usage failed", "session_id", sessionID, "error", err)
-		}
-	}
 }
 
 // flushMessages appends each message in msgs to the runs store (one row per
@@ -524,24 +500,6 @@ func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []ll
 		}
 	}
 	return len(msgs)
-}
-
-// recordTurnPrompt persists the system prompt this turn is about to run with,
-// so a stored conversation records what the model was TOLD and not only what
-// it said. Content-addressed and skipped when unchanged, so the steady state
-// (nothing edited between turns) costs one hash lookup; see
-// internal/runs/prompts.go.
-//
-// Best-effort by design: a failure here is logged and the turn proceeds. The
-// prompt is a debugging record, and losing it must never cost the user an
-// answer.
-func recordTurnPrompt(cfg TurnConfig, sess *Session, sysPrompt string, seq int) {
-	if cfg.Store == nil || sess == nil || sess.id == "" {
-		return
-	}
-	if err := cfg.Store.SavePrompt(sess.id, seq, sysPrompt, time.Now()); err != nil && cfg.Log != nil {
-		cfg.Log.Warn("persist system prompt failed", "session_id", sess.id, "error", err)
-	}
 }
 
 // renderSystemPrompt appends the live per-session transport suffix to the

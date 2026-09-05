@@ -57,14 +57,14 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			defer rt.Close()
-			threads := telegram.NewThreadIndex(func() *runs.Store { return rt.Store() }, "telegram")
+			sessions := telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram")
 
 			var apiClient *telegram.BotAPIClient
 			var bot *telegram.Bot
 			if console {
-				bot = telegram.NewBot(telegram.NewConsoleClient(cmd.InOrStdin(), cmd.OutOrStdout(), telegram.ConsoleChatID), rt, telegram.ConsoleChatID, threads)
+				bot = telegram.NewBot(telegram.NewConsoleClient(cmd.InOrStdin(), cmd.OutOrStdout(), telegram.ConsoleChatID), rt, telegram.ConsoleChatID, sessions)
 			} else {
-				token, err := lispconfig.ResolveSecret(configPath, cfg.Telegram.TokenEnv)
+				token, err := lispconfig.ResolveSecret(cfg.Telegram.TokenEnv)
 				if err != nil {
 					return fmt.Errorf("telegram: %w", err)
 				}
@@ -72,7 +72,7 @@ func newTelegramCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				bot = telegram.NewBot(apiClient, rt, cfg.Telegram.HomeChat, threads)
+				bot = telegram.NewBot(apiClient, rt, cfg.Telegram.HomeChat, sessions)
 			}
 			bot.SetWorkDir(workDir)
 			bot.SetLogger(rt.Logger())

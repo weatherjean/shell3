@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/weatherjean/shell3/internal/lispconfig"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runner"
 	"github.com/weatherjean/shell3/internal/wrk"
 	"golang.org/x/term"
@@ -138,7 +139,7 @@ func newWrkBeatCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&stateRoot, "state", filepath.Join(".shell3_project", "wrk"), "Workflow state root")
+	c.Flags().StringVar(&stateRoot, "state", paths.NewLocal(".").Wrk, "Workflow state root")
 	return c
 }
 
@@ -163,7 +164,7 @@ func newWrkStatusCommand() *cobra.Command {
 			return enc.Encode(snapshot)
 		},
 	}
-	c.Flags().StringVar(&stateRoot, "state", filepath.Join(".shell3_project", "wrk"), "Workflow state root")
+	c.Flags().StringVar(&stateRoot, "state", paths.NewLocal(".").Wrk, "Workflow state root")
 	return c
 }
 
@@ -193,7 +194,7 @@ func newWrkSignalCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&stateRoot, "state", filepath.Join(".shell3_project", "wrk"), "Workflow state root")
+	c.Flags().StringVar(&stateRoot, "state", paths.NewLocal(".").Wrk, "Workflow state root")
 	return c
 }
 
@@ -218,7 +219,7 @@ func newWrkCancelCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&stateRoot, "state", filepath.Join(".shell3_project", "wrk"), "Workflow state root")
+	c.Flags().StringVar(&stateRoot, "state", paths.NewLocal(".").Wrk, "Workflow state root")
 	return c
 }
 

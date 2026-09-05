@@ -10,35 +10,35 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// ThreadIndex remembers one front-end surface's current conversation session.
+// SessionIndex remembers one front-end surface's current conversation session.
 // The in-memory value is authoritative for the process; the runs store's
-// threads table carries it across restarts. The store is resolved per call
+// current_sessions table carries it across restarts. The store is resolved per call
 // (a /reload swaps generations, closing the old database handle). A nil store
 // degrades to memory-only, so a runtime without persistence still tracks the
 // conversation within its own lifetime. surface namespaces the front-end
 // ("telegram" is the only one today) so a future transport could never
 // cross-resolve another's conversation.
-type ThreadIndex struct {
+type SessionIndex struct {
 	store   func() *runs.Store
 	surface string
 	mu      sync.Mutex
 	id      string
 }
 
-// NewThreadIndex returns the thread index for one front-end surface. store
+// NewSessionIndex returns the session index for one front-end surface. store
 // resolves the CURRENT generation's runs store on every call (nil is fine).
-func NewThreadIndex(store func() *runs.Store, surface string) *ThreadIndex {
+func NewSessionIndex(store func() *runs.Store, surface string) *SessionIndex {
 	if store == nil {
 		store = func() *runs.Store { return nil }
 	}
-	return &ThreadIndex{store: store, surface: surface}
+	return &SessionIndex{store: store, surface: surface}
 }
 
 // SetCurrent records id as the surface's current conversation session.
 // A failed write is returned, not swallowed: a stale marker silently forks
 // the conversation on the next restart — cron reports land in a session the
 // user never sees.
-func (ti *ThreadIndex) SetCurrent(id string) error {
+func (ti *SessionIndex) SetCurrent(id string) error {
 	ti.mu.Lock()
 	ti.id = id
 	ti.mu.Unlock()
@@ -51,7 +51,7 @@ func (ti *ThreadIndex) SetCurrent(id string) error {
 // Current returns the current-conversation session id, if any: the in-memory
 // value first, then the store (a marker persisted by an earlier process). An
 // empty recorded id (a /new that cleared the marker) reads as absent.
-func (ti *ThreadIndex) Current() (string, bool) {
+func (ti *SessionIndex) Current() (string, bool) {
 	ti.mu.Lock()
 	id, seen := ti.id, ti.id != ""
 	ti.mu.Unlock()
@@ -80,19 +80,19 @@ func roomSurface(host string, chatID int64) string {
 // forSurface derives a sibling index over the same store, keyed on another
 // surface. The store closure is shared, so a /reload generation swap is
 // picked up by every derived index at once.
-func (ti *ThreadIndex) forSurface(surface string) *ThreadIndex {
+func (ti *SessionIndex) forSurface(surface string) *SessionIndex {
 	if ti == nil {
 		// A Bot built without persistence (library use, tests): rooms still
 		// need an index, they just have nothing to survive a restart with.
-		return NewThreadIndex(nil, surface)
+		return NewSessionIndex(nil, surface)
 	}
-	return &ThreadIndex{store: ti.store, surface: surface}
+	return &SessionIndex{store: ti.store, surface: surface}
 }
 
 // currentStore resolves the runs store this index writes to, or nil. The
 // closure is re-evaluated per call so a /reload generation swap is picked up
 // rather than pinned.
-func (ti *ThreadIndex) currentStore() *runs.Store {
+func (ti *SessionIndex) currentStore() *runs.Store {
 	if ti == nil {
 		return nil
 	}
@@ -118,7 +118,7 @@ func chatIDFromSurface(host, surface string) (int64, bool) {
 // — the prefix every room key of that host is built from. A nil
 // index (a Bot built without persistence) reports the Telegram default so a
 // test-built bot keys its rooms the way the real one does.
-func (ti *ThreadIndex) hostSurface() string {
+func (ti *SessionIndex) hostSurface() string {
 	if ti == nil || ti.surface == "" {
 		return "telegram"
 	}

@@ -20,7 +20,7 @@ func openTestStore(t *testing.T) *runs.Store {
 
 func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	st := openTestStore(t)
-	sessionID, err := st.NewSession(runs.Meta{})
+	sessionID, err := st.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}

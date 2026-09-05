@@ -14,7 +14,7 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 		t.Fatalf("open runs store: %v", err)
 	}
 
-	prevID, err := st.NewSession(runs.Meta{})
+	prevID, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 	sess.messages = append(sess.messages, msgs...)
 	sess.persistedLen = len(msgs) // high-water mark: all persisted
 
-	compactInto(CompactSummary{Summary: "compacted"}, st, sess, nil, applog.Noop{}, "", "", "", "", "", "")
+	compactInto(CompactSummary{Summary: "compacted"}, st, sess, nil, applog.Noop{})
 
 	got, err := st.LoadMessages(prevID)
 	if err != nil {

@@ -22,9 +22,9 @@ func newHostNoticeSession(t *testing.T, scripts ...fakellm.Script) (*Session, *f
 	return sess, fake, cfg
 }
 
-func TestHostNoticeLandsAtEndOfWakeContext(t *testing.T) {
+func TestHostNoticeLandsAtEndOfNextTurnContext(t *testing.T) {
 	sess, fake, cfg := newHostNoticeSession(t,
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "NO_REPLY"}}})
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "understood"}}})
 
 	sess.InterjectHostNotice(probeHostNotice)
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser}, nil)

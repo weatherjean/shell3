@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 const routeVersion = 1
@@ -42,7 +43,7 @@ func controlRoot(manifest Manifest) string {
 	if manifest.NotifyState != "" {
 		return manifest.NotifyState
 	}
-	return filepath.Join(manifest.WorkDir, ".shell3_project")
+	return paths.NewLocal(manifest.WorkDir).Root
 }
 
 func workflowTarget(manifest Manifest) string {

@@ -34,7 +34,7 @@ func TestTelegramInboxNotifierPostsCountWithoutClaiming(t *testing.T) {
 	rt := shell3test.NewRuntimeForTest(t, "must not run")
 	var out lockedBuffer
 	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewThreadIndex(func() *runs.Store { return rt.Store() }, "telegram"))
+		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
 	store := inbox.Store{Root: t.TempDir()}
 	receipt, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "workflow complete"})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestTelegramInboxNotifierReconcilesDroppedWake(t *testing.T) {
 	rt := shell3test.NewRuntimeForTest(t, "must not run")
 	var out lockedBuffer
 	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewThreadIndex(func() *runs.Store { return rt.Store() }, "telegram"))
+		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
 	store := inbox.Store{Root: t.TempDir()}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -104,7 +104,7 @@ func TestTelegramInboxNotifierPostsStartupBeforePendingNotice(t *testing.T) {
 	rt := shell3test.NewRuntimeForTest(t, "must not run")
 	var out lockedBuffer
 	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewThreadIndex(func() *runs.Store { return rt.Store() }, "telegram"))
+		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
 	store := inbox.Store{Root: t.TempDir()}
 	if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "ready"}); err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestLispTelegramConsoleUsesOrchestratorAndSingleTransportTool(t *testing.T)
 		t.Fatalf("stdout = %q", out.String())
 	}
 	tools, ok := request["tools"].([]any)
-	if !ok || len(tools) != 4 {
+	if !ok || len(tools) != 3 {
 		t.Fatalf("request tools = %#v", request["tools"])
 	}
 	var names []string
@@ -215,7 +215,7 @@ func TestLispTelegramConsoleUsesOrchestratorAndSingleTransportTool(t *testing.T)
 		fn := raw.(map[string]any)["function"].(map[string]any)
 		names = append(names, fn["name"].(string))
 	}
-	if strings.Join(names, ",") != "bash,bash_bg,edit_file,telegram" {
+	if strings.Join(names, ",") != "bash,bash_bg,telegram" {
 		t.Fatalf("tool names = %v", names)
 	}
 }

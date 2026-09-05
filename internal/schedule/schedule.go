@@ -18,6 +18,7 @@ import (
 	robcron "github.com/robfig/cron/v3"
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/lispconfig"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/wrk"
 )
@@ -97,9 +98,10 @@ func NewExecutor(configPath, workDir string, cfg *lispconfig.Config, store *runs
 	if log == nil {
 		log = applog.Noop{}
 	}
+	local := paths.NewLocal(workDir)
 	return &Executor{
 		ConfigPath: configPath, WorkDir: workDir,
-		StateRoot: filepath.Join(workDir, ".shell3_project", "wrk"), Shell3Bin: executable,
+		StateRoot: local.Wrk, Shell3Bin: executable,
 		Jobs: byName, Store: store, Log: log,
 	}, nil
 }
@@ -137,7 +139,7 @@ func (e *Executor) Run(ctx context.Context, name, trigger string, scheduledAt ti
 	_, err = wrk.Start(e.ConfigPath, job.Wrkfile, wrk.StartOptions{
 		StateRoot: e.StateRoot, RunID: runID, Shell3Bin: e.Shell3Bin,
 		Request: job.Config.Request, NotifyTo: job.Config.Notify,
-		NotifyState: filepath.Join(e.WorkDir, ".shell3_project"), Timeout: job.Config.Timeout,
+		NotifyState: paths.NewLocal(e.WorkDir).Root, Timeout: job.Config.Timeout,
 		RequiredOutput: job.Config.Output, ExpectedTask: job.Task,
 	})
 	if err != nil {
@@ -294,7 +296,7 @@ func Start(parent context.Context, configPath, workDir string, cfg *lispconfig.C
 	if len(executor.Jobs) == 0 && len(running) == 0 {
 		return &Manager{executor: executor}, nil
 	}
-	lock, err := acquire(filepath.Join(workDir, ".shell3_project", "schedule.lock"))
+	lock, err := acquire(paths.NewLocal(workDir).ScheduleLock)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +427,7 @@ func acquire(path string) (*os.File, error) {
 }
 
 // SameDeclarations reports whether a live adapter may reload without changing
-// its armed clock. Schedule changes require a process restart in version 1.
+// its armed clock. Schedule changes require a process restart.
 func SameDeclarations(a, b []lispconfig.Schedule) bool {
 	if len(a) != len(b) {
 		return false

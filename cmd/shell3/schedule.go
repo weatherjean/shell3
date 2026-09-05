@@ -94,7 +94,7 @@ func newServiceCommand() *cobra.Command {
 				return err
 			}
 			defer resources.Close()
-			mailbox := inbox.Store{Root: filepath.Join(resources.workDir, ".shell3_project")}
+			mailbox := inbox.Store{Root: paths.NewLocal(resources.workDir).Root}
 			listener, err := inbox.StartListener(ctx, mailbox)
 			if err != nil {
 				return err

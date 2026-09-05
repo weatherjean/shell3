@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"github.com/weatherjean/shell3/internal/runs"
 	"strings"
 	"testing"
 )
@@ -31,28 +30,4 @@ func TestRenderSystemPromptWithoutSuffix(t *testing.T) {
 	if got := renderSystemPrompt(empty); got != "base" {
 		t.Fatalf("render = %q, want whitespace-only suffix ignored", got)
 	}
-}
-
-func TestTurnRecordsItsSystemPrompt(t *testing.T) {
-	dir := t.TempDir()
-	st, err := runs.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	sess := &Session{id: "sess-1"}
-	cfg := TurnConfig{}
-	cfg.Store = st
-	recordTurnPrompt(cfg, sess, "the prompt this turn ran with", 0)
-
-	got := st.PromptsForSession("sess-1")
-	if len(got) != 1 || got[0].Text != "the prompt this turn ran with" {
-		t.Fatalf("stored prompts = %+v", got)
-	}
-}
-
-func TestTurnPromptRecordingIsOptional(t *testing.T) {
-	recordTurnPrompt(TurnConfig{}, &Session{id: "s"}, "body", 0)
-	recordTurnPrompt(TurnConfig{}, nil, "body", 0)
 }

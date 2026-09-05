@@ -116,7 +116,7 @@ func validateKind(kind, ext string, size int64) error {
 	}
 }
 
-// sendMediaHandler implements send_media_telegram. Failures are returned as
+// sendMediaHandler implements the telegram tool. Failures are returned as
 // "error: …" tool-result strings (not Go errors), matching the engine's tools.
 func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJSON string) (string, error) {
 	c := b.roomOrHome(sess.ID())

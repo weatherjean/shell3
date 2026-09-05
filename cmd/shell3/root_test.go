@@ -29,7 +29,7 @@ func TestRootInteractiveCoexistsWithPersistentWakeListener(t *testing.T) {
 			t.Errorf("request JSON: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintln(w, `data: {"choices":[{"index":0,"delta":{"content":"tui-ready"},"finish_reason":"stop"}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"index":0,"delta":{"content":"console-ready"},"finish_reason":"stop"}]}`)
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "data: [DONE]")
 		fmt.Fprintln(w)
@@ -67,14 +67,14 @@ func TestRootInteractiveCoexistsWithPersistentWakeListener(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "tui-ready") {
+	if !strings.Contains(out.String(), "console-ready") {
 		t.Fatalf("stdout = %q", out.String())
 	}
 	if authorization != "Bearer process-key" {
 		t.Fatalf("authorization used wrong secret source: %q", authorization)
 	}
 	tools, ok := request["tools"].([]any)
-	if !ok || len(tools) != 3 {
+	if !ok || len(tools) != 2 {
 		t.Fatalf("request tools = %#v", request["tools"])
 	}
 	var names []string
@@ -83,7 +83,7 @@ func TestRootInteractiveCoexistsWithPersistentWakeListener(t *testing.T) {
 		fn := tool["function"].(map[string]any)
 		names = append(names, fn["name"].(string))
 	}
-	if strings.Join(names, ",") != "bash,bash_bg,edit_file" {
+	if strings.Join(names, ",") != "bash,bash_bg" {
 		t.Fatalf("tool names = %v", names)
 	}
 }

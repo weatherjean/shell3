@@ -27,9 +27,9 @@ func errResult(out string) toolResult { return toolResult{output: out, isError: 
 
 // unknownToolMsg is the error for a tool call whose name nothing owns. Models
 // trained on other harnesses reflexively call read_file/grep/write_file; the
-// nudge steers them back to bash/edit_file instead of leaving them guessing.
+// nudge steers them back to bash instead of leaving them guessing.
 func unknownToolMsg(name string) string {
-	return fmt.Sprintf("error: unknown tool %q — this agent is bash-first: read/list/search with bash (cat, sed -n, ls, rg) and create or modify files with edit_file", name)
+	return fmt.Sprintf("error: unknown tool %q — this agent is bash-first: inspect and modify files with ordinary project commands through bash", name)
 }
 
 // classifyHandlerOutput types a built-in handler's output string. Handlers

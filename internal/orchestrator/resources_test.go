@@ -13,7 +13,7 @@ func TestCoreToolDefinitionsAreExactlyTheOrchestratorSurface(t *testing.T) {
 	for _, def := range defs {
 		names = append(names, def.Name)
 	}
-	if got, want := strings.Join(names, ","), "bash,bash_bg,edit_file"; got != want {
+	if got, want := strings.Join(names, ","), "bash,bash_bg"; got != want {
 		t.Fatalf("tools = %q, want %q", got, want)
 	}
 }

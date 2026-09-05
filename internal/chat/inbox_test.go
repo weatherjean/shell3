@@ -12,21 +12,14 @@ import (
 
 func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("actually use repo B")
 
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
-	events := c.all()
-	var sawReminder bool
-	for _, ev := range events {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "actually use repo B") {
-			sawReminder = true
-		}
-	}
-	if !sawReminder {
-		t.Fatalf("queued interject should surface as a system-reminder event; events=%+v", events)
+	if reminders := recordedReminderText(sess); !strings.Contains(reminders, "actually use repo B") {
+		t.Fatalf("queued interject was not recorded: %q", reminders)
 	}
 	for _, m := range sess.messages {
 		if strings.Contains(m.Content, "user sent additional input") {
@@ -42,7 +35,7 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 		}},
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "adjusted"}}},
 	)
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
 		LLM:     fake,
 		Profile: AgentProfile{SystemPrompt: "t"},
@@ -55,41 +48,25 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
-	events := c.all()
-	toolIdx, remIdx := -1, -1
-	for i, ev := range events {
-		if ev.Kind == EventToolResult && toolIdx == -1 {
-			toolIdx = i
-		}
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "stop, wrong file") {
-			remIdx = i
-		}
-	}
-	if toolIdx == -1 || remIdx == -1 || remIdx < toolIdx {
-		t.Fatalf("interject must inject after the tool round (tool=%d, reminder=%d)", toolIdx, remIdx)
+	if calls := fake.CallsSnapshot(); len(calls) != 2 || !providerCallsContain(calls[1:], "stop, wrong file") {
+		t.Fatalf("interject was not injected into the next provider round: %+v", calls)
 	}
 }
 
 func TestInterject_MultipleInterjectionsDrainIntoOneReminder(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("first note")
 	sess.Interject("second note")
 
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
-	events := c.all()
-	var reminderEvents []Event
-	for _, ev := range events {
-		if ev.Kind == EventSystemReminder {
-			reminderEvents = append(reminderEvents, ev)
-		}
+	rems := reminderSnapshot(sess)
+	if len(rems) != 1 {
+		t.Fatalf("expected exactly 1 recorded reminder, got %d: %+v", len(rems), rems)
 	}
-	if len(reminderEvents) != 1 {
-		t.Fatalf("expected exactly 1 reminder event, got %d: %+v", len(reminderEvents), reminderEvents)
-	}
-	rem := reminderEvents[0].Text
+	rem := rems[0].Text
 	if !strings.Contains(rem, "first note") || !strings.Contains(rem, "second note") {
 		t.Fatalf("single reminder should contain both bullets; got: %q", rem)
 	}
@@ -102,7 +79,7 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 		}},
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
 	)
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
 		LLM:     fake,
 		Profile: AgentProfile{SystemPrompt: "t"},
@@ -120,34 +97,22 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
-	events := c.all()
-	var sawReminder bool
-	for _, ev := range events {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "from goroutine") {
-			sawReminder = true
-		}
-	}
-	if !sawReminder {
-		t.Fatalf("cross-goroutine Interject must surface as a reminder; events=%+v", events)
+	if !providerCallsContain(fake.CallsSnapshot(), "from goroutine") {
+		t.Fatal("cross-goroutine Interject did not reach a provider round")
 	}
 }
 
 func TestInterjectHostNoticeDeliveredWithNoticeHeader(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	sess.InterjectHostNotice("[superstop] background commands stopped")
 
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
-	var rem string
-	for _, ev := range c.all() {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "superstop") {
-			rem = ev.Text
-		}
-	}
+	rem := recordedReminderText(sess)
 	if rem == "" {
-		t.Fatalf("notice should surface as a system-reminder at turn start; events=%+v", c.all())
+		t.Fatal("notice should be recorded as a system reminder at turn start")
 	}
 	if !strings.Contains(rem, "shell3 host notice") {
 		t.Fatalf("notice must use the host-notification header: %q", rem)
@@ -164,7 +129,7 @@ func TestInterjectHostNoticeNotDeliveredMidTurn(t *testing.T) {
 		}},
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
 	)
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	cfg := TurnConfig{
 		LLM:     fake,
 		Profile: AgentProfile{SystemPrompt: "t"},
@@ -177,10 +142,8 @@ func TestInterjectHostNoticeNotDeliveredMidTurn(t *testing.T) {
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
-	for _, ev := range c.all() {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "superstop") {
-			t.Fatalf("a notice must not be injected mid-turn; got reminder: %q", ev.Text)
-		}
+	if rem := recordedReminderText(sess); strings.Contains(rem, "superstop") {
+		t.Fatalf("a notice must not be injected mid-turn; got reminder: %q", rem)
 	}
 	if !sess.HasInbox() {
 		t.Fatal("notice should remain queued after the turn's mid-round drain")
@@ -189,16 +152,32 @@ func TestInterjectHostNoticeNotDeliveredMidTurn(t *testing.T) {
 
 func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
-	sess, c := newCollectorSession(SessionOpts{})
+	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("   ")
 
 	cfg := TurnConfig{LLM: fake, Profile: AgentProfile{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
-	events := c.all()
-	for _, ev := range events {
-		if ev.Kind == EventSystemReminder {
-			t.Fatalf("whitespace-only Interject produced a SystemReminder event; text=%q", ev.Text)
+	if rems := reminderSnapshot(sess); len(rems) != 0 {
+		t.Fatalf("whitespace-only Interject produced reminders: %+v", rems)
+	}
+}
+
+func recordedReminderText(sess *Session) string {
+	var texts []string
+	for _, reminder := range reminderSnapshot(sess) {
+		texts = append(texts, reminder.Text)
+	}
+	return strings.Join(texts, "\n")
+}
+
+func providerCallsContain(calls []fakellm.Call, text string) bool {
+	for _, call := range calls {
+		for _, msg := range call.Msgs {
+			if strings.Contains(msg.Content, text) {
+				return true
+			}
 		}
 	}
+	return false
 }

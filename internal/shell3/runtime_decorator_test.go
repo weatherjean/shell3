@@ -74,7 +74,7 @@ func TestSessionDecorator_AppliesToSubagentChildren(t *testing.T) {
 	rt.SetSessionDecorator(func(s *Session) {
 		_ = s.RegisterHostTool(dummyTool("image_generate"))
 	})
-	child, err := rt.Session(SessionOpts{Agent: "code", Headless: true})
+	child, err := rt.Session(SessionOpts{Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}

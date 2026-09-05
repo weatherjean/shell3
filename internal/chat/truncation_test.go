@@ -61,7 +61,7 @@ func TestTruncatedTurnAppendsVisibleNotice(t *testing.T) {
 		t.Fatalf("notice not streamed to the front-end: %q", streamed.String())
 	}
 
-	msgs := s.Messages()
+	msgs := s.messages
 	last := msgs[len(msgs)-1]
 	if last.Role != llm.RoleAssistant {
 		t.Fatalf("last message role: %v", last.Role)
@@ -79,7 +79,7 @@ func TestUntruncatedTurnHasNoNotice(t *testing.T) {
 	cfg := TurnConfig{LLM: truncatingClient{text: "all done"}}
 	RunTurn(context.Background(), cfg, s, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
-	msgs := s.Messages()
+	msgs := s.messages
 	last := msgs[len(msgs)-1]
 	if strings.Contains(last.Content, truncationNotice) {
 		t.Fatalf("spurious truncation notice: %q", last.Content)

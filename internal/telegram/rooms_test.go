@@ -4,7 +4,6 @@ package telegram
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ func TestConvIsPerChat(t *testing.T) {
 		t.Fatalf("chatID = %d, want 222", got)
 	}
 	if b.conv(111).index == b.conv(222).index {
-		t.Fatal("each room needs its own thread index, or a restart resumes the wrong session")
+		t.Fatal("each room needs its own session index, or a restart resumes the wrong session")
 	}
 }
 
@@ -133,7 +132,7 @@ func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
 	if err := st.SetCurrentSession(roomSurface("telegram", -200), "sess-b"); err != nil {
 		t.Fatal(err)
 	}
-	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	idx := NewSessionIndex(func() *runs.Store { return st }, "telegram")
 	b := NewBot(newFakeClient(), mustRuntime(t), 42, idx)
 
 	c := b.roomForOwner("sess-b")
@@ -145,19 +144,6 @@ func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
 	}
 	if b.roomForOwner("nobody") != nil {
 		t.Fatal("an unknown owner names no room")
-	}
-}
-
-func TestInboxNamesRooms(t *testing.T) {
-	b := newBot(t, newFakeClient(), mustRuntime(t))
-	c := b.conv(-100)
-	c.mu.Lock()
-	c.mailQueue = append(c.mailQueue, inMail{text: "waiting here"})
-	c.mu.Unlock()
-
-	out := b.Inbox()
-	if !strings.Contains(out, "-100") || !strings.Contains(out, "waiting here") {
-		t.Fatalf("inbox = %q, want the room and its queued message", out)
 	}
 }
 
@@ -191,7 +177,7 @@ func TestRoomSurvivesSupergroupMigration(t *testing.T) {
 	if !ok || got != sessID {
 		t.Fatalf("marker under the new surface = %q,%v; want %q", got, ok, sessID)
 	}
-	if st := b.threads.currentStore(); st != nil {
+	if st := b.sessions.currentStore(); st != nil {
 		if id, ok := st.CurrentSession(roomSurface("telegram", -100)); ok && id != "" {
 			t.Fatalf("old surface still marks session %q", id)
 		}

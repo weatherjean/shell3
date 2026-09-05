@@ -1,6 +1,6 @@
 // Package runs is the session store: one SQLite database per project at
-// .shell3_project/shell3.db, holding sessions, messages, reminders, the
-// front-end thread indexes, running command markers, and a full-text index.
+// .shell3_project/shell3.db, holding sessions, messages, reminders, front-end
+// conversation markers, running command markers, and schedule invocations.
 // Job logs stay plain files beside it, and inbox notices may point to them.
 package runs
 
@@ -46,85 +46,29 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// schemaVersion changes with every table-shape change. Mismatched databases
-// are discarded and recreated rather than migrated or read with another shape.
-const schemaVersion = 13
-
-// openDB opens path, applying the one current schema. A mismatched database is
-// deleted and recreated; shell3 has no schema migrations or compatibility
-// readers. Corrupt and unreadable databases still return an error because a
-// failure to inspect a file is not proof that it is merely stale.
+// openDB opens path and applies the current schema.
 func openDB(path string) (*sql.DB, error) {
 	db, err := openRaw(path)
 	if err != nil {
 		return nil, err
 	}
-
-	fresh, err := isFreshDB(db)
-	if err != nil {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if fresh {
-		if _, err := db.Exec(schema); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		if err := setUserVersion(db, schemaVersion); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		return db, nil
-	}
-
-	version, err := userVersion(db)
-	if err != nil {
+	if version > schemaVersion {
 		_ = db.Close()
-		return nil, err
-	}
-	if version == schemaVersion {
-		// Idempotent: harmless to re-run against an already-current database.
-		if _, err := db.Exec(schema); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		return db, nil
-	}
-
-	fmt.Fprintf(os.Stderr, "runs store: schema v%d != v%d — discarding and resetting %s\n",
-		version, schemaVersion, path)
-	if err := db.Close(); err != nil {
-		return nil, err
-	}
-	if err := removeDatabaseFiles(path); err != nil {
-		return nil, err
-	}
-
-	db, err = openRaw(path)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("runs: database schema version %d is newer than supported version %d", version, schemaVersion)
 	}
 	if _, err := db.Exec(schema); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := setUserVersion(db, schemaVersion); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-// removeDatabaseFiles removes only the configured SQLite file and its two
-// conventional sidecars. It never scans the directory or touches siblings.
-func removeDatabaseFiles(path string) error {
-	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
-		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("runs: reset db: remove %s: %w", candidate, err)
-		}
-	}
-	return nil
-}
+const schemaVersion = 1
 
 // openRaw opens the database file with the store's connection pragmas, doing
 // no schema work of its own.
@@ -144,56 +88,15 @@ func openRaw(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// isFreshDB reports whether the database file has no tables of its own yet —
-// a brand-new file, as opposed to one written by an older (or newer) version
-// of this package. A fresh file always reads user_version 0, but so does a
-// v1 database that never stamped one, so the two are told apart by whether
-// sqlite_master has anything in it.
-func isFreshDB(db *sql.DB) (bool, error) {
-	var n int
-	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table'`).Scan(&n); err != nil {
-		return false, fmt.Errorf("runs: check schema: %w", err)
-	}
-	return n == 0, nil
-}
-
-func userVersion(db *sql.DB) (int, error) {
-	var v int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		return 0, fmt.Errorf("runs: read schema version: %w", err)
-	}
-	return v, nil
-}
-
-func setUserVersion(db *sql.DB, v int) error {
-	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v)); err != nil {
-		return fmt.Errorf("runs: stamp schema version: %w", err)
-	}
-	return nil
-}
-
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
 	id                 TEXT PRIMARY KEY,
-	workdir            TEXT NOT NULL DEFAULT '',
-	config_dir         TEXT NOT NULL DEFAULT '',
-	model              TEXT NOT NULL DEFAULT '',
-	status             TEXT NOT NULL DEFAULT 'live',
-	parent_id          TEXT NOT NULL DEFAULT '',
-	agent              TEXT NOT NULL DEFAULT '',
-	cron_job           TEXT NOT NULL DEFAULT '',
-	started_at         TEXT NOT NULL,
-	ended_at           TEXT NOT NULL DEFAULT '',
-	last_at            TEXT NOT NULL,
-	last_prompt_tokens INTEGER NOT NULL DEFAULT 0,
-	total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-	total_completion_tokens INTEGER NOT NULL DEFAULT 0
+	last_prompt_tokens INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
 	session_id TEXT    NOT NULL,
 	seq        INTEGER NOT NULL,
 	json       TEXT    NOT NULL,
-	ts         TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE TABLE IF NOT EXISTS reminders (
@@ -201,23 +104,9 @@ CREATE TABLE IF NOT EXISTS reminders (
 	seq        INTEGER NOT NULL,
 	text       TEXT    NOT NULL
 );
-CREATE TABLE IF NOT EXISTS threads (
+CREATE TABLE IF NOT EXISTS current_sessions (
 	surface    TEXT NOT NULL PRIMARY KEY,
 	session_id TEXT NOT NULL
-);
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-	text, session_id UNINDEXED, seq UNINDEXED, role UNINDEXED
-);
-CREATE TABLE IF NOT EXISTS prompts (
-	hash TEXT PRIMARY KEY,
-	text TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS turn_prompts (
-	session_id TEXT    NOT NULL,
-	seq        INTEGER NOT NULL,
-	hash       TEXT    NOT NULL,
-	ts         TEXT    NOT NULL,
-	PRIMARY KEY (session_id, seq)
 );
 CREATE TABLE IF NOT EXISTS background_jobs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -243,6 +132,7 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
 );
 CREATE INDEX IF NOT EXISTS schedule_runs_name_started
 	ON schedule_runs(schedule_name, started_at DESC);
+PRAGMA user_version = 1;
 `
 
 // newID is a sortable wall-clock timestamp plus a random suffix, so ids order

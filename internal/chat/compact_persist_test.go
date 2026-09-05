@@ -14,7 +14,7 @@ func TestSaveHistory_AfterCompaction(t *testing.T) {
 		t.Fatalf("open runs store: %v", err)
 	}
 
-	newID, err := st.NewSession(runs.Meta{})
+	newID, err := st.NewSession()
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

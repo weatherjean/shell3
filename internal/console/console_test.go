@@ -22,7 +22,7 @@ func TestRunLineConversationEndToEnd(t *testing.T) {
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 1, nil,
 		func(shell3.SessionOpts) (chat.Config, error) {
 			return chat.Config{
-				LLM: fake, WorkDir: t.TempDir(), Agent: "orchestrator", ModelID: "fake",
+				LLM: fake, WorkDir: t.TempDir(), ModelID: "fake",
 				Profile: chat.AgentProfile{SystemPrompt: "test"},
 			}, nil
 		})
@@ -41,9 +41,6 @@ func TestRunLineConversationEndToEnd(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "you› ") || !strings.Contains(got, "shell3›\nplain reply") {
 		t.Fatalf("transcript = %q", got)
 	}
-	if got := out.String(); strings.Contains(strings.Split(got, "you› ")[0], "/test_output") {
-		t.Fatalf("startup advertises diagnostic command: %q", got)
-	}
 	calls := fake.CallsSnapshot()
 	if len(calls) != 1 || calls[0].Msgs[len(calls[0].Msgs)-1].Content != "hello" {
 		t.Fatalf("provider calls = %+v", calls)
@@ -55,7 +52,7 @@ func TestRunHelpAliasesAreHostHandled(t *testing.T) {
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 1, nil,
 		func(shell3.SessionOpts) (chat.Config, error) {
 			return chat.Config{
-				LLM: fake, WorkDir: t.TempDir(), Agent: "orchestrator", ModelID: "fake",
+				LLM: fake, WorkDir: t.TempDir(), ModelID: "fake",
 				Profile: chat.AgentProfile{SystemPrompt: "test"},
 			}, nil
 		})
@@ -142,7 +139,7 @@ func TestRunQueuesCLIInputUntilActiveTurnEnds(t *testing.T) {
 	dir := t.TempDir()
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), dir, nil, 1, nil,
 		func(shell3.SessionOpts) (chat.Config, error) {
-			return chat.Config{LLM: model, WorkDir: dir, Agent: "orchestrator", ModelID: "fake", Profile: chat.AgentProfile{SystemPrompt: "test"}}, nil
+			return chat.Config{LLM: model, WorkDir: dir, ModelID: "fake", Profile: chat.AgentProfile{SystemPrompt: "test"}}, nil
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +210,7 @@ func TestRunReportsInboxWithoutStartingTurnOrInjectingContent(t *testing.T) {
 	dir := t.TempDir()
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), dir, nil, 1, nil,
 		func(shell3.SessionOpts) (chat.Config, error) {
-			return chat.Config{LLM: fake, WorkDir: dir, Agent: "orchestrator", ModelID: "fake", Profile: chat.AgentProfile{SystemPrompt: "test"}}, nil
+			return chat.Config{LLM: fake, WorkDir: dir, ModelID: "fake", Profile: chat.AgentProfile{SystemPrompt: "test"}}, nil
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +275,7 @@ func TestTurnRendererKeepsTranscriptCompact(t *testing.T) {
 }
 
 func TestTruncateResultBoundsLongSingleLine(t *testing.T) {
-	got := truncateResult("edit_file", strings.Repeat("x", maxResultRunes*2))
+	got := truncateResult("sample_tool", strings.Repeat("x", maxResultRunes*2))
 	if !strings.Contains(got, "characters omitted") {
 		t.Fatalf("long output was not elided: %d runes", len([]rune(got)))
 	}
@@ -321,41 +318,5 @@ func TestThinkingAnimationParksCursorBelowMarker(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "\x1b[1A\r\x1b[2K") {
 		t.Fatalf("stop did not reclaim the marker line: %q", got)
-	}
-}
-
-func TestRunTestOutputDoesNotCallModel(t *testing.T) {
-	fake := fakellm.New()
-	rt, err := shell3.NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 1, nil,
-		func(shell3.SessionOpts) (chat.Config, error) {
-			return chat.Config{
-				LLM: fake, WorkDir: t.TempDir(), Agent: "orchestrator", ModelID: "fake",
-				Profile: chat.AgentProfile{SystemPrompt: "test"},
-			}, nil
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "console"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := RunWithReload(context.Background(), strings.NewReader("/test_output\n/quit\n"), &out, rt, sess, inbox.Store{}, nil); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
-	for _, want := range []string{
-		"render test", "you› Sample user prompt", "→ bash:", "← bash:", "→ bash_bg:", "✗ bash:",
-		"→ edit_file:", "→ sample_tool:", "↻ retry:", "context compacted",
-		"background report", "representative error", "shell3›", "Markdown heading", "1290 tokens",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("test output missing %q:\n%s", want, got)
-		}
-	}
-	if calls := fake.CallsSnapshot(); len(calls) != 0 {
-		t.Fatalf("/test_output made %d model calls", len(calls))
 	}
 }

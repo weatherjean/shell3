@@ -16,7 +16,7 @@ func drainContextEvents(c *conversation, events ...shell3.Event) {
 		ch <- ev
 	}
 	close(ch)
-	c.drainTurn(context.Background(), ch, nil, false)
+	c.drainTurn(context.Background(), ch, nil)
 }
 
 func TestContextMilestonesAndCompactionReset(t *testing.T) {
@@ -24,7 +24,7 @@ func TestContextMilestonesAndCompactionReset(t *testing.T) {
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 	c := tconv(b)
-	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
+	sess, err := rt.Session(shell3.SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

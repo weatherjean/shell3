@@ -9,17 +9,8 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// NotifyText queues a host reminder and wakes the session if idle. It is for
-// host lifecycle context such as /superstop, not background-job delivery.
-func (s *Session) NotifyText(text string) {
-	s.sess.InterjectHostNotice(text)
-	if !s.isBusy() {
-		s.wake()
-	}
-}
-
-// NotifyTextNoWake queues a host reminder for the next ordinary turn.
-func (s *Session) NotifyTextNoWake(text string) {
+// QueueHostNotice queues harness context for the next ordinary turn.
+func (s *Session) QueueHostNotice(text string) {
 	s.sess.InterjectHostNotice(text)
 }
 
