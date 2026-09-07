@@ -47,6 +47,10 @@ type Bot struct {
 	// senders. Authorization still runs first.
 	answerAllGroups bool
 	reload          func() error
+	control         HostControl
+	restartPending  bool
+	restartSignaled bool
+	restartReady    chan struct{}
 	// metaMu guards the chat metadata cache, separate from b.mu because a miss
 	// makes a network call and holding the registry lock would stall routing.
 	metaMu        sync.Mutex
@@ -77,14 +81,15 @@ func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, sessions *Sessi
 	// Default allowlist: the home chat's owner.
 	allow, _ := newSenderAllowlist(homeChat, nil)
 	return &Bot{
-		client:   client,
-		rt:       rt,
-		homeChat: homeChat,
-		sessions: sessions,
-		convs:    make(map[int64]*conversation),
-		maxTurns: defaultMaxTurns,
-		allow:    allow,
-		log:      applog.Noop{},
+		client:       client,
+		rt:           rt,
+		homeChat:     homeChat,
+		sessions:     sessions,
+		convs:        make(map[int64]*conversation),
+		maxTurns:     defaultMaxTurns,
+		allow:        allow,
+		log:          applog.Noop{},
+		restartReady: make(chan struct{}),
 	}
 }
 
@@ -243,6 +248,10 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	}
 	c = b.conv(m.ChatID)
 	c.setGroup(m.ChatType)
+	if b.RestartPending() {
+		c.sendReply(ctx, "shell3 restart is pending; please resend this message after the startup notice")
+		return
+	}
 	// Both gates have passed, so this message is for us: NOW fetch its
 	// attachments. Downloading before this point would mean pulling every
 	// stranger's photo out of every group the bot can see (privacy mode off
@@ -273,6 +282,13 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// needs the session resolved on a turn goroutine.
 	if len(saved) == 0 {
 		c.mu.Lock()
+		// Close the race with armRestart: this message may have passed the
+		// earlier gate immediately before restartPending changed.
+		if b.RestartPending() {
+			c.mu.Unlock()
+			c.sendReply(ctx, "shell3 restart is pending; please resend this message after the startup notice")
+			return
+		}
 		c.burst = append(c.burst, incoming)
 		if c.burstTimer == nil {
 			window := b.debounce

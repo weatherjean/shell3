@@ -58,6 +58,18 @@ Telegram `token-env`, `home-chat`, and all schedule declarations are
 restart-only. Other valid Telegram configuration reloads between turns.
 `service` has no reload command; restart it after any relevant config change.
 
+The attached Telegram agent uses its bounded `shell3` tool for `status`,
+`validate`, `reload`, and `restart`. The tool is pinned to the running host and
+accepts no paths, commands, PIDs, or service-manager names. It is supplied by
+the host rather than declared in `shell3.lisp`; `config_change` compares only
+the active and on-disk parsed configuration. Results identify the tool and
+interface version, name changed top-level sections, and include semantic
+SHA-256 fingerprints plus the active generation's load time. The fingerprints
+ignore source formatting and comments and never contain resolved secrets.
+Restart validates first, gates new turns, drains active replies, and re-execs
+the persistent host only after successful delivery. `/reload` remains the
+operator shortcut over the same controller.
+
 Graceful shutdown cancels live model work and managed background process groups.
 A background command interrupted by shutdown keeps its SQLite marker so the
 next runtime can report the loss. Normal completion writes its durable inbox

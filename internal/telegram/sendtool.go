@@ -16,9 +16,10 @@ import (
 const maxSendBytes = 50 << 20 // Telegram bot upload limit (~50 MB)
 const maxPhotoBytes = 10 << 20
 
-// DecorateOrchestratorSession installs the replacement architecture's sole
-// transport-specific model tool. Text remains the ordinary assistant reply.
+// DecorateOrchestratorSession installs the bounded host-control tool and
+// Telegram's transport-specific file tool. Text remains the ordinary reply.
 func (b *Bot) DecorateOrchestratorSession(s *shell3.Session) {
+	b.registerControlTool(s)
 	b.registerFileTool(s, "telegram")
 }
 

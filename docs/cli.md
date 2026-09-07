@@ -66,7 +66,10 @@ shell3 telegram --console
 
 Telegram reads the token named by its configuration and resumes one persisted
 conversation per chat. It supports `/ask`, `/help`, `/stop`, `/superstop`,
-`/new`, and `/reload`.
+`/new`, and `/reload`. Attached turns also receive the bounded `shell3` host
+tool (`status`, `validate`, `reload`, `restart`) and the `telegram` file-send
+tool. A model-requested restart waits for active replies before the persistent
+host re-execs itself with the same arguments and inherited environment.
 
 `--console` runs the Telegram routing contract over standard input and output.
 It needs no Telegram credentials, but model requests still use the configured

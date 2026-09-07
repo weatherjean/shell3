@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -20,7 +21,9 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/inbox"
 	"github.com/weatherjean/shell3/internal/lispconfig"
+	"github.com/weatherjean/shell3/internal/orchestrator"
 	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 	"github.com/weatherjean/shell3/internal/telegram"
 )
@@ -141,7 +144,7 @@ func (b *lockedBuffer) String() string {
 	return b.b.String()
 }
 
-func TestLispTelegramConsoleUsesOrchestratorAndSingleTransportTool(t *testing.T) {
+func TestLispTelegramConsoleUsesOrchestratorAndHostTools(t *testing.T) {
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -207,7 +210,7 @@ func TestLispTelegramConsoleUsesOrchestratorAndSingleTransportTool(t *testing.T)
 		t.Fatalf("stdout = %q", out.String())
 	}
 	tools, ok := request["tools"].([]any)
-	if !ok || len(tools) != 3 {
+	if !ok || len(tools) != 4 {
 		t.Fatalf("request tools = %#v", request["tools"])
 	}
 	var names []string
@@ -215,7 +218,7 @@ func TestLispTelegramConsoleUsesOrchestratorAndSingleTransportTool(t *testing.T)
 		fn := raw.(map[string]any)["function"].(map[string]any)
 		names = append(names, fn["name"].(string))
 	}
-	if strings.Join(names, ",") != "bash,bash_bg,telegram" {
+	if strings.Join(names, ",") != "bash,bash_bg,shell3,telegram" {
 		t.Fatalf("tool names = %v", names)
 	}
 }
@@ -242,5 +245,102 @@ func TestValidateTelegramReloadRejectsScheduleChanges(t *testing.T) {
 	}
 	if err := validateTelegramReload("shell3.lisp", current, parse("0 9 * * *")); err == nil || !strings.Contains(err.Error(), "schedule declarations changed") {
 		t.Fatalf("changed reload = %v", err)
+	}
+}
+
+func TestTelegramHostControllerReloadsAtomicallyAndClassifiesRestart(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "shell3.lisp")
+	t.Setenv("SHELL3_CONTROL_TEST_KEY", "test-key")
+	t.Setenv("SHELL3_CONTROL_TEST_KEY_2", "test-key-2")
+	writeConfig := func(prompt, modelTokenEnv, telegramTokenEnv string, contextWindow int) {
+		t.Helper()
+		src := fmt.Sprintf(`(shell3
+  (version 1)
+  (model primary
+    (base-url "http://127.0.0.1")
+    (api-key-env %s)
+    (id "test-model")
+    (context-window %d))
+  (orchestrator (model primary) (prompt %q))
+  (telegram (token-env %s) (home-chat 42)))`, modelTokenEnv, contextWindow, prompt, telegramTokenEnv)
+		if err := os.WriteFile(configPath, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig("old prompt", "SHELL3_CONTROL_TEST_KEY", "UNUSED_TELEGRAM_TOKEN", 1000)
+	cfg, err := lispconfig.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := orchestrator.OpenTelegram(t.Context(), configPath, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	bot := telegram.NewBot(
+		telegram.NewConsoleClient(strings.NewReader(""), io.Discard, telegram.ConsoleChatID),
+		rt, telegram.ConsoleChatID,
+		telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"),
+	)
+	control := &telegramHostController{
+		configPath: configPath, workDir: dir, rt: rt, bot: bot, current: cfg,
+		currentLoaded: time.Now().UTC(),
+	}
+	sess, err := rt.Session(shell3.SessionOpts{Name: "control-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeConfig("new prompt", "SHELL3_CONTROL_TEST_KEY", "UNUSED_TELEGRAM_TOKEN", 2000)
+	status, err := control.status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status["config_valid"] != true || status["config_change"] != "reloadable" ||
+		!reflect.DeepEqual(status["changed_sections"], []string{"models", "orchestrator"}) ||
+		status["active_config_fingerprint"] == status["disk_config_fingerprint"] {
+		t.Fatalf("status observability = %#v", status)
+	}
+	result, err := control.reload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["ok"] != true || result["config_change"] != "none" || result["applied_config_change"] != "reloadable" {
+		t.Fatalf("reload result = %#v", result)
+	}
+	if !reflect.DeepEqual(result["applied_sections"], []string{"models", "orchestrator"}) ||
+		!reflect.DeepEqual(result["changed_sections"], []string{}) ||
+		result["active_config_fingerprint"] != result["disk_config_fingerprint"] {
+		t.Fatalf("reload observability = %#v", result)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, result["active_config_loaded_at"].(string)); err != nil {
+		t.Fatalf("active_config_loaded_at = %q: %v", result["active_config_loaded_at"], err)
+	}
+	if got := sess.Snapshot().ContextWindow; got != 2000 {
+		t.Fatalf("reloaded context window = %d", got)
+	}
+
+	writeConfig("must not apply", "SHELL3_CONTROL_TEST_KEY", "UNUSED_TELEGRAM_TOKEN_2", 3000)
+	result, err = control.reload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["ok"] != false || result["config_change"] != "restart_required" || result["restart_required"] != true ||
+		!reflect.DeepEqual(result["changed_sections"], []string{"models", "orchestrator", "telegram"}) || result["reload"] != "rejected" {
+		t.Fatalf("restart classification = %#v", result)
+	}
+	if got := sess.Snapshot().ContextWindow; got != 2000 {
+		t.Fatalf("restart-only generation was partially applied: context window %d", got)
+	}
+
+	if err := os.WriteFile(configPath, []byte("(broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.validate(t.Context()); err == nil {
+		t.Fatal("invalid generation passed validation")
+	}
+	if got := sess.Snapshot().ContextWindow; got != 2000 {
+		t.Fatalf("failed validation changed active context window: %d", got)
 	}
 }

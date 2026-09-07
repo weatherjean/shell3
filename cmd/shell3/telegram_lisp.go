@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -35,6 +36,23 @@ func newTelegramCommand() *cobra.Command {
 		Short: "Attach Telegram remote control to the orchestrator",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			restartRequested := false
+			// Registered before every resource defer, so a requested re-exec is
+			// the final lifecycle step: replies, markers, schedules, sessions and
+			// logs all close first. Exec keeps restart independent of launchd or
+			// systemd while preserving the inherited credential environment.
+			defer func() {
+				if !restartRequested {
+					return
+				}
+				executable, err := os.Executable()
+				if err == nil {
+					err = syscall.Exec(executable, os.Args, os.Environ())
+				}
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "shell3: deferred restart failed: %v\n", err)
+				}
+			}()
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			ctx, cancel := context.WithCancel(ctx)
@@ -84,27 +102,16 @@ func newTelegramCommand() *cobra.Command {
 					return err
 				}
 			}
-			bot.SetReload(func() error {
-				fresh, err := lispconfig.Load(configPath)
-				if err != nil {
-					return err
-				}
-				if err := validateTelegramReload(configPath, cfg, fresh); err != nil {
-					return err
-				}
-				if _, err := orchestrator.Reload(rt, configPath, workDir, true); err != nil {
-					return err
-				}
-				bot.SetMaxConcurrentTurns(fresh.Telegram.MaxConcurrentTurns)
-				bot.SetAnswerAllGroupMessages(fresh.Telegram.GroupMessages == "all")
-				if !console {
-					if err := bot.SetAllowFrom(fresh.Telegram.AllowFrom); err != nil {
-						return err
-					}
-				}
-				cfg = fresh
-				return nil
+			control := &telegramHostController{
+				configPath: configPath, workDir: workDir, rt: rt, bot: bot,
+				current: cfg, currentLoaded: time.Now().UTC(),
+				restartEnabled: !console, applyAllowFrom: !console,
+			}
+			bot.SetHostControl(telegram.HostControl{
+				Status: control.status, Validate: control.validate,
+				Reload: control.reload, PrepareRestart: control.prepareRestart,
 			})
+			bot.SetReload(control.reloadCommand)
 			rt.SetSessionDecorator(func(sess *shell3.Session) {
 				if !sess.Headless() {
 					bot.DecorateOrchestratorSession(sess)
@@ -158,6 +165,10 @@ func newTelegramCommand() *cobra.Command {
 				return nil
 			case <-botDone:
 				return nil
+			case <-bot.RestartReady():
+				rt.Logger().Info("deferred host restart ready", "event", "host.restart_ready")
+				restartRequested = true
+				return nil
 			}
 		},
 	}
@@ -170,11 +181,8 @@ func validateTelegramReload(configPath string, current, fresh *lispconfig.Config
 	if fresh.Telegram == nil {
 		return fmt.Errorf("%s: missing telegram form", configPath)
 	}
-	if fresh.Telegram.TokenEnv != current.Telegram.TokenEnv || fresh.Telegram.HomeChat != current.Telegram.HomeChat {
-		return fmt.Errorf("telegram token-env or home-chat changed; restart the adapter")
-	}
-	if !scheduler.SameDeclarations(fresh.Schedules, current.Schedules) {
-		return fmt.Errorf("schedule declarations changed; restart the persistent adapter")
+	if reasons := telegramRestartReasons(current, fresh); len(reasons) > 0 {
+		return &restartRequiredError{reasons: reasons}
 	}
 	return nil
 }

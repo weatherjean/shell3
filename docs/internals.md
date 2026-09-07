@@ -7,7 +7,7 @@ changing a subsystem.
 
 ```text
 shell3.lisp → orchestrator → Runtime → Session → chat turn → provider
-                                  │          └→ bash | bash_bg
+                                  │          └→ bash | bash_bg | host tools
                                   └→ background command → main inbox notice
 
 *.wrk.lisp → immutable run → scheduler → typed external runner processes
@@ -41,8 +41,8 @@ declared model and Telegram secret variables.
 `internal/orchestrator` renders the prompt and creates a config factory. The
 model-facing core schema contains only `bash` and `bash_bg`; file editing uses
 ordinary commands through `bash`, with conventions supplied by embedded
-skills. Telegram registers one host tool named `telegram` for sending a local
-file.
+skills. A persistent Telegram host registers the bounded `shell3` lifecycle
+tool plus `telegram` for sending a local file.
 
 Skill names and descriptions enter the prompt. Bodies remain in the parsed kit
 until `shell3 config skill` retrieves one. Memory is rendered into every turn.
@@ -51,7 +51,10 @@ until `shell3 config skill` retrieves one. Memory is rendered into every turn.
 and validates a complete generation before publishing it. Idle sessions and
 future sessions adopt the new factory; a busy turn finishes on its captured
 config. Telegram `token-env`, `home-chat`, and schedules require a process
-restart.
+restart. The `shell3` host tool validates and classifies the on-disk
+generation, applies reloadable changes through the same atomic path as
+`/reload`, and defers a requested restart until active replies have been
+persisted and delivered.
 
 ## Runtime and sessions
 
@@ -278,7 +281,7 @@ internal/schedule/       calendar host and schedule recovery
 internal/sexpr/          inert S-expression reader
 internal/shell3/         runtime, sessions, background commands
 internal/strutil/        text truncation and reminder neutralization
-internal/telegram/       Telegram adapter and file-send tool
+internal/telegram/       Telegram adapter, host control, and file-send tool
 internal/wrk/            workflow parser, compiler, scheduler, and router
 ```
 

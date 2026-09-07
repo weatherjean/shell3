@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/mdpage"
@@ -146,23 +147,37 @@ const replyMaxChunks = 2
 // long reply always looks the same in the message list.
 const overflowDocName = "reply.html"
 
-func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string) {
+func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string) error {
 	if text == "" {
 		text = "(no output)"
 	}
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
-		_ = c.postChunk(ctx, sess, replyTo, chunks[0])
+		previewErr := c.postChunk(ctx, sess, replyTo, chunks[0])
 		page := mdpage.Render("shell3 — full reply", text)
 		if id, err := c.b.client.SendDocument(ctx, c.chatIDValue(), overflowDocName, page, "full reply"); err == nil {
 			c.recordSent(sess, id)
-			return
+			return nil
 		}
 		chunks = chunks[1:] // document failed: degrade to posting the rest
+		var sendErrs []error
+		if previewErr != nil {
+			sendErrs = append(sendErrs, previewErr)
+		}
+		for _, part := range chunks {
+			if err := c.postChunk(ctx, sess, replyTo, part); err != nil {
+				sendErrs = append(sendErrs, err)
+			}
+		}
+		return errors.Join(sendErrs...)
 	}
+	var sendErrs []error
 	for _, part := range chunks {
-		_ = c.postChunk(ctx, sess, replyTo, part)
+		if err := c.postChunk(ctx, sess, replyTo, part); err != nil {
+			sendErrs = append(sendErrs, err)
+		}
 	}
+	return errors.Join(sendErrs...)
 }
 
 // postChunk posts one chunk through the HTML→plain fallback path and records

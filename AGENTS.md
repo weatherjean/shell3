@@ -8,14 +8,15 @@ code, tests, and public documentation aligned.
 ## Project contract
 
 - Configuration is one strict inert `shell3.lisp`.
-- The attached main agent is an orchestrator. Its only core tools are `bash`
-  and `bash_bg`; file editing uses project commands through `bash` and
-  lazily-loaded skill guidance.
+- The attached main agent is an orchestrator. Its core tools are `bash` and
+  `bash_bg`; a persistent attached host additionally exposes one bounded
+  operational tool named `shell3`. File editing uses project commands through
+  `bash` and lazily-loaded skill guidance.
 - Multi-agent work belongs in checked `*.wrk.lisp` workflows that dispatch
   typed external runners. Workers are leaves and may not launch workflows.
 - Bare `shell3` is the primary local line-oriented interface. Telegram is an
-  optional remote-control adapter to the same runtime and adds only one
-  file-send tool named `telegram`.
+  optional remote-control adapter to the same runtime and adds one file-send
+  tool named `telegram` alongside the persistent host's `shell3` control tool.
 - One persisted shell3 host owns Lisp-declared schedules: either `shell3
   telegram` or headless `shell3 service`, never both for one project. Each fire
   is a durable wrkfile run; the host service manager keeps the chosen process

@@ -182,9 +182,10 @@ shell3 telegram
 shell3 service --config /path/to/shell3.lisp --workdir /path/to/project
 ```
 
-Never run both for the same project. Telegram adds one model tool, `telegram`,
-which sends a local file to the current chat. `service` opens no model session.
-Keep the selected foreground process alive with the host service manager.
+Never run both for the same project. A persistent Telegram host adds the
+bounded `shell3` lifecycle tool and the `telegram` file-send tool; ordinary
+text remains the assistant reply. `service` opens no model session. Keep the
+selected foreground process alive with the host service manager.
 
 Inbox notices and background-command completions are durable and at-least-once.
 Notices addressed to `main` remain passive until the user asks the agent to

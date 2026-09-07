@@ -34,8 +34,8 @@ func Open(ctx context.Context, configPath, workDir string) (*shell3.Runtime, err
 	return openWithClient(ctx, configPath, workDir, defaultClient)
 }
 
-// OpenTelegram builds the same orchestrator runtime with a transport reminder
-// for the single Telegram file-delivery tool installed by the adapter.
+// OpenTelegram builds the same orchestrator runtime with reminders for the
+// host-control and Telegram file-delivery tools installed by the adapter.
 func OpenTelegram(ctx context.Context, configPath, workDir string) (*shell3.Runtime, error) {
 	return openWithClientMode(ctx, configPath, workDir, true, defaultClient)
 }
@@ -43,6 +43,14 @@ func OpenTelegram(ctx context.Context, configPath, workDir string) (*shell3.Runt
 // Reload validates and resolves a complete kit generation before atomically
 // replacing the configuration of every idle session.
 func Reload(rt *shell3.Runtime, configPath, workDir string, telegram bool) (*lispconfig.Config, error) {
+	return ReloadChecked(rt, configPath, workDir, telegram, nil)
+}
+
+// ReloadChecked is Reload with one front-end validation hook run against the
+// exact parsed generation that will be published. Keeping the check inside
+// this load avoids a time-of-check/time-of-use gap when a live host must reject
+// restart-only changes such as Telegram schedules.
+func ReloadChecked(rt *shell3.Runtime, configPath, workDir string, telegram bool, check func(*lispconfig.Config) error) (*lispconfig.Config, error) {
 	var err error
 	configPath, err = filepath.Abs(configPath)
 	if err != nil {
@@ -64,6 +72,11 @@ func Reload(rt *shell3.Runtime, configPath, workDir string, telegram bool) (*lis
 	}
 	if _, err := scheduler.Resolve(configPath, cfg); err != nil {
 		return nil, err
+	}
+	if check != nil {
+		if err := check(cfg); err != nil {
+			return nil, err
+		}
 	}
 	factory, err := sessionFactory(cfg, configPath, workDir, telegram, rt.Store(), rt.Logger(), defaultClient)
 	if err != nil {
@@ -192,7 +205,7 @@ func renderPrompt(cfg *lispconfig.Config, configPath, workDir, executable string
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(cfg.Main.Prompt))
 	if telegram {
-		b.WriteString("\n\nThis session is attached through Telegram and has one additional transport tool named `telegram`. It sends a local file to the current chat. Ordinary text is delivered by your normal assistant reply; use the tool only when the user needs a file.")
+		b.WriteString("\n\nThis session is attached through Telegram and has two host tools. `shell3` is a host-provided control tool, not a declaration in shell3.lisp; its config_change field compares only the active and on-disk configuration and says nothing about executable or tool changes. Use `shell3` to inspect, validate, reload, or safely restart the running host; never kill shell3 or invoke its service manager through bash. Use `telegram` only to send a local file to the current chat. Ordinary text is delivered by your normal assistant reply.")
 	}
 	if strings.TrimSpace(cfg.Memory) != "" {
 		b.WriteString("\n\n## Memory\n\n")

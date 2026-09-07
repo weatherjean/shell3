@@ -50,7 +50,7 @@ func TestTelegramToolRegisteredAndSends(t *testing.T) {
 	}
 }
 
-func TestOrchestratorDecoratorRegistersOnlyTelegramTransportTool(t *testing.T) {
+func TestOrchestratorDecoratorRegistersControlAndTelegramTools(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
@@ -63,7 +63,7 @@ func TestOrchestratorDecoratorRegistersOnlyTelegramTransportTool(t *testing.T) {
 	for _, tool := range sess.Snapshot().Tools {
 		names = append(names, tool.Name)
 	}
-	if got, want := strings.Join(names, ","), "telegram"; got != want {
+	if got, want := strings.Join(names, ","), "shell3,telegram"; got != want {
 		t.Fatalf("tools = %q, want %q", got, want)
 	}
 }

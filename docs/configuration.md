@@ -139,5 +139,8 @@ prompt as untrusted context.
 
 Valid changes can reload between turns except `token-env`, `home-chat`, and
 schedules, which require restarting the Telegram process.
+The attached Telegram agent can perform the same validation and reload through
+its bounded `shell3` tool; its restart action drains active replies before the
+persistent process exits.
 
 Schedules are documented with their execution model in [Workflows](wrk.md).

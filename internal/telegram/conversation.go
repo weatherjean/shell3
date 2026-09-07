@@ -95,12 +95,29 @@ func (c *conversation) flushBurst(ctx context.Context) {
 	}
 }
 
+// queueBurstForRestart turns accepted-but-not-yet-dispatched debounce input
+// into queued work. The restart drain runs pendingMessages before re-exec.
+func (c *conversation) queueBurstForRestart() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.burstTimer != nil {
+		c.burstTimer.Stop()
+	}
+	c.pendingMessages = append(c.pendingMessages, c.burst...)
+	c.burst = nil
+	c.burstTimer = nil
+}
+
 // dispatchMessages routes a batch: mid-turn TEXT steers the running turn at the
 // next round boundary, so "stop, wrong file" redirects work in flight rather
 // than waiting behind it; media queues; an idle bot runs the batch as one
 // turn. A steer landing after the final boundary gets a catch-up turn.
 func (c *conversation) dispatchMessages(ctx context.Context, batch []inboundMessage) {
 	if len(batch) == 0 {
+		return
+	}
+	if c.b.RestartPending() {
+		c.sendReply(ctx, "shell3 restart is pending; please resend this message after the startup notice")
 		return
 	}
 	hasMedia := false
@@ -197,10 +214,11 @@ func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Sessio
 	if containsToolMarkup(reply) {
 		reply = malformedReplyNotice
 	}
-	c.postReply(ctx, sess, anchor, reply)
+	deliveryErr := c.postReply(ctx, sess, anchor, reply)
 	c.markCurrent(sess)
 	c.releaseSlot(cancel)
 	c.b.startNextWorkAll(ctx, c)
+	c.b.finishRestartDrain(deliveryErr)
 }
 
 // mainSession is the room's session, created on first use: the persisted
