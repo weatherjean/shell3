@@ -150,3 +150,24 @@ func TestOpenRequiresOrchestratorAndNamedSecret(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestTelegramOpenUsesCapturedGeneration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shell3.lisp")
+	cfg, err := lispconfig.Parse(path, []byte(`(shell3 (version 1) (model m (api-key-env CAPTURE_TEST_KEY) (id "captured")) (orchestrator (model m) (prompt "captured prompt")))`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CAPTURE_TEST_KEY", "test-only")
+	if err := os.WriteFile(path, []byte("invalid after capture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := OpenTelegram(t.Context(), path, dir, cfg)
+	if err != nil {
+		t.Fatalf("reread changed source: %v", err)
+	}
+	defer rt.Close()
+	if _, err := rt.Session(shell3.SessionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+}

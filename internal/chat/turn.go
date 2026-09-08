@@ -64,7 +64,6 @@ func buildErrorDump(msgs []llm.Message, streamErr error, reqBody, resBody []byte
 		copyMsg := msg
 		copyMsg.Content = strutil.Truncate(msg.Content, errorDumpMessageBytes)
 		copyMsg.ReasoningContent = strutil.Truncate(msg.ReasoningContent, errorDumpMessageBytes)
-		copyMsg.OperatorContent = ""
 		if len(msg.ToolCalls) > errorDumpToolCalls {
 			copyMsg.ToolCalls = append([]llm.ToolCall(nil), msg.ToolCalls[:errorDumpToolCalls]...)
 		} else {
@@ -136,6 +135,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	var terminalEmit func()
 	defer func() {
 		if r := recover(); r != nil {
+			sess.completeInterruptedToolCalls()
 			stack := debug.Stack()
 			err := fmt.Errorf("panic: %v\n%s", r, stack)
 			cfg.Log.Error("panic in turn goroutine", err)
@@ -159,9 +159,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	// as an empty user turn, which real providers reject.
 	inboxSeeded := userMsg.Content == ""
 	if !inboxSeeded {
-		if cfg.TrustedUserContext && userMsg.Role == llm.RoleUser {
-			userMsg.OperatorContent = userMsg.Content
-		}
 		sess.append(userMsg)
 	}
 
@@ -353,12 +350,9 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			}
 			if handler != nil {
 				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), cfg.ToolConfig)
-				res = classifyHandlerOutput(out)
+				res = handlerResult(out, herr)
 				if herr != nil {
 					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
-					if out == "" {
-						res = errResult("error: " + herr.Error())
-					}
 				}
 			}
 		}
@@ -484,20 +478,12 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 	}
 }
 
-// flushMessages appends each message in msgs to the runs store (one row per
-// message, append-only) and returns how many were persisted. Best-effort:
-// a write failure is logged, not fatal — but it STOPS the flush and the count
-// reflects only the contiguous persisted prefix, so the caller advances its
-// high-water mark no further than what actually reached disk. Continuing past a
-// failure would let the high-water mark skip an unwritten message, permanently
-// losing it (and orphaning a tool_call from its result). The unwritten tail is
-// retried on the next flush. Shared by saveHistory and compactInto.
+// A failed batch leaves the persistence cursor unchanged so the whole suffix
+// can be retried without exposing half of a tool exchange.
 func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []llm.Message) int {
-	for i, m := range msgs {
-		if err := st.AppendMessage(sessionID, m); err != nil {
-			lg.Warn("append message failed", "session_id", sessionID, "error", err)
-			return i
-		}
+	if err := st.AppendMessages(sessionID, msgs); err != nil {
+		lg.Warn("append messages failed", "session_id", sessionID, "error", err)
+		return 0
 	}
 	return len(msgs)
 }

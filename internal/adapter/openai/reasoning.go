@@ -26,12 +26,8 @@ func deltaReasoning(d openai.ChatCompletionChunkChoiceDelta) string {
 		if !ok {
 			continue
 		}
-		// Deliberately NOT gated on f.Valid(): respjson.Field.Valid() reports
-		// whether a field KNOWN to the struct was present and well-typed, and
-		// it is always false for an extra field (verified against openai-go
-		// v1.12.0 — an extra whose Raw() is `"dup"` still reports Valid() ==
-		// false). Raw() carries the JSON regardless, so decode that and let a
-		// decode failure be the rejection.
+		// Extra fields do not satisfy respjson.Field.Valid(); decode Raw()
+		// directly. The provider corpus covers these extension fields.
 		raw := f.Raw()
 		if raw == "" {
 			continue

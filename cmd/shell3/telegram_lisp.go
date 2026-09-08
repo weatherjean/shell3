@@ -70,7 +70,7 @@ func newTelegramCommand() *cobra.Command {
 			if cfg.Telegram == nil {
 				return fmt.Errorf("%s: missing telegram form", configPath)
 			}
-			rt, err := orchestrator.OpenTelegram(ctx, configPath, workDir)
+			rt, err := orchestrator.OpenTelegram(ctx, configPath, workDir, cfg)
 			if err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ func newTelegramCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				bot = telegram.NewBot(apiClient, rt, cfg.Telegram.HomeChat, sessions)
+				bot = telegram.NewBot(apiClient, rt, fmt.Sprint(cfg.Telegram.HomeChat), sessions)
 			}
 			bot.SetWorkDir(workDir)
 			bot.SetLogger(rt.Logger())

@@ -115,7 +115,7 @@ func resolveRoute(root, target string) (route, error) {
 	return r, nil
 }
 
-func registeredTargets(root string) ([]string, error) {
+func registeredTargets(root string, log applog.Logger) ([]string, error) {
 	dir := filepath.Join(root, "wrk-routes")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -130,11 +130,20 @@ func registeredTargets(root string) ([]string, error) {
 			continue
 		}
 		var r route
-		if err := readJSON(filepath.Join(dir, entry.Name()), &r); err != nil {
-			return nil, fmt.Errorf("wrk: read route %s: %w", entry.Name(), err)
+		path := filepath.Join(dir, entry.Name())
+		err := readJSON(path, &r)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
 		}
-		if r.Version != routeVersion || routePath(root, r.Target) != filepath.Join(dir, entry.Name()) {
-			return nil, fmt.Errorf("wrk: invalid route record %s", entry.Name())
+		if err == nil && (r.Version != routeVersion || routePath(root, r.Target) != path) {
+			err = fmt.Errorf("wrk: invalid route record %s", entry.Name())
+		}
+		if err != nil {
+			if moveErr := os.Rename(path, path+".invalid"); moveErr != nil && !errors.Is(moveErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("wrk: quarantine %s: %w", path, moveErr)
+			}
+			log.Error("invalid workflow route quarantined", err, "path", path)
+			continue
 		}
 		targets = append(targets, r.Target)
 	}
@@ -165,10 +174,6 @@ func StartRouter(parent context.Context, root string, hints <-chan string, log a
 	if err != nil {
 		return nil, fmt.Errorf("wrk: resolve router state: %w", err)
 	}
-	targets, err := registeredTargets(root)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithCancel(parent)
 	var logClose io.Closer
 	if log == nil {
@@ -177,6 +182,14 @@ func StartRouter(parent context.Context, root string, hints <-chan string, log a
 			cancel()
 			return nil, err
 		}
+	}
+	targets, err := registeredTargets(root, log)
+	if err != nil {
+		cancel()
+		if logClose != nil {
+			_ = logClose.Close()
+		}
+		return nil, err
 	}
 	r := &Router{
 		ctx: ctx, cancel: cancel, root: root, hints: hints,
@@ -207,7 +220,7 @@ func (r *Router) run() {
 				r.enqueue(target)
 			}
 		case <-ticker.C:
-			targets, err := registeredTargets(r.root)
+			targets, err := registeredTargets(r.root, r.log)
 			if err != nil {
 				r.report("registry", err)
 				continue
@@ -272,20 +285,9 @@ func (r *Router) drive(target string) error {
 		return err
 	}
 	for {
-		snapshot, err := Inspect(route.RunDir)
-		if err != nil {
-			return err
-		}
-		switch snapshot.Status {
-		case "completed", "failed", "cancelled":
-			return nil
-		}
 		result, err := Beat(r.ctx, route.RunDir)
 		if err != nil {
 			if errors.Is(err, ErrBeatOwned) {
-				return nil
-			}
-			if result.Status == "failed" || result.Status == "cancelled" {
 				return nil
 			}
 			return err

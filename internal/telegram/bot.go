@@ -20,7 +20,7 @@ type Bot struct {
 	rt     *shell3.Runtime
 	// homeChat takes host alerts and ownerless file sends. NOT an access
 	// rule — rooms are authorized by who speaks in them.
-	homeChat int64
+	homeChat string
 	// allow decides WHO may drive the agent, whatever the chat. Never nil
 	// after NewBot — a nil allowlist denies everyone.
 	allow *senderAllowlist
@@ -36,7 +36,7 @@ type Bot struct {
 	mu sync.Mutex // guards the room registry and the mutable wiring below
 	// convs holds one conversation per chat id, created the first time an
 	// allowlisted sender addresses the bot there.
-	convs map[int64]*conversation
+	convs map[string]*conversation
 	// activeTurns counts rooms holding a slot, bounded by maxTurns — without
 	// a global cap N rooms fan out N concurrent agents.
 	activeTurns int
@@ -54,9 +54,9 @@ type Bot struct {
 	// metaMu guards the chat metadata cache, separate from b.mu because a miss
 	// makes a network call and holding the registry lock would stall routing.
 	metaMu        sync.Mutex
-	chatMetaCache map[int64]chatMeta
+	chatMetaCache map[string]chatMeta
 	// metaInflight keeps at most one getChat per room in flight.
-	metaInflight map[int64]bool
+	metaInflight map[string]bool
 
 	// botUser is the bot's own @username, for @mention matching.
 	// botUserKnown separates "not looked up" from "looked up, no answer".
@@ -77,7 +77,7 @@ const defaultMaxTurns = 4
 // NewBot wires a Bot over the runtime. homeChat receives host-owned inbox
 // alerts; sessions is the process-wide index each room derives its own surface
 // from, kept across /reload.
-func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, sessions *SessionIndex) *Bot {
+func NewBot(client tgClient, rt *shell3.Runtime, homeChat string, sessions *SessionIndex) *Bot {
 	// Default allowlist: the home chat's owner.
 	allow, _ := newSenderAllowlist(homeChat, nil)
 	return &Bot{
@@ -85,7 +85,7 @@ func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, sessions *Sessi
 		rt:           rt,
 		homeChat:     homeChat,
 		sessions:     sessions,
-		convs:        make(map[int64]*conversation),
+		convs:        make(map[string]*conversation),
 		maxTurns:     defaultMaxTurns,
 		allow:        allow,
 		log:          applog.Noop{},
@@ -126,7 +126,7 @@ func (b *Bot) SetAllowFrom(ids []string) error {
 
 // SetAnswerAllGroupMessages controls whether an allowlisted sender must
 // address the bot in a group. It is replaced on /reload with the current
-// telegram.group_messages setting.
+// (telegram (group-messages all)) setting.
 func (b *Bot) SetAnswerAllGroupMessages(on bool) {
 	b.mu.Lock()
 	b.answerAllGroups = on
@@ -200,13 +200,13 @@ type inboundMessage struct {
 //     from every group member and a turn-path gate would still let a stranger
 //     /stop a turn or /new the conversation away.
 //  2. In a GROUP the message must be ADDRESSED to the bot unless
-//     telegram.group_messages is all. A no-op in a private chat.
+//     (group-messages all) is set. A no-op in a private chat.
 func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// A group becoming a supergroup changes its chat id, announced once as a
 	// service message with no sender — so this runs BEFORE the sender gate,
 	// there being nobody to authorize. Missing it strands the room's
 	// conversation under an id that never speaks again.
-	if m.MigratedTo != 0 {
+	if m.MigratedTo != "" {
 		b.migrateRoom(m.ChatID, m.MigratedTo)
 		return
 	}
@@ -304,12 +304,10 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	c.dispatchMessages(ctx, []inboundMessage{incoming})
 }
 
-// roomAddressed answers the trigger question for a room that may not exist
-// yet: with no conversation nothing has been posted to reply to, so only an
-// @mention can open one.
+// Reply authorship remains valid when no room has been restored yet.
 func roomAddressed(c *conversation, m Msg, botUser string) bool {
 	if c == nil {
-		return mentions(m.Text, botUser)
+		return m.ReplyToBot || mentions(m.Text, botUser)
 	}
 	return c.addressed(m, botUser)
 }

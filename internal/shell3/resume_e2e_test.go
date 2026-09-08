@@ -11,6 +11,46 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
+func TestResumeDoesNotPublishSessionAfterLoadFailure(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("unused"))
+	id, err := rt.Store().NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Store().Close(); err != nil {
+		t.Fatal(err)
+	}
+	if session, err := rt.Session(SessionOpts{Name: "broken", ResumeID: id}); err == nil || session != nil {
+		t.Fatalf("session=%v err=%v", session, err)
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sessions["broken"] != nil {
+		t.Fatal("failed resume was published")
+	}
+}
+
+func TestResumeRejectsIncompleteToolHistory(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("unused"))
+	id, err := rt.Store().NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call", Name: "bash", RawArgs: "{}"}}}
+	if err := rt.Store().AppendMessage(id, call); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Session(SessionOpts{ResumeID: id}); err == nil {
+		t.Fatal("resumed incomplete exchange")
+	}
+	if err := rt.Store().AppendMessage(id, llm.Message{Role: llm.RoleTool, ToolCallID: "call", Content: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Session(SessionOpts{ResumeID: id}); err != nil {
+		t.Fatalf("valid exchange rejected: %v", err)
+	}
+}
+
 // fakeCfgWithStore mirrors fakeCfg but wires a shared SQLite runs Store so
 // turns persist their message stream. ContextWindow feeds the turn's reminder
 // accounting directly.

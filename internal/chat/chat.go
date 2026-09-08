@@ -87,11 +87,10 @@ func NewHandlers() map[string]ToolHandler {
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	return TurnConfig{
 		ToolConfig: ToolConfig{
-			Store:              cfg.Store,
-			WorkDir:            cfg.WorkDir,
-			Headless:           cfg.Headless,
-			TrustedUserContext: !cfg.Headless,
-			Log:                LogOrNoop(cfg.Log),
+			Store:    cfg.Store,
+			WorkDir:  cfg.WorkDir,
+			Headless: cfg.Headless,
+			Log:      LogOrNoop(cfg.Log),
 		},
 		LLM:          cfg.LLM,
 		Profile:      cfg.Profile,

@@ -81,13 +81,13 @@ func TestMessageQueueDrainsAfterTurn(t *testing.T) {
 	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "one"})
+	go b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "one"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "two"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "2", Text: "two"})
 	close(g.Release)
 
 	waitFor(t, func() bool {
@@ -106,14 +106,14 @@ func TestMessageQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	go b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "start"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", ReplyToID: "1", Text: "also this"})
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "3", ReplyToID: "1", Text: "and this"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "2", ReplyToID: "1", Text: "also this"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "3", ReplyToID: "1", Text: "and this"})
 	close(g.Release)
 
 	waitFor(t, func() bool {
@@ -140,7 +140,7 @@ func TestSuperstopNoticeWaitsForNextUserTurn(t *testing.T) {
 	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	go b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "start"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
@@ -166,7 +166,7 @@ func TestSuperstopNoticeWaitsForNextUserTurn(t *testing.T) {
 		t.Fatal("superstop must leave one host notice queued without user steering")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "continue"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "2", Text: "continue"})
 	if !waitForReply(t, fc, "next reply") {
 		t.Fatalf("next user turn produced no reply: %v", fc.sentTexts())
 	}
@@ -190,7 +190,7 @@ func TestRunUserTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	rt := storeRuntime(t, corrupt)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "hello"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
 	})
@@ -207,7 +207,7 @@ func TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	rt := storeRuntime(t, corrupt)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "start"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
 	})

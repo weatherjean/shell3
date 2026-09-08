@@ -28,9 +28,6 @@ type ToolConfig struct {
 	WorkDir string
 	// Headless marks turns without an attached human.
 	Headless bool
-	// TrustedUserContext marks an interactive root turn for ephemeral operator
-	// attribution in the persisted transcript.
-	TrustedUserContext bool
 	// StartBashBg runs a command on the job runtime, returning its id. env is
 	// extra "K=V" entries (bash_bg passes nil). Nil disables background jobs.
 	StartBashBg func(command, workdir string, argv, env []string) (string, error)

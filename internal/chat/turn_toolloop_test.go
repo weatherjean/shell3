@@ -9,7 +9,51 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/runs"
 )
+
+func TestToolPanicPersistsCompleteExchange(t *testing.T) {
+	store, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	id, err := store.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
+		{ToolCall: &llm.ToolCall{ID: "first", Name: "panic", RawArgs: "{}"}},
+		{ToolCall: &llm.ToolCall{ID: "second", Name: "panic", RawArgs: "{}"}},
+	}})
+	cfg := TurnConfig{LLM: fake, Handlers: map[string]ToolHandler{"panic": stubHandler{name: "panic", onExec: func() { panic("injected") }}}, ToolConfig: ToolConfig{Store: store, Log: LogOrNoop(nil)}}
+	sess, _ := newCollectorSession(SessionOpts{})
+	RunTurn(t.Context(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "run"}, func() {
+		if err := store.AppendMessages(id, sess.messages); err != nil {
+			t.Error(err)
+		}
+	})
+	history, err := store.LoadMessages(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := map[string]bool{}
+	for _, message := range history {
+		if message.Role == llm.RoleTool {
+			results[message.ToolCallID] = true
+		}
+	}
+	if len(results) != 2 {
+		t.Fatalf("unmatched tool calls: %+v", history)
+	}
+	for _, message := range history {
+		for _, call := range message.ToolCalls {
+			if !results[call.ID] {
+				t.Fatalf("missing result for %q", call.ID)
+			}
+		}
+	}
+}
 
 type stubHandler struct {
 	name   string

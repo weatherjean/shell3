@@ -1,12 +1,34 @@
 package chat
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 )
+
+func TestHandlerStatusDoesNotDependOnOutput(t *testing.T) {
+	for _, tc := range []struct {
+		output string
+		err    error
+	}{
+		{output: "error: example printed successfully"},
+		{output: "partial output", err: errors.New("failed")},
+		{err: errors.New("failed")},
+	} {
+		got := handlerResult(tc.output, tc.err)
+		if got.isError != (tc.err != nil) || !strings.Contains(got.output, tc.output) {
+			t.Fatalf("outcome = %+v", got)
+		}
+		host := dispatchHostTool(context.Background(), TurnConfig{HostTool: func(context.Context, string, string) (string, error) { return tc.output, tc.err }}, "example", "{}")
+		if host != got {
+			t.Fatalf("host outcome = %+v, want %+v", host, got)
+		}
+	}
+}
 
 func newTestSession(t *testing.T) *Session {
 	t.Helper()

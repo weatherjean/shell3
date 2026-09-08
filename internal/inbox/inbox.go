@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/fsstate"
 )
 
 const maxBodyBytes = 1 << 20
@@ -143,35 +145,8 @@ func (s Store) persist(msg Message) error {
 		return fmt.Errorf("inbox: encode message: %w", err)
 	}
 	data = append(data, '\n')
-	tmp := filepath.Join(dir, "."+msg.ID+".tmp")
-	final := filepath.Join(dir, msg.ID+".json")
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("inbox: create message: %w", err)
-	}
-	ok := false
-	defer func() {
-		_ = f.Close()
-		if !ok {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("inbox: write message: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("inbox: sync message: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("inbox: close message: %w", err)
-	}
-	if err := os.Rename(tmp, final); err != nil {
+	if err := fsstate.Write(filepath.Join(dir, msg.ID+".json"), data); err != nil {
 		return fmt.Errorf("inbox: publish message: %w", err)
-	}
-	ok = true
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		_ = d.Close()
 	}
 	return nil
 }
@@ -345,6 +320,7 @@ func (s Store) List(target string, status NoticeStatus, offset, limit int) ([]No
 			if err != nil {
 				return nil, 0, err
 			}
+			msg.Body = ""
 			notices = append(notices, Notice{Message: msg, Status: item.status})
 		}
 	}
@@ -359,7 +335,15 @@ func (s Store) List(target string, status NoticeStatus, offset, limit int) ([]No
 		return nil, total, nil
 	}
 	end := min(total, offset+limit)
-	return notices[offset:end], total, nil
+	page := notices[offset:end]
+	for i := range page {
+		notice, err := s.Read(target, page[i].Message.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		page[i] = notice
+	}
+	return page, total, nil
 }
 
 // Read finds one notice by id across pending and archived storage.
@@ -537,35 +521,10 @@ func (s Store) writeReadProgress(target string, progress ReadProgress) error {
 		return fmt.Errorf("inbox: encode notice progress: %w", err)
 	}
 	data = append(data, '\n')
-	f, err := os.CreateTemp(dir, "."+progress.ID+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("inbox: create notice progress: %w", err)
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		_ = f.Close()
-		if !ok {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if err := f.Chmod(0o600); err != nil {
-		return fmt.Errorf("inbox: protect notice progress: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("inbox: write notice progress: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("inbox: sync notice progress: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("inbox: close notice progress: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := fsstate.Write(path, data); err != nil {
 		return fmt.Errorf("inbox: publish notice progress: %w", err)
 	}
-	ok = true
-	return syncDir(dir)
+	return nil
 }
 
 func (s Store) clearReadProgress(target, id string) error {
@@ -665,14 +624,7 @@ func validateTarget(target string) error {
 	return nil
 }
 
-func syncDir(path string) error {
-	d, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
+func syncDir(path string) error { return fsstate.SyncDir(path) }
 
 func encodeTarget(target string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(target))

@@ -16,9 +16,7 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.jobs.mu.Lock()
-	logPath := rt.jobs.jobs[id].logPath
-	rt.jobs.mu.Unlock()
+	logPath := sessionStore(parent).JobLogPath(parent.ID(), id)
 	rt.jobs.wait()
 	if logPath == "" {
 		t.Fatal("no logPath recorded on the job")
@@ -43,9 +41,7 @@ func TestCommandJobLogCapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.jobs.mu.Lock()
-	logPath := rt.jobs.jobs[id].logPath
-	rt.jobs.mu.Unlock()
+	logPath := sessionStore(parent).JobLogPath(parent.ID(), id)
 	rt.jobs.wait()
 	fi, err := os.Stat(logPath)
 	if err != nil {
@@ -53,20 +49,5 @@ func TestCommandJobLogCapped(t *testing.T) {
 	}
 	if fi.Size() > jobLogMaxBytes+1024 {
 		t.Fatalf("log size %d exceeds cap %d", fi.Size(), jobLogMaxBytes)
-	}
-}
-
-func TestCommandJobNoParentNoLog(t *testing.T) {
-	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.mu.Lock()
-	logPath := m.jobs[id].logPath
-	m.mu.Unlock()
-	m.wg.Wait()
-	if logPath != "" {
-		t.Fatalf("unexpected logPath %q", logPath)
 	}
 }

@@ -44,27 +44,27 @@ type fakeClient struct {
 }
 
 type sentPhoto struct {
-	chatID   int64
+	chatID   string
 	filename string
 	data     []byte
 	caption  string
 }
 
 type sentVoice struct {
-	chatID  int64
+	chatID  string
 	data    []byte
 	caption string
 }
 
 type sentAudio struct {
-	chatID   int64
+	chatID   string
 	filename string
 	data     []byte
 	caption  string
 }
 
 type sentVideo struct {
-	chatID   int64
+	chatID   string
 	filename string
 	data     []byte
 	caption  string
@@ -76,20 +76,20 @@ type sentEdit struct {
 }
 
 type sentDoc struct {
-	chatID   int64
+	chatID   string
 	filename string
 	data     []byte
 	caption  string
 }
 
 type sentMsg struct {
-	chatID int64
+	chatID string
 	text   string
 }
 
 type sentReply struct {
 	msgID   string
-	chatID  int64
+	chatID  string
 	replyTo string
 	text    string
 	html    bool
@@ -101,14 +101,14 @@ func newFakeClient() *fakeClient {
 
 func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
 
-func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
+func (f *fakeClient) EditPlain(ctx context.Context, chatID string, msgID string, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.edits = append(f.edits, sentEdit{msgID: msgID, text: text})
 	return nil
 }
 
-func (f *fakeClient) DeleteMessage(ctx context.Context, chatID int64, msgID string) error {
+func (f *fakeClient) DeleteMessage(ctx context.Context, chatID string, msgID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, msgID)
@@ -121,7 +121,7 @@ func (f *fakeClient) deletedSnapshot() []string {
 	return append([]string{}, f.deleted...)
 }
 
-func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
+func (f *fakeClient) SendDocument(ctx context.Context, chatID string, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failDoc != nil {
@@ -133,7 +133,7 @@ func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename st
 	return strconv.Itoa(f.next), nil
 }
 
-func (f *fakeClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (f *fakeClient) SendPhoto(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failPhoto != nil {
@@ -143,7 +143,7 @@ func (f *fakeClient) SendPhoto(ctx context.Context, chatID int64, filename strin
 	return nil
 }
 
-func (f *fakeClient) SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error {
+func (f *fakeClient) SendVoice(ctx context.Context, chatID string, data []byte, caption string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failVoice != nil {
@@ -153,7 +153,7 @@ func (f *fakeClient) SendVoice(ctx context.Context, chatID int64, data []byte, c
 	return nil
 }
 
-func (f *fakeClient) SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (f *fakeClient) SendAudio(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failAudio != nil {
@@ -163,7 +163,7 @@ func (f *fakeClient) SendAudio(ctx context.Context, chatID int64, filename strin
 	return nil
 }
 
-func (f *fakeClient) SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (f *fakeClient) SendVideo(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failVideo != nil {
@@ -182,7 +182,7 @@ func (f *fakeClient) lastDoc() (sentDoc, bool) {
 	return f.docs[len(f.docs)-1], true
 }
 
-func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
+func (f *fakeClient) Send(ctx context.Context, chatID string, text string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
@@ -197,7 +197,7 @@ func (f *fakeClient) lastSilent() bool {
 	return len(f.silent) > 0 && f.silent[len(f.silent)-1]
 }
 
-func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
+func (f *fakeClient) SendHTML(ctx context.Context, chatID string, html string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failHTML {
@@ -209,7 +209,7 @@ func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string, op
 	return strconv.Itoa(f.next), nil
 }
 
-func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
+func (f *fakeClient) SendReply(ctx context.Context, chatID string, text string, replyTo string, opts ...SendOpt) (string, error) {
 	if f.failReply != nil {
 		return f.Send(ctx, chatID, text, opts...)
 	}
@@ -222,7 +222,7 @@ func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, r
 	return id, nil
 }
 
-func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
+func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID string, html string, replyTo string, opts ...SendOpt) (string, error) {
 	if f.failHTML {
 		return "", errFakeHTML
 	}
@@ -263,7 +263,7 @@ func (f *fakeClient) htmlTexts() []string {
 	return out
 }
 
-func (f *fakeClient) Typing(ctx context.Context, chatID int64) error { return nil }
+func (f *fakeClient) Typing(ctx context.Context, chatID string) error { return nil }
 
 func (f *fakeClient) sentTexts() []string {
 	f.mu.Lock()
@@ -291,7 +291,7 @@ func (f *fakeClient) plainTexts() []string {
 
 func (f *fakeClient) Username(context.Context) (string, error) { return "mybot", nil }
 
-func (f *fakeClient) ChatInfo(_ context.Context, chatID int64) (string, string, error) {
+func (f *fakeClient) ChatInfo(_ context.Context, chatID string) (string, string, error) {
 	f.mu.Lock()
 	f.chatInfoN++
 	block, fail := f.blockChatInfo, f.failChatInfo

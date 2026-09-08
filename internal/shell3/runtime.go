@@ -283,7 +283,10 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(cfg, opts) // shared parts are the runtime's to clean
+	s, err := newSession(cfg, opts)
+	if err != nil {
+		return nil, err
+	}
 	s.opts = opts
 	s.runtime, s.name = rt, name
 	// Standing reminders now that runtime and name are set.

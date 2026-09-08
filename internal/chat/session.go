@@ -60,6 +60,29 @@ type inboxItem struct {
 	host bool
 }
 
+// completeInterruptedToolCalls repairs the final assistant/tool bundle before
+// a panicked turn is persisted. No user or provider message may follow a gap.
+func (s *Session) completeInterruptedToolCalls() {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	var calls []llm.ToolCall
+	answered := map[string]bool{}
+	for _, m := range s.messages {
+		if m.Role == llm.RoleAssistant {
+			calls = m.ToolCalls
+			answered = map[string]bool{}
+		}
+		if m.Role == llm.RoleTool {
+			answered[m.ToolCallID] = true
+		}
+	}
+	for _, call := range calls {
+		if !answered[call.ID] {
+			s.messages = append(s.messages, llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Name: call.Name, Content: "error: turn interrupted before tool result"})
+		}
+	}
+}
+
 // Interject queues user steering: delivered at the next round boundary
 // mid-turn, otherwise at the start of the next turn. Safe from any goroutine.
 func (s *Session) Interject(text string) {

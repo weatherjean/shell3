@@ -30,7 +30,7 @@ type Event struct {
 	ToolName         string // ToolCall, ToolResult
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
-	ToolError        bool   // ToolResult — the tool reported an error (a tool-call hook denial, a dispatch/validation failure, or a host tool failure; bash builtin exit codes are not classified)
+	ToolError        bool   // ToolResult — execution, validation, or dispatch failed
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
 	TotalTokens      int    // Usage, Done

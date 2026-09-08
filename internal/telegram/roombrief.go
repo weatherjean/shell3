@@ -45,7 +45,7 @@ const chatMetaLookupTimeout = 5 * time.Second
 //   - nothing known: fetch synchronously — there is nothing to serve and a
 //     room's first turn should know its own name. Bounded, and a failure
 //     yields the zero value, degrading the brief to the chat id.
-func (b *Bot) chatMetaFor(chatID int64) chatMeta {
+func (b *Bot) chatMetaFor(chatID string) chatMeta {
 	b.metaMu.Lock()
 	meta, ok := b.chatMetaCache[chatID]
 	fresh := ok && meta.known && time.Since(meta.fetched) < briefRefresh
@@ -62,10 +62,10 @@ func (b *Bot) chatMetaFor(chatID int64) chatMeta {
 
 // refreshChatMetaAsync refreshes off the turn path, one flight per room:
 // without the guard every turn in a busy room spawns another getChat.
-func (b *Bot) refreshChatMetaAsync(chatID int64) {
+func (b *Bot) refreshChatMetaAsync(chatID string) {
 	b.metaMu.Lock()
 	if b.metaInflight == nil {
-		b.metaInflight = map[int64]bool{}
+		b.metaInflight = map[string]bool{}
 	}
 	if b.metaInflight[chatID] {
 		b.metaMu.Unlock()
@@ -88,7 +88,7 @@ func (b *Bot) refreshChatMetaAsync(chatID int64) {
 // what was known — a hiccup must not blank a brief mid-conversation — and
 // does NOT re-stamp the cache, so the next call retries rather than serving
 // the failure for the whole interval.
-func (b *Bot) refreshChatMeta(ctx context.Context, chatID int64) chatMeta {
+func (b *Bot) refreshChatMeta(ctx context.Context, chatID string) chatMeta {
 	ctx, cancel := context.WithTimeout(ctx, chatMetaLookupTimeout)
 	defer cancel()
 
@@ -107,7 +107,7 @@ func (b *Bot) refreshChatMeta(ctx context.Context, chatID int64) chatMeta {
 	}
 	meta := chatMeta{title: title, description: desc, fetched: time.Now(), known: true}
 	if b.chatMetaCache == nil {
-		b.chatMetaCache = map[int64]chatMeta{}
+		b.chatMetaCache = map[string]chatMeta{}
 	}
 	b.chatMetaCache[chatID] = meta
 	return meta
@@ -119,9 +119,9 @@ func (b *Bot) refreshChatMeta(ctx context.Context, chatID int64) chatMeta {
 func (c *conversation) brief() string {
 	chatID := c.chatIDValue()
 	meta := c.b.chatMetaFor(chatID)
-	room := fmt.Sprintf("Telegram chat %d", chatID)
+	room := fmt.Sprintf("Telegram chat %s", chatID)
 	if meta.title != "" {
-		room = fmt.Sprintf("the Telegram chat %q (id %d)", meta.title, chatID)
+		room = fmt.Sprintf("the Telegram chat %q (id %s)", meta.title, chatID)
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## This room\n\nYou are speaking in %s. "+

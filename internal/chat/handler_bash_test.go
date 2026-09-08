@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,9 +39,10 @@ func TestBashHandler_Execute_canceledContext(t *testing.T) {
 	cancel()
 	args := json.RawMessage(`{"command":"echo should not run"}`)
 	out, err := h.Execute(ctx, "1", args, ToolConfig{})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected execution error")
 	}
+	out = handlerResult(out, err).output
 	if strings.Contains(out, "should not run") {
 		t.Fatalf("command ran despite cancelled context: %q", out)
 	}
@@ -57,9 +57,10 @@ func TestBashHandler_Execute_timeout(t *testing.T) {
 	start := time.Now()
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
 	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected execution error")
 	}
+	out = handlerResult(out, err).output
 	if elapsed > 3*time.Second {
 		t.Fatalf("timeout did not fire: elapsed %s", elapsed)
 	}
@@ -84,9 +85,10 @@ func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 	start := time.Now()
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
 	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected execution error")
 	}
+	out = handlerResult(out, err).output
 	if elapsed > 5*time.Second {
 		t.Fatalf("did not return promptly despite grandchild: elapsed %s", elapsed)
 	}
@@ -111,28 +113,14 @@ func TestBashHandler_Execute_outputTruncation(t *testing.T) {
 	}
 }
 
-func TestElideMiddle(t *testing.T) {
-	short := []byte("hello")
-	if got := elideMiddle(short, 100); got != "hello" {
-		t.Fatalf("short pass-through failed: %q", got)
-	}
-	long := bytes.Repeat([]byte("x"), 1000)
-	got := elideMiddle(long, 100)
-	if !strings.Contains(got, "bytes elided") {
-		t.Fatalf("missing marker: %q", got)
-	}
-	if len(got) > 250 {
-		t.Fatalf("elided output too large: %d", len(got))
-	}
-}
-
 func TestBashHandler_Execute_nonzeroExit(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command":"echo oops && exit 1"}`)
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{WorkDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected execution error")
 	}
+	out = handlerResult(out, err).output
 	if !strings.Contains(out, "oops") {
 		t.Fatalf("expected 'oops' in output, got %q", out)
 	}
@@ -145,9 +133,10 @@ func TestBashHandler_Execute_malformedArgs(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command": 5}`)
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{WorkDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected execution error")
 	}
+	out = handlerResult(out, err).output
 	if !strings.HasPrefix(out, "error: invalid bash arguments") {
 		t.Fatalf("expected invalid-arguments error, got %q", out)
 	}

@@ -96,7 +96,13 @@ A turn:
 
 Tool calls and results remain in provider-valid order on success, error, and
 cancellation paths. A tool result is always retained with its matching call.
+Pending message batches commit in one transaction. Compaction commits the old
+history suffix, new continuation, and current-session markers together.
 There is no separate prompt-history, full-text-search, or cost-accounting store.
+
+The Go provider adapter retains typed request parameters for temperature and
+parallel tool calls as an embedding seam, covered by wire-format tests. Lisp
+model declarations currently configure reasoning and output token limits.
 
 Provider usage updates the current context gauge. Old tool output is pruned
 before the configured threshold. Compaction summarizes the head, keeps a
@@ -118,12 +124,16 @@ working directory. Runner argv is assembled without shell interpolation;
 workflow `command` nodes intentionally execute their declared body with Bash.
 Attached Bash tools and workflow commands inherit the host environment.
 
-Process cancellation targets a process group and bounds shutdown when children
-inherit output pipes. shell3 is not an OS sandbox.
+Process cancellation sends group TERM, allows a bounded grace period, then
+sends group KILL before returning. Pipe shutdown is bounded separately.
+shell3 is not an OS sandbox.
 
 `bash_bg` admission and the positive `WaitGroup.Add` happen under the job
 manager lock. Shutdown closes admission before cancellation and waiting.
 Live jobs remain in the manager map; completion removes them.
+Job IDs use `bg-` followed by 16 UUID hex characters. Log creation is exclusive,
+so a restart or an ID collision cannot overwrite an earlier job's output.
+Foreground output is bounded during capture, retaining its head and tail.
 
 Each managed command writes a bounded in-memory tail and, when the session has
 a durable ID, a job log. SQLite holds a running marker while the process may be
@@ -176,6 +186,9 @@ console owns no socket.
 modes, snapshots resolved inputs, and drives durable state transitions. A beat
 claims input, reconciles running nodes, verifies completed work, dispatches one
 runnable wave, atomically replaces each state file, and exits when quiescent.
+Durable state writes use unique temporary files, file sync, rename, and directory
+sync. Wait-node deadlines persist across beats and restarts. Compiled launchers
+pin config and workflow hashes and invoke this same runtime.
 
 Independent `read` nodes may share a wave up to the task limit. A `write` node
 runs alone. Every loop attempt creates a fresh runner process. External checks
@@ -247,6 +260,9 @@ separate lock because cache misses perform network I/O.
 Private and group authorization use sender IDs. Groups require an addressed
 message by default. Supergroup migration moves the same conversation marker and
 invalidates cached metadata.
+Chat and message IDs remain opaque strings in normalized messages, room keys,
+and persisted surfaces. The Bot API adapter converts Telegram's numeric wire
+IDs; console room prefixes can use arbitrary nonempty IDs.
 
 The `telegram` tool sends only regular local files, bounds reads, and rejects
 credential/config aliases by path and inode. Text uses the ordinary assistant
@@ -266,6 +282,7 @@ internal/bootstrap/      runtime-directory initialization
 internal/chat/           turn loop, tools, compaction, persistence ordering
 internal/cli/            one-shot helpers
 internal/console/        local line-oriented interface
+internal/fsstate/        atomic durable file replacement
 internal/inbox/          durable notices and advisory wake socket
 internal/lispconfig/     shell3.lisp parser and resolver
 internal/llm/            provider interfaces and message types

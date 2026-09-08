@@ -69,11 +69,6 @@ func TestReminderTracker_ModelChange(t *testing.T) {
 }
 
 func TestReminderTracker_30kDeltaThreshold(t *testing.T) {
-	var r reminderTracker
-	r.lastModel = "gpt-4o"
-	r.lastContextPct = 0
-	r.lastTokens = 100
-
 	r2 := reminderTracker{
 		lastModel:      modelSonnet,
 		lastContextPct: 10,
@@ -86,7 +81,6 @@ func TestReminderTracker_30kDeltaThreshold(t *testing.T) {
 	if !strings.Contains(got, "context:") {
 		t.Errorf("expected context line in delta reminder, got %q", got)
 	}
-	_ = r
 }
 
 func TestInjectReminder_AppendsToLastUser(t *testing.T) {

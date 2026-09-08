@@ -80,17 +80,8 @@ var errNothingToCompact = errors.New("nothing to compact")
 // before the operator is told: past half, compaction fights for the remainder.
 const systemPromptShare = 50
 
-// warnFixedOverhead says once per session that the system prompt itself is
-// eating the compaction budget.
-//
-// Compaction reclaims MESSAGE tokens only. The prompt is re-rendered from disk
-// every turn, so its context: files and skills index return in full right
-// after each one. Once that fixed overhead nears compact_at, every turn trips
-// the threshold, compacts, and is still over: history shrinks toward nothing
-// while the cause sits untouched, and the only symptom is the provider
-// eventually rejecting the request for length. Behaviour is unchanged —
-// reclaiming the message half still beats nothing — this just names the cause
-// as it starts to bite. config.MaxContextBytes caps the usual source.
+// Compaction cannot reclaim the configured prompt, memory, or skill metadata.
+// Warn once per session when that fixed overhead consumes the message budget.
 func warnFixedOverhead(cfg TurnConfig, sess *Session) {
 	if sess.warnedFixedOverhead || cfg.Log == nil {
 		return
@@ -104,7 +95,7 @@ func warnFixedOverhead(cfg TurnConfig, sess *Session) {
 	cfg.Log.Warn("system prompt is consuming the compaction budget; compaction cannot reclaim it",
 		"system_prompt_tokens", fixed,
 		"compact_at", cfg.CompactAt,
-		"hint", "shrink the agent's context: files or skills index — shell3 health reports oversized context files")
+		"hint", "shorten the prompt, memory, or skill metadata in shell3.lisp")
 }
 
 // compactNow is the auto path: compactApply already logged any failure, so
@@ -281,65 +272,30 @@ type CompactSummary struct {
 // still holds the full history would let the next saveHistory duplicate the
 // tail into it. Aborting keeps the stored history coherent.
 func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger) bool {
-	prevSessionID := sess.id
-	// Published into sess.id atomically with sess.messages under msgMu, so a
-	// concurrent ID() reader never sees a torn id/messages pairing.
-	newSessionID := prevSessionID
-	rolled := false
-
-	// Start the NEW session FIRST; only then flush and end the outgoing one. A
-	// failed NewSession leaves the outgoing session intact and still
-	// persistable, rather than ending one we keep writing to.
+	previous := sess.id
+	var body strings.Builder
+	fmt.Fprintf(&body, "<system-reminder>\nContinuation of session %s. History compacted.\n</system-reminder>\n\n", previous)
+	fmt.Fprintf(&body, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
+	messages := make([]llm.Message, 0, 1+len(tail))
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: body.String()})
+	messages = append(messages, tail...)
+	id, persisted := previous, 0
 	if st != nil {
-		newID, err := st.NewSession()
-		if err != nil {
-			lg.Warn("start session failed during compact; skipping compaction", "error", err)
+		if sess.persistedLen > len(sess.messages) {
 			return false
 		}
-		// Only the unsaved tail: 0..persistedLen-1 already reached the
-		// append-only store, and re-flushing would duplicate those rows.
-		if sess.persistedLen <= len(sess.messages) {
-			flushMessages(st, lg, prevSessionID, sess.messages[sess.persistedLen:])
+		var err error
+		id, err = st.RollSession(previous, sess.messages[sess.persistedLen:], messages)
+		if err != nil {
+			lg.Warn("persist compaction failed; keeping original session", "error", err)
+			return false
 		}
-		if err := st.EndSession(prevSessionID); err != nil {
-			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
-		}
-		newSessionID = newID
-		rolled = true
+		persisted = len(messages)
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\n</system-reminder>\n\n", prevSessionID)
-	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
-
-	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
-
-	// Build in a local, publish under msgMu: this runs on the turn goroutine
-	// but replaces the slice a concurrent persistence read may be copying.
-	newMsgs := make([]llm.Message, 0, 1+len(tail))
-	newMsgs = append(newMsgs, continuationMsg)
-	newMsgs = append(newMsgs, tail...)
 	sess.msgMu.Lock()
-	sess.id = newSessionID
-	sess.messages = newMsgs
-	// Reminder anchors index the pre-compaction slice, so the rewrite
-	// invalidates them. Drop the log: stale high-Seq
-	// anchors break History()'s non-decreasing-Seq interleave and hide every
-	// later reminder. The new session has its own empty sidecar.
+	sess.id, sess.messages, sess.persistedLen = id, messages, persisted
 	sess.reminderLog = nil
 	sess.msgMu.Unlock()
-
-	// Mirror the compacted context under the NEW session id so a resume loads
-	// it rather than the pre-compaction blob; the flush above wrote the
-	// outgoing session, this writes the incoming one.
-	if rolled {
-		// Advance the high-water mark only past what reached disk, so a partial
-		// flush leaves the rest for the next saveHistory.
-		sess.persistedLen = flushMessages(st, lg, newSessionID, newMsgs)
-	} else {
-		// No store: nothing persisted, so the high-water mark starts fresh.
-		sess.persistedLen = 0
-	}
 	return true
 }
 

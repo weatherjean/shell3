@@ -71,7 +71,7 @@ func (c *BotAPIClient) Username(ctx context.Context) (string, error) {
 // ChatInfo is a chat's title and description, the room brief's raw material.
 // A private chat has neither in the sense meant here — its title is the other
 // party's name — so the caller decides what to use.
-func (c *BotAPIClient) ChatInfo(ctx context.Context, chatID int64) (string, string, error) {
+func (c *BotAPIClient) ChatInfo(ctx context.Context, chatID string) (string, string, error) {
 	ch, err := c.b.GetChat(ctx, &bot.GetChatParams{ChatID: chatID})
 	if err != nil {
 		return "", "", err
@@ -106,6 +106,7 @@ func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotA
 		return nil, err
 	}
 	c.b = b
+	c.selfID = b.ID()
 	go b.Start(ctx) // long-polls until ctx cancelled
 	go c.watchHealth(ctx)
 	return c, nil
@@ -154,14 +155,17 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	if msg.HasMedia {
 		msg.FetchMedia = func(fctx context.Context) []Media { return resolveMedia(fctx, c, m) }
 	}
-	c.out <- msg
+	select {
+	case c.out <- msg:
+	case <-ctx.Done():
+	}
 }
 
 // normalizeMessage projects a Telegram message onto Msg, minus attachments —
 // resolveMedia needs the network. A MEDIA message's words are in Caption, not
 // Text, so a photo sent with "translate this" has an empty Text.
 func normalizeMessage(m *models.Message) Msg {
-	msg := Msg{ChatID: m.Chat.ID, ChatType: string(m.Chat.Type), ID: strconv.Itoa(m.ID),
+	msg := Msg{ChatID: strconv.FormatInt(m.Chat.ID, 10), ChatType: string(m.Chat.Type), ID: strconv.Itoa(m.ID),
 		Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
 	if m.From != nil {
 		// Set by Telegram, not the client. A channel post has no From, which
@@ -171,7 +175,9 @@ func normalizeMessage(m *models.Message) Msg {
 	if r := m.ReplyToMessage; r != nil {
 		msg.ReplyToID = strconv.Itoa(r.ID)
 	}
-	msg.MigratedTo = m.MigrateToChatID
+	if m.MigrateToChatID != 0 {
+		msg.MigratedTo = strconv.FormatInt(m.MigrateToChatID, 10)
+	}
 	return msg
 }
 
@@ -247,6 +253,9 @@ func (c *BotAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 		return Media{}, false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return Media{}, false
+	}
 
 	// +1 so an over-limit body is detectable.
 	lr := io.LimitReader(resp.Body, maxMediaBytes+1)
@@ -308,25 +317,25 @@ func withSendRetry[T any](ctx context.Context, send func() (T, error)) (T, error
 
 // Send posts plain text with no ParseMode — the fallback when SendHTML is
 // rejected.
-func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
+func (c *BotAPIClient) Send(ctx context.Context, chatID string, text string, opts ...SendOpt) (string, error) {
 	return c.sendText(ctx, chatID, text, false, "", opts)
 }
 
 // SendHTML posts with parse_mode=HTML so the agent's formatting renders.
 // Malformed HTML is a 400, so callers fall back to Send.
-func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
+func (c *BotAPIClient) SendHTML(ctx context.Context, chatID string, html string, opts ...SendOpt) (string, error) {
 	return c.sendText(ctx, chatID, html, true, "", opts)
 }
 
 // SendReply threads plain text onto replyTo, retrying as a plain Send if that
 // message is gone.
-func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
+func (c *BotAPIClient) SendReply(ctx context.Context, chatID string, text string, replyTo string, opts ...SendOpt) (string, error) {
 	return c.sendText(ctx, chatID, text, false, replyTo, opts)
 }
 
 // SendHTMLReply is SendReply with parse_mode=HTML; callers fall back to
 // SendReply on an HTML rejection.
-func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
+func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID string, html string, replyTo string, opts ...SendOpt) (string, error) {
 	return c.sendText(ctx, chatID, html, true, replyTo, opts)
 }
 
@@ -341,7 +350,7 @@ func replyNotFound(err error) bool {
 // A non-numeric replyTo is a foreign transport's id (the console client
 // numbers its own), and a vanished anchor answers replyNotFound — both send
 // unthreaded rather than failing the turn.
-func (c *BotAPIClient) sendText(ctx context.Context, chatID int64, text string, asHTML bool, replyTo string, opts []SendOpt) (string, error) {
+func (c *BotAPIClient) sendText(ctx context.Context, chatID string, text string, asHTML bool, replyTo string, opts []SendOpt) (string, error) {
 	p := &bot.SendMessageParams{
 		ChatID:              chatID,
 		Text:                text,
@@ -368,7 +377,7 @@ func (c *BotAPIClient) sendText(ctx context.Context, chatID int64, text string, 
 
 // DeleteMessage removes a sent message by id (non-numeric ids are foreign and
 // ignored).
-func (c *BotAPIClient) DeleteMessage(ctx context.Context, chatID int64, msgID string) error {
+func (c *BotAPIClient) DeleteMessage(ctx context.Context, chatID string, msgID string) error {
 	id, err := strconv.Atoi(msgID)
 	if err != nil {
 		return nil
@@ -380,7 +389,7 @@ func (c *BotAPIClient) DeleteMessage(ctx context.Context, chatID int64, msgID st
 // EditPlain replaces a message's text (omitting ReplyMarkup on
 // editMessageText leaves any existing keyboard alone; nothing sends one
 // anymore).
-func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
+func (c *BotAPIClient) EditPlain(ctx context.Context, chatID string, msgID string, text string) error {
 	mid, err := strconv.Atoi(msgID)
 	if err != nil {
 		return err
@@ -394,7 +403,7 @@ func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string
 }
 
 // Typing shows the "typing…" chat action.
-func (c *BotAPIClient) Typing(ctx context.Context, chatID int64) error {
+func (c *BotAPIClient) Typing(ctx context.Context, chatID string) error {
 	_, err := c.b.SendChatAction(ctx, &bot.SendChatActionParams{
 		ChatID: chatID,
 		Action: models.ChatActionTyping,
@@ -414,7 +423,7 @@ func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 }
 
 // SendDocument uploads a file to the chat as a document.
-func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
+func (c *BotAPIClient) SendDocument(ctx context.Context, chatID string, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	m, err := withSendRetry(ctx, func() (*models.Message, error) {
 		return c.b.SendDocument(ctx, &bot.SendDocumentParams{
 			ChatID:              chatID,
@@ -430,7 +439,7 @@ func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename 
 }
 
 // SendPhoto uploads an image to the chat with an optional caption.
-func (c *BotAPIClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (c *BotAPIClient) SendPhoto(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	_, err := c.b.SendPhoto(ctx, &bot.SendPhotoParams{
 		ChatID:  chatID,
 		Photo:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
@@ -442,7 +451,7 @@ func (c *BotAPIClient) SendPhoto(ctx context.Context, chatID int64, filename str
 // SendVoice uploads a voice note to the chat with an optional caption. The
 // upload is given a fixed filename since SendVoiceParams takes no filename
 // field of its own.
-func (c *BotAPIClient) SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error {
+func (c *BotAPIClient) SendVoice(ctx context.Context, chatID string, data []byte, caption string) error {
 	_, err := c.b.SendVoice(ctx, &bot.SendVoiceParams{
 		ChatID:  chatID,
 		Voice:   &models.InputFileUpload{Filename: "voice.ogg", Data: bytes.NewReader(data)},
@@ -452,7 +461,7 @@ func (c *BotAPIClient) SendVoice(ctx context.Context, chatID int64, data []byte,
 }
 
 // SendAudio uploads a music/audio file to the chat with an optional caption.
-func (c *BotAPIClient) SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (c *BotAPIClient) SendAudio(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	_, err := c.b.SendAudio(ctx, &bot.SendAudioParams{
 		ChatID:  chatID,
 		Audio:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
@@ -462,7 +471,7 @@ func (c *BotAPIClient) SendAudio(ctx context.Context, chatID int64, filename str
 }
 
 // SendVideo uploads a video file to the chat with an optional caption.
-func (c *BotAPIClient) SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+func (c *BotAPIClient) SendVideo(ctx context.Context, chatID string, filename string, data []byte, caption string) error {
 	_, err := c.b.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID:  chatID,
 		Video:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},

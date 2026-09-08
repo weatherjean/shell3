@@ -1,7 +1,9 @@
 package runs
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,35 +22,74 @@ func (s *Store) NewSession() (string, error) {
 
 // AppendMessage appends one message at the next sequence number.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("runs: marshal message: %w", err)
-	}
+	return s.AppendMessages(id, []llm.Message{m})
+}
+
+// AppendMessages commits a complete pending history suffix in one transaction.
+func (s *Store) AppendMessages(id string, messages []llm.Message) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := appendMessages(tx, id, messages); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func appendMessages(tx *sql.Tx, id string, messages []llm.Message) error {
 	var seq int
 	if err := tx.QueryRow(
 		`SELECT COALESCE(MAX(seq),-1)+1 FROM messages WHERE session_id=?`, id,
 	).Scan(&seq); err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}
-	if _, err := tx.Exec(
-		`INSERT INTO messages (session_id, seq, json) VALUES (?,?,?)`,
-		id, seq, string(b),
-	); err != nil {
-		return fmt.Errorf("runs: append message: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("runs: append message: %w", err)
+	for i, m := range messages {
+		b, err := json.Marshal(m)
+		if err != nil {
+			return fmt.Errorf("runs: marshal message: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO messages (session_id, seq, json) VALUES (?,?,?)`, id, seq+i, string(b)); err != nil {
+			return fmt.Errorf("runs: append message: %w", err)
+		}
 	}
 	return nil
 }
 
+// RollSession persists both sides of compaction and moves existing surface
+// markers atomically. Callers publish the new in-memory ID only after success.
+func (s *Store) RollSession(previous string, pending, continuation []llm.Message) (string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	id := newID()
+	if _, err := tx.Exec(`INSERT INTO sessions (id) VALUES (?)`, id); err != nil {
+		return "", err
+	}
+	if err := appendMessages(tx, previous, pending); err != nil {
+		return "", err
+	}
+	if err := appendMessages(tx, id, continuation); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(`UPDATE current_sessions SET session_id=? WHERE session_id=?`, id, previous); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // LoadMessages reads the session's messages in order.
 func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
+	var exists int
+	if err := s.db.QueryRow(`SELECT 1 FROM sessions WHERE id=?`, id).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("runs: load session %s: %w", id, err)
+	}
 	rows, err := s.db.Query(`SELECT json FROM messages WHERE session_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, fmt.Errorf("runs: load messages %s: %w", id, err)
@@ -72,15 +113,25 @@ func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 // EndSession removes an empty conversation. Stored messages and job logs stay
 // available for the front end's durable session marker to resume.
 func (s *Store) EndSession(id string) error {
-	if s.hasMessages(id) || hasJobLogs(s.jobsDir(id)) {
+	var hasMessages bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM messages WHERE session_id=?)`, id).Scan(&hasMessages); err != nil {
+		return fmt.Errorf("runs: inspect session %s: %w", id, err)
+	}
+	if hasMessages {
+		return nil
+	}
+	dir := s.jobsDir(id)
+	if dir == "" {
+		return fmt.Errorf("runs: invalid session id %q", id)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("runs: inspect session logs: %w", err)
+	}
+	if len(entries) > 0 {
 		return nil
 	}
 	return s.deleteSession(id)
-}
-
-func (s *Store) hasMessages(id string) bool {
-	var one int
-	return s.db.QueryRow(`SELECT 1 FROM messages WHERE session_id=? LIMIT 1`, id).Scan(&one) == nil
 }
 
 // SetLastPromptTokens records the count a later resume restores its gauge from.
@@ -196,12 +247,4 @@ func (s *Store) jobsDir(id string) string {
 		return ""
 	}
 	return filepath.Join(d, "jobs")
-}
-
-func hasJobLogs(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	entries, err := os.ReadDir(dir)
-	return err == nil && len(entries) > 0
 }

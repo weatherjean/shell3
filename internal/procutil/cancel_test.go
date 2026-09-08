@@ -5,6 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -45,5 +48,37 @@ func waitForFile(t *testing.T, path string) {
 			t.Fatalf("timed out waiting for %s", filepath.Base(path))
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCancellationKillsResistantDescendant(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	pidPath := filepath.Join(t.TempDir(), "child.pid")
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `trap '' TERM; sleep 30 & echo $! > "$1"; wait`, "sh", pidPath)
+	ConfigureGroupCancel(cmd, 100*time.Millisecond)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
+	waitForFile(t, pidPath)
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("cancelled process succeeded")
+	}
+	deadline := time.Now().Add(time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("descendant survived cancellation")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

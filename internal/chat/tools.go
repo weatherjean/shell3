@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // ErrHostToolNotFound is returned by a HostTool dispatcher when it does not
@@ -32,16 +31,16 @@ func unknownToolMsg(name string) string {
 	return fmt.Sprintf("error: unknown tool %q — this agent is bash-first: inspect and modify files with ordinary project commands through bash", name)
 }
 
-// classifyHandlerOutput types a built-in handler's output string. Handlers
-// report in-band failures to the model as "error: …" strings (so the text and
-// the flag can never disagree); this is the single place that convention is
-// interpreted. Hook, validation, and dispatcher failures never pass
-// through here — they construct typed errResults directly.
-func classifyHandlerOutput(out string) toolResult {
-	if strings.HasPrefix(out, "error:") {
-		return errResult(out)
+// handlerResult preserves command output independently of failure status.
+func handlerResult(out string, err error) toolResult {
+	if err == nil {
+		return okResult(out)
 	}
-	return okResult(out)
+	message := "error: " + err.Error()
+	if out != "" {
+		message += "\n" + out
+	}
+	return errResult(message)
 }
 
 // dispatchHostTool runs a host-registered Go tool (internal/shell3.RegisterHostTool)
@@ -55,10 +54,10 @@ func dispatchHostTool(ctx context.Context, cfg TurnConfig, name, rawArgs string)
 	out, err := cfg.HostTool(ctx, name, rawArgs)
 	switch {
 	case err == nil:
-		return classifyHandlerOutput(out)
+		return okResult(out)
 	case errors.Is(err, ErrHostToolNotFound):
 		return errResult(unknownToolMsg(name))
 	default:
-		return errResult("error: " + err.Error())
+		return handlerResult(out, err)
 	}
 }

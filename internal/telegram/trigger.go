@@ -8,7 +8,7 @@ import "strings"
 //
 // In a private chat the answer is always yes: there is nobody else in the
 // room. A group defaults to requiring an @mention of this bot or a reply to
-// one of the bot's own messages. telegram.group_messages: all bypasses this
+// one of the bot's own messages. (group-messages all) bypasses this
 // trigger in Bot.handleMsg, after sender authorization.
 //
 // This is enforcement, not convenience. Telegram's own privacy mode cannot do

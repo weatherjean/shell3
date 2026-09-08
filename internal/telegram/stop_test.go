@@ -18,7 +18,7 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "do work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "do work"})
 
 	select {
 	case <-blk.Started:
@@ -34,7 +34,7 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 		t.Fatal("turnActive is false while a turn is in flight: handleMsg did not mark the turn active on its own goroutine")
 	}
 
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/stop"})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {

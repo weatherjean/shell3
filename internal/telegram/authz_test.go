@@ -12,7 +12,7 @@ import (
 )
 
 func TestAllowlistDefaultsToChatOwner(t *testing.T) {
-	a, err := newSenderAllowlist(42, nil)
+	a, err := newSenderAllowlist("42", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestAllowlistDefaultsToChatOwner(t *testing.T) {
 }
 
 func TestAllowlistExplicitReplacesDefault(t *testing.T) {
-	a, err := newSenderAllowlist(-1001234567890, []string{"42", " 77 "})
+	a, err := newSenderAllowlist("-1001234567890", []string{"42", " 77 "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestAllowlistExplicitReplacesDefault(t *testing.T) {
 }
 
 func TestAllowlistDeniesZeroSender(t *testing.T) {
-	a, _ := newSenderAllowlist(42, []string{"42"})
+	a, _ := newSenderAllowlist("42", []string{"42"})
 	if a.allows(0) {
 		t.Error("a zero sender must never be allowed")
 	}
@@ -51,7 +51,7 @@ func TestAllowlistDeniesZeroSender(t *testing.T) {
 }
 
 func TestAllowlistRejectsNonNumeric(t *testing.T) {
-	_, err := newSenderAllowlist(42, []string{"@someuser"})
+	_, err := newSenderAllowlist("42", []string{"@someuser"})
 	if err == nil || !strings.Contains(err.Error(), "not a numeric user id") {
 		t.Fatalf("want a numeric-id error, got %v", err)
 	}
@@ -63,12 +63,12 @@ func TestUnauthorizedSenderCannotRunCommands(t *testing.T) {
 	rt := storeRuntimeClient(t, client)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 99, ID: "1", Text: "/status"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 99, ID: "1", Text: "/status"})
 	if n := len(fc.sent); n != 0 {
 		t.Fatalf("an unauthorized /status produced %d message(s): %v", n, fc.sent)
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 99, ID: "2", Text: "hello"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 99, ID: "2", Text: "hello"})
 	if client.CallCount() != 0 {
 		t.Fatalf("an unauthorized message started %d model call(s)", client.CallCount())
 	}
@@ -80,7 +80,7 @@ func TestAuthorizedSenderStillWorks(t *testing.T) {
 	rt := storeRuntimeClient(t, client)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "hello"})
 	if !waitForReply(t, fc, "hi there") {
 		t.Fatal("the authorized owner got no reply")
 	}
@@ -95,7 +95,7 @@ func TestSetAllowFromWidens(t *testing.T) {
 	if err := b.SetAllowFrom([]string{"42", "77"}); err != nil {
 		t.Fatal(err)
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 77, ID: "1", Text: "hello"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 77, ID: "1", Text: "hello"})
 	if !waitForReply(t, fc, "sure") {
 		t.Fatal("a newly authorized sender got no reply")
 	}

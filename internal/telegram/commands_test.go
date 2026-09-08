@@ -28,7 +28,7 @@ func TestReloadUnavailableIsExplicit(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/reload"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reload is unavailable") {
 		t.Fatalf("reload reply = %v", fc.sentTexts())
 	}
@@ -40,7 +40,7 @@ func TestReloadCommandRunsHostCallback(t *testing.T) {
 	b := newBot(t, fc, rt)
 	called := 0
 	b.SetReload(func() error { called++; return nil })
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/reload"})
 	if called != 1 || !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "config reloaded") {
 		t.Fatalf("called=%d replies=%v", called, fc.sentTexts())
 	}
@@ -50,7 +50,7 @@ func TestCommandBotnameSuffixIsStripped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/help@my_shell3_bot"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/help@my_shell3_bot"})
 	joined := strings.Join(fc.sentTexts(), "\n")
 	if strings.Contains(joined, "unknown command") || !strings.Contains(joined, "shell3") {
 		t.Fatalf("suffixed help reply = %v", fc.sentTexts())
@@ -61,7 +61,7 @@ func TestSuperstopNothingRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/superstop"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "nothing was running") {
 		t.Fatalf("idle superstop reply = %v", fc.sentTexts())
 	}
@@ -82,9 +82,9 @@ func TestSuperstopKillsJobsAndSummarizes(t *testing.T) {
 	for range sess.Send(context.Background(), "start a background job") {
 	}
 	waitFor(t, func() bool { return sess.RunningJobs() > 0 })
-	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: "42", SenderID: 42, Text: "/superstop"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "superstop") || !strings.Contains(all, "bg1") {
+	if !strings.Contains(all, "superstop") || !strings.Contains(all, "bg-") {
 		t.Fatalf("superstop summary = %v", fc.sentTexts())
 	}
 }

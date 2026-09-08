@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/fsstate"
 	"github.com/weatherjean/shell3/internal/inbox"
 	"github.com/weatherjean/shell3/internal/lispconfig"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -48,6 +49,8 @@ type StartOptions struct {
 	// RequiredOutput is a clean relative path beneath the run's artifacts
 	// directory. A workflow cannot complete successfully without this file.
 	RequiredOutput string
+	ConfigHash     string
+	DefinitionHash string
 }
 
 type Manifest struct {
@@ -75,11 +78,25 @@ type BeatResult struct {
 
 // Start snapshots the validated Lisp inputs and creates a new immutable run.
 func Start(configPath, definitionPath string, opts StartOptions) (string, error) {
-	cfg, err := lispconfig.Load(configPath)
+	configSource, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("wrk: read config: %w", err)
+	}
+	definitionSource, err := os.ReadFile(definitionPath)
+	if err != nil {
+		return "", fmt.Errorf("wrk: read definition: %w", err)
+	}
+	configHash := sha256.Sum256(configSource)
+	definitionHash := sha256.Sum256(definitionSource)
+	if opts.ConfigHash != "" && opts.ConfigHash != fmt.Sprintf("%x", configHash) ||
+		opts.DefinitionHash != "" && opts.DefinitionHash != fmt.Sprintf("%x", definitionHash) {
+		return "", errors.New("wrk: compiled inputs changed; regenerate the launcher")
+	}
+	cfg, err := lispconfig.Parse(configPath, configSource)
 	if err != nil {
 		return "", err
 	}
-	def, err := Load(definitionPath, cfg)
+	def, err := Parse(definitionPath, definitionSource, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -129,19 +146,12 @@ func Start(configPath, definitionPath string, opts StartOptions) (string, error)
 		}
 		opts.RequiredOutput = clean
 	}
-	configSource, err := os.ReadFile(configPath)
-	if err != nil {
-		return "", fmt.Errorf("wrk: read config snapshot: %w", err)
-	}
-	definitionSource, err := os.ReadFile(definitionPath)
-	if err != nil {
-		return "", fmt.Errorf("wrk: read definition snapshot: %w", err)
-	}
 	runDir := filepath.Join(opts.StateRoot, def.Name, opts.RunID)
-	if _, err := os.Stat(runDir); err == nil {
-		return "", fmt.Errorf("wrk: run %s/%s already exists", def.Name, opts.RunID)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := os.MkdirAll(filepath.Dir(runDir), 0o700); err != nil {
 		return "", err
+	}
+	if err := os.Mkdir(runDir, 0o700); err != nil {
+		return "", fmt.Errorf("wrk: create run %s/%s: %w", def.Name, opts.RunID, err)
 	}
 	if err := os.MkdirAll(filepath.Join(runDir, "nodes"), 0o700); err != nil {
 		return "", fmt.Errorf("wrk: create run: %w", err)
@@ -149,8 +159,6 @@ func Start(configPath, definitionPath string, opts StartOptions) (string, error)
 	if err := os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o700); err != nil {
 		return "", err
 	}
-	configHash := sha256.Sum256(configSource)
-	definitionHash := sha256.Sum256(definitionSource)
 	created := time.Now().UTC()
 	deadline := time.Time{}
 	for _, timeout := range []time.Duration{def.Timeout, opts.Timeout} {
@@ -318,16 +326,11 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 		if node.Kind != WaitNode || states[node.Name] != "waiting" {
 			continue
 		}
-		if event := matchingEvent(events, node.Event); event != nil {
-			nodeDir := filepath.Join(runDir, "nodes", node.Name)
-			if err := writeJSON(filepath.Join(nodeDir, "event.json"), event); err != nil {
-				return result, err
-			}
-			if err := writeStatus(nodeDir, "passed"); err != nil {
-				return result, err
-			}
-			states[node.Name] = "passed"
+		state, err := advanceWait(runDir, node, events)
+		if err != nil {
+			return result, err
 		}
+		states[node.Name] = state
 	}
 	if status := terminalStatus(states); status != "" {
 		var terminalErr error
@@ -376,18 +379,11 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 	}
 	for _, node := range selected {
 		if node.Kind == WaitNode {
-			nodeDir := filepath.Join(runDir, "nodes", node.Name)
-			state := "waiting"
-			if event := matchingEvent(events, node.Event); event != nil {
-				state = "passed"
-				if err := writeJSON(filepath.Join(nodeDir, "event.json"), event); err != nil {
-					return result, err
-				}
-			}
-			states[node.Name] = state
-			if err := writeStatus(nodeDir, state); err != nil {
+			state, err := advanceWait(runDir, node, events)
+			if err != nil {
 				return result, err
 			}
+			states[node.Name] = state
 			result.Ran = append(result.Ran, node.Name)
 		}
 	}
@@ -517,7 +513,8 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 		} else {
 			cmd.Stderr = errOut
 		}
-		procutil.ConfigureGroupCancel(cmd, 2*time.Second)
+		// Allow _agent to cancel and reap its own runner group before escalation.
+		procutil.ConfigureGroupCancel(cmd, 4*time.Second)
 		runErr := cmd.Run()
 		if err := writeNodeResult(nodeDir, attempt, output.String()); err != nil {
 			return transitionNode(nodeDir, "failed", err)
@@ -593,8 +590,8 @@ func transitionNode(nodeDir, state string, cause error) (string, error) {
 
 func runCheck(ctx context.Context, runDir string, manifest Manifest, nodeDir string, check *Check, logName string, attempt int, progress io.Writer) (bool, error) {
 	if check.Kind == "file" {
-		_, err := os.Stat(filepath.Join(runDir, "artifacts", check.Value))
-		return err == nil, nil
+		info, err := os.Stat(filepath.Join(runDir, "artifacts", check.Value))
+		return err == nil && info.Mode().IsRegular(), nil
 	}
 	return runShell(ctx, manifest.WorkDir, taskEnv(runDir, manifest, attempt), check.Value, filepath.Join(nodeDir, logName), progress)
 }
@@ -639,8 +636,10 @@ func progressf(w io.Writer, format string, args ...any) {
 }
 
 func taskEnv(runDir string, manifest Manifest, attempt int) []string {
-	return []string{"TASK_ID=" + manifest.Task, "TASK_RUN=" + manifest.RunID, "TASK_ROOT=" + manifest.WorkDir,
-		"TASK_ARTIFACTS=" + filepath.Join(runDir, "artifacts"), fmt.Sprintf("TASK_ATTEMPT=%d", attempt)}
+	return lispconfig.TaskEnvironment(map[string]string{
+		"task-id": manifest.Task, "task-run": manifest.RunID, "task-root": manifest.WorkDir,
+		"task-artifacts": filepath.Join(runDir, "artifacts"), "task-attempt": fmt.Sprint(attempt),
+	})
 }
 
 func selectRunnable(nodes []Node, parallel int) []Node {
@@ -811,11 +810,7 @@ func watchCancellation(runDir string, cancel context.CancelFunc, done <-chan str
 }
 
 func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsstate.Write(path, data)
 }
 
 func writeJSON(path string, value any) error {
@@ -868,7 +863,7 @@ func newRunID() (string, error) {
 }
 
 func validRunID(value string) bool {
-	if value == "" {
+	if value == "" || value == "." || value == ".." {
 		return false
 	}
 	for _, r := range value {
@@ -877,4 +872,32 @@ func validRunID(value string) bool {
 		}
 	}
 	return true
+}
+
+// advanceWait uses the signal's durable timestamp, so a timely signal still
+// succeeds when the next beat runs after the deadline.
+func advanceWait(runDir string, node Node, events []ExternalEvent) (string, error) {
+	dir := filepath.Join(runDir, "nodes", node.Name)
+	var deadline time.Time
+	if node.Timeout > 0 {
+		path := filepath.Join(dir, "deadline.json")
+		if err := readJSON(path, &deadline); errors.Is(err, os.ErrNotExist) {
+			deadline = time.Now().UTC().Add(node.Timeout)
+			if err := writeJSON(path, deadline); err != nil {
+				return "", err
+			}
+		} else if err != nil {
+			return "", err
+		}
+	}
+	state := "waiting"
+	if event := matchingEvent(events, node.Event); event != nil && (deadline.IsZero() || event.Created.Before(deadline)) {
+		if err := writeJSON(filepath.Join(dir, "event.json"), event); err != nil {
+			return "", err
+		}
+		state = "passed"
+	} else if !deadline.IsZero() && !time.Now().Before(deadline) {
+		state = "failed"
+	}
+	return state, writeStatus(dir, state)
 }

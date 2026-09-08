@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/inbox"
 )
 
@@ -163,7 +164,7 @@ func TestRouterQuarantinesIncompatibleSnapshotAndReportsOnce(t *testing.T) {
 	if record.Message != "workflow route failed" || record.Fields["target"] != "wrk:routed/old-schema" || !strings.Contains(record.Error, "immutable run snapshot hash mismatch") {
 		t.Fatalf("error record = %+v", record)
 	}
-	targets, err := registeredTargets(control)
+	targets, err := registeredTargets(control, applog.Noop{})
 	if err != nil {
 		t.Fatal(err)
 	}

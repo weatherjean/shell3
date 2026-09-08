@@ -23,8 +23,8 @@ deterministic config-to-workflow smoke test.
 - Keep code, tests, and public documentation aligned.
 - Preserve unrelated worktree changes.
 - Prefer a rule, worked example, or extension seam over a new built-in.
-- Keep the model tool surface limited to `bash`, `bash_bg`, and the optional
-  Telegram file-send tool. Prefer project CLI conventions and embedded skills
+- Keep the core model tools `bash` and `bash_bg`, the persistent host's bounded
+  `shell3` control tool, and Telegram's optional file-send tool. Prefer project CLI conventions and embedded skills
   over new file-manipulation tools.
 - Treat everything under `internal/` as changeable implementation detail.
 - Add failure-path tests for parsing, storage, concurrency, and delivery work.

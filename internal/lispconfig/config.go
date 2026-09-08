@@ -615,6 +615,9 @@ func parseRunner(node sexpr.Node, args []sexpr.Node, constants map[string]string
 				if _, exists := parameters[paramName]; exists {
 					return "", Runner{}, nil, at(declaration, "duplicate parameter %q", paramName)
 				}
+				if _, exists := constants[paramName]; exists {
+					return "", Runner{}, nil, at(declaration, "parameter %q conflicts with a constant", paramName)
+				}
 				parameters[paramName] = param
 			}
 		case "command":
@@ -684,17 +687,19 @@ func parseRunner(node sexpr.Node, args []sexpr.Node, constants map[string]string
 }
 
 func parseParameter(node sexpr.Node) (string, parameter, error) {
-	_, args, ok := node.Form()
+	name, args, ok := node.Form()
 	if !ok {
 		return "", parameter{}, at(node, "parameter declaration must be a form")
 	}
-	name, _, _ := node.Form()
 	if len(args) < 2 || args[0].Kind != sexpr.Symbol || args[0].Value != "string" || args[1].Kind != sexpr.Symbol {
 		return "", parameter{}, at(node, "parameter syntax is (name string required|optional [default])")
 	}
 	p := parameter{}
 	if !sexpr.ValidName(name) {
 		return "", parameter{}, at(node, "invalid parameter name %q", name)
+	}
+	if runtimeSlots[name] || name == "using" {
+		return "", parameter{}, at(node, "reserved parameter name %q", name)
 	}
 	switch args[1].Value {
 	case "required":

@@ -56,10 +56,7 @@ func saveAttachments(files []Media) []savedFile {
 	return out
 }
 
-// attachmentNote turns saved attachments into a text note for the agent: what
-// arrived and where it landed. It names no tool — perception is a tool the
-// operator declares, the harness cannot know whether one exists, and the
-// skills index is already in the prompt.
+// attachmentNote identifies saved files and points to Bash for inspection.
 func attachmentNote(saved []savedFile) string {
 	if len(saved) == 0 {
 		return ""

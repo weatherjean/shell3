@@ -76,27 +76,6 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	}
 }
 
-func TestBashBgUsesStartCallback(t *testing.T) {
-	var gotCmd string
-	cfg := ToolConfig{
-		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
-			gotCmd = command
-			return "bg1", nil
-		},
-	}
-	out, err := BashBgHandler{}.Execute(context.Background(), "t", json.RawMessage(`{"command":"echo hi"}`), cfg)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if gotCmd != "echo hi" {
-		t.Fatalf("callback got %q, want %q", gotCmd, "echo hi")
-	}
-	if !strings.Contains(out, "bg1") {
-		t.Fatalf("output %q missing job id", out)
-	}
-}
-
 func TestBashBgRejectsUnknownFields(t *testing.T) {
 	started := false
 	cfg := ToolConfig{

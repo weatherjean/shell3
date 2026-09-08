@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/weatherjean/shell3/internal/procutil"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
@@ -34,9 +36,14 @@ func newRingBuffer(maxSize int) *ringBuffer { return &ringBuffer{maxSize: maxSiz
 func (r *ringBuffer) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.buf = append(r.buf, p...)
-	if len(r.buf) > r.maxSize {
-		r.buf = r.buf[len(r.buf)-r.maxSize:]
+	if len(p) >= r.maxSize {
+		r.buf = append(r.buf[:0], p[len(p)-r.maxSize:]...)
+	} else {
+		if excess := len(r.buf) + len(p) - r.maxSize; excess > 0 {
+			copy(r.buf, r.buf[excess:])
+			r.buf = r.buf[:len(r.buf)-excess]
+		}
+		r.buf = append(r.buf, p...)
 	}
 	return len(p), nil
 }
@@ -63,7 +70,7 @@ type cappedFileWriter struct {
 }
 
 func newCappedFileWriter(path string) *cappedFileWriter {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		return nil
 	}
@@ -147,7 +154,6 @@ type jobManager struct {
 	rt   *Runtime
 	jobs map[string]*bgJob
 	max  int
-	seq  int
 
 	// closing is set by cancelAll so shutdown cannot admit new work.
 	closing bool
@@ -161,12 +167,6 @@ func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {
 		rt: rt, jobs: map[string]*bgJob{},
 		max: maxConcurrent,
 	}
-}
-
-// nextID must be called under m.mu.
-func (m *jobManager) nextID(prefix string) string {
-	m.seq++
-	return fmt.Sprintf("%s%d", prefix, m.seq)
 }
 
 func (m *jobManager) capError() error {
@@ -193,7 +193,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		m.mu.Unlock()
 		return "", m.capError()
 	}
-	id := m.nextID("bg")
+	id := "bg-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &jobSink{ring: newRingBuffer(64 * 1024)}
 	// Best-effort log beside the parent's transcript, so output up to the cap

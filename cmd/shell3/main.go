@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"charm.land/fang/v2"
 	"github.com/spf13/cobra"
@@ -39,10 +41,13 @@ func main() {
 	}
 
 	// fang prints the styled error itself; the returned error only signals exit.
-	if err := fang.Execute(context.Background(), root,
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := fang.Execute(ctx, root,
 		fang.WithVersion(version),
 		fang.WithColorSchemeFunc(cli.FangColorScheme),
-	); err != nil {
+	)
+	stop()
+	if err != nil {
 		os.Exit(1)
 	}
 }

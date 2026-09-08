@@ -144,8 +144,8 @@ func TestConsole_SilentTag(t *testing.T) {
 func TestConsoleParseLineRoomPrefix(t *testing.T) {
 	c := NewConsoleClient(strings.NewReader(""), io.Discard, ConsoleChatID)
 	m := c.parseLine("#-100 @shell3console deploy")
-	if m.ChatID != -100 {
-		t.Fatalf("ChatID = %d, want -100", m.ChatID)
+	if m.ChatID != "-100" {
+		t.Fatalf("ChatID = %s, want -100", m.ChatID)
 	}
 	if m.ChatType != "supergroup" {
 		t.Fatalf("ChatType = %q, want a group (the trigger gate must apply)", m.ChatType)
@@ -156,11 +156,22 @@ func TestConsoleParseLineRoomPrefix(t *testing.T) {
 
 	plain := c.parseLine("hello")
 	if plain.ChatID != ConsoleChatID || plain.ChatType != "private" {
-		t.Fatalf("plain line = chat %d type %q, want the default private chat", plain.ChatID, plain.ChatType)
+		t.Fatalf("plain line = chat %s type %q, want the default private chat", plain.ChatID, plain.ChatType)
 	}
 
-	notARoom := c.parseLine("#nope still text")
-	if notARoom.ChatID != ConsoleChatID || notARoom.Text != "#nope still text" {
-		t.Fatalf("unparseable room prefix = chat %d text %q, want it left alone", notARoom.ChatID, notARoom.Text)
+	notARoom := c.parseLine("# still text")
+	if notARoom.ChatID != ConsoleChatID || notARoom.Text != "# still text" {
+		t.Fatalf("unparseable room prefix = chat %s text %q, want it left alone", notARoom.ChatID, notARoom.Text)
+	}
+}
+
+func TestConsolePreservesOpaqueRoomAndReplyIDs(t *testing.T) {
+	c := NewConsoleClient(strings.NewReader(""), io.Discard, ConsoleChatID)
+	m := c.parseLine("#room:β @message-abc continue")
+	if m.ChatID != "room:β" || m.ReplyToID != "message-abc" || m.Text != "continue" {
+		t.Fatalf("normalized message = %+v", m)
+	}
+	if got, ok := chatIDFromSurface("telegram", roomSurface("telegram", m.ChatID)); !ok || got != m.ChatID {
+		t.Fatalf("room ID changed: %q", got)
 	}
 }

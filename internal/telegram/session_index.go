@@ -3,26 +3,21 @@
 package telegram
 
 import (
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// SessionIndex remembers one front-end surface's current conversation session.
-// The in-memory value is authoritative for the process; the runs store's
-// current_sessions table carries it across restarts. The store is resolved per call
-// (a /reload swaps generations, closing the old database handle). A nil store
-// degrades to memory-only, so a runtime without persistence still tracks the
-// conversation within its own lifetime. surface namespaces the front-end
-// ("telegram" is the only one today) so a future transport could never
-// cross-resolve another's conversation.
+// SessionIndex persists a room's current conversation before caching it.
+// Surface keys isolate transports and rooms; the store closure follows reloads.
+// A nil store provides memory-only tracking.
 type SessionIndex struct {
 	store   func() *runs.Store
 	surface string
 	mu      sync.Mutex
 	id      string
+	seen    bool
 }
 
 // NewSessionIndex returns the session index for one front-end surface. store
@@ -34,17 +29,16 @@ func NewSessionIndex(store func() *runs.Store, surface string) *SessionIndex {
 	return &SessionIndex{store: store, surface: surface}
 }
 
-// SetCurrent records id as the surface's current conversation session.
-// A failed write is returned, not swallowed: a stale marker silently forks
-// the conversation on the next restart — cron reports land in a session the
-// user never sees.
+// SetCurrent publishes the marker only after a successful durable write.
 func (ti *SessionIndex) SetCurrent(id string) error {
 	ti.mu.Lock()
-	ti.id = id
-	ti.mu.Unlock()
+	defer ti.mu.Unlock()
 	if st := ti.store(); st != nil {
-		return st.SetCurrentSession(ti.surface, id)
+		if err := st.SetCurrentSession(ti.surface, id); err != nil {
+			return err
+		}
 	}
+	ti.id, ti.seen = id, true
 	return nil
 }
 
@@ -53,10 +47,9 @@ func (ti *SessionIndex) SetCurrent(id string) error {
 // empty recorded id (a /new that cleared the marker) reads as absent.
 func (ti *SessionIndex) Current() (string, bool) {
 	ti.mu.Lock()
-	id, seen := ti.id, ti.id != ""
-	ti.mu.Unlock()
-	if seen {
-		return id, true
+	defer ti.mu.Unlock()
+	if ti.seen {
+		return ti.id, ti.id != ""
 	}
 	st := ti.store()
 	if st == nil {
@@ -69,12 +62,9 @@ func (ti *SessionIndex) Current() (string, bool) {
 	return id, true
 }
 
-// roomSurface keys one room under its FRONT-END's surface namespace. The
-// prefix is the host's own surface ("telegram"), so two front-ends sharing a
-// runs store could never cross-resolve each other's rooms — the property the
-// single-surface keys had, kept now that each surface has many rooms.
-func roomSurface(host string, chatID int64) string {
-	return host + ":" + strconv.FormatInt(chatID, 10)
+// roomSurface namespaces an opaque chat ID under its transport.
+func roomSurface(host string, chatID string) string {
+	return host + ":" + chatID
 }
 
 // forSurface derives a sibling index over the same store, keyed on another
@@ -89,9 +79,7 @@ func (ti *SessionIndex) forSurface(surface string) *SessionIndex {
 	return &SessionIndex{store: ti.store, surface: surface}
 }
 
-// currentStore resolves the runs store this index writes to, or nil. The
-// closure is re-evaluated per call so a /reload generation swap is picked up
-// rather than pinned.
+// currentStore resolves the active generation's store.
 func (ti *SessionIndex) currentStore() *runs.Store {
 	if ti == nil {
 		return nil
@@ -99,25 +87,13 @@ func (ti *SessionIndex) currentStore() *runs.Store {
 	return ti.store()
 }
 
-// chatIDFromSurface parses a "<host>:<chatid>" surface key back into its chat
-// id. It is how a completion whose room is not live yet — every completion
-// recovered at boot — finds the room it belongs to.
-func chatIDFromSurface(host, surface string) (int64, bool) {
+// chatIDFromSurface recovers a room ID without interpreting it.
+func chatIDFromSurface(host, surface string) (string, bool) {
 	rest, ok := strings.CutPrefix(surface, host+":")
-	if !ok {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(rest, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return id, true
+	return rest, ok && rest != ""
 }
 
-// hostSurface is the front-end namespace this index belongs to ("telegram")
-// — the prefix every room key of that host is built from. A nil
-// index (a Bot built without persistence) reports the Telegram default so a
-// test-built bot keys its rooms the way the real one does.
+// hostSurface returns the transport namespace, defaulting to Telegram.
 func (ti *SessionIndex) hostSurface() string {
 	if ti == nil || ti.surface == "" {
 		return "telegram"

@@ -3,6 +3,7 @@ package shell3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -42,7 +43,6 @@ type Session struct {
 	curDone    <-chan struct{}    // current turn ctx's Done; unblocks a send to an abandoned cur on Close
 	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
-	sawError   bool               // any turn emitted an error event; drives the audit "end" status
 	// busy spans Send until its turn goroutine finishes, rejecting overlapping
 	// sends and between-turn configuration changes instead of racing them.
 	busy bool
@@ -56,7 +56,7 @@ type Session struct {
 
 // newSession wires a Session around a built chat.Config. Split out from Start
 // so tests can inject a fakellm-backed config.
-func newSession(cfg chat.Config, opts SessionOpts) *Session {
+func newSession(cfg chat.Config, opts SessionOpts) (*Session, error) {
 	var storeID string
 	var seed []llm.Message
 	var seedTokens int     // persisted provider-reported prompt tokens for a resumed session
@@ -73,18 +73,19 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			if msgs, err := cfg.Store.LoadMessages(resumeID); err == nil {
 				seed = msgs
 			} else {
-				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
+				return nil, fmt.Errorf("resume session: %w", err)
+			}
+			if err := llm.ValidateToolOrder(seed); err != nil {
+				return nil, fmt.Errorf("resume session %s: %w", resumeID, err)
 			}
 			// Restore the persisted gauge so the first resumed turn's
 			// prune/compaction fires; 0 falls back to the estimate.
 			seedTokens = cfg.Store.LastPromptTokens(resumeID)
 		default:
-			// Best-effort: a failed NewSession leaves storeID "" and no
-			// persistence, logged so it is observable rather than silent.
 			if id, err := cfg.Store.NewSession(); err == nil {
 				storeID = id
 			} else {
-				chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
+				return nil, fmt.Errorf("start session: %w", err)
 			}
 		}
 	}
@@ -104,7 +105,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			chat.LogOrNoop(cfg.Log).Warn("restore reminders failed", "session_id", resumedFrom, "error", err)
 		}
 	}
-	return s
+	return s, nil
 }
 
 // route is the chat.Session sink, running on the turn goroutine, so every
@@ -116,11 +117,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 // the terminal Done/Error included. Channel close is the authoritative
 // end-of-turn signal; the terminal event is best-effort.
 func (s *Session) route(ev chat.Event) {
-	if ev.Kind == chat.EventError {
-		s.mu.Lock()
-		s.sawError = true
-		s.mu.Unlock()
-	}
 	pub := translate(ev)
 	s.mu.Lock()
 	cur, done := s.cur, s.curDone
@@ -291,8 +287,7 @@ func (s *Session) ID() string {
 }
 
 // Close cancels and joins any active turn before ending the stored session.
-// Start-owned sessions also close their private Runtime. Repeated sequential
-// calls are safe; concurrent calls are unsupported.
+// Concurrent callers share the same result.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() { s.closeErr = s.doClose() })
 	return s.closeErr

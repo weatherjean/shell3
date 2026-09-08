@@ -273,7 +273,7 @@ func TestTelegramHostControllerReloadsAtomicallyAndClassifiesRestart(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := orchestrator.OpenTelegram(t.Context(), configPath, dir)
+	rt, err := orchestrator.OpenTelegram(t.Context(), configPath, dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ package telegram
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 
 type conversation struct {
 	b       *Bot
-	chatID  int64
+	chatID  string
 	isGroup bool
 	// index persists which store session is this room's conversation, under
 	// the room's own surface key, so a restart resumes every room.
@@ -235,11 +236,13 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 
 	var sess *shell3.Session
 	if id, ok := c.currentSession(); ok {
-		if s, err := c.b.rt.Session(shell3.SessionOpts{
+		s, err := c.b.rt.Session(shell3.SessionOpts{
 			ResumeID: id, PromptSuffix: c.brief,
-		}); err == nil {
-			sess = s
+		})
+		if err != nil {
+			return nil, err
 		}
+		sess = s
 	}
 	if sess == nil {
 		s, err := c.b.rt.Session(shell3.SessionOpts{PromptSuffix: c.brief})
@@ -256,14 +259,13 @@ func (c *conversation) mainSession() (*shell3.Session, error) {
 		_ = sess.Close()
 		return winner, nil
 	}
+	if err := c.index.SetCurrent(sess.ID()); err != nil {
+		c.mu.Unlock()
+		_ = sess.Close()
+		return nil, fmt.Errorf("persist current session: %w", err)
+	}
 	c.main = sess
 	c.mu.Unlock()
-	if err := c.setCurrentSession(sess.ID()); err != nil {
-		// The in-memory marker would still agree with sess, but a restart
-		// re-reads the STORE: a lost write here resumes a stale conversation
-		// on the next boot, so it must at least be visible.
-		c.b.log.Warn("current-session marker not persisted", "session", sess.ID(), "err", err)
-	}
 	return sess, nil
 }
 
@@ -439,11 +441,11 @@ func (c *conversation) keepTyping(ctx context.Context) (stop func()) {
 // conv returns the conversation for chatID, creating it on first sight.
 // handleMsg has already decided the sender may drive the agent, so creation
 // carries no authorization meaning of its own.
-func (b *Bot) conv(chatID int64) *conversation {
+func (b *Bot) conv(chatID string) *conversation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.convs == nil {
-		b.convs = make(map[int64]*conversation)
+		b.convs = make(map[string]*conversation)
 	}
 	if c, ok := b.convs[chatID]; ok {
 		return c
@@ -459,7 +461,7 @@ func (b *Bot) conv(chatID int64) *conversation {
 
 // peekConv returns an existing conversation without creating one: routing
 // peeks before it decides, and a message not for the bot must leave no trace.
-func (b *Bot) peekConv(chatID int64) *conversation {
+func (b *Bot) peekConv(chatID string) *conversation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.convs[chatID]
@@ -505,7 +507,7 @@ func (c *conversation) session() *shell3.Session {
 	return c.main
 }
 
-func (c *conversation) chatIDValue() int64 {
+func (c *conversation) chatIDValue() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.chatID
@@ -562,8 +564,8 @@ func (b *Bot) startNextWorkAll(ctx context.Context, first *conversation) {
 //
 // Idempotent and safe if the new room was already touched: an existing
 // conversation at the destination wins, since it may already hold a turn.
-func (b *Bot) migrateRoom(from, to int64) {
-	if from == to || to == 0 {
+func (b *Bot) migrateRoom(from, to string) {
+	if from == to || to == "" {
 		return
 	}
 	b.mu.Lock()

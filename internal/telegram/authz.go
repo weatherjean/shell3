@@ -7,15 +7,7 @@ import (
 )
 
 // senderAllowlist decides which Telegram users may drive the agent.
-//
-// It exists because chat_id is not an access model once the bot can be in a
-// group. chat_id answers "where does the bot talk"; it says nothing about who
-// is standing in that room. Every member of a group can see the chat, and
-// treating presence as permission would hand an unrestricted shell — gated
-// only by the kit's `gate:` function — to anyone who can be added to it.
-//
-// The sender id is the right thing to key on: Telegram's servers populate it,
-// and unlike anything in the message body the sender cannot choose it.
+// Telegram supplies sender identity; membership in a chat grants no authority.
 type senderAllowlist struct {
 	ids map[int64]struct{}
 }
@@ -28,7 +20,7 @@ type senderAllowlist struct {
 // configured chat" and "the person who has always been talking to this bot"
 // are the same number. An operator who never opens a group never has to learn
 // this setting exists.
-func newSenderAllowlist(chatID int64, ids []string) (*senderAllowlist, error) {
+func newSenderAllowlist(chatID string, ids []string) (*senderAllowlist, error) {
 	a := &senderAllowlist{ids: make(map[int64]struct{}, len(ids)+1)}
 	for _, raw := range ids {
 		s := strings.TrimSpace(raw)
@@ -41,8 +33,10 @@ func newSenderAllowlist(chatID int64, ids []string) (*senderAllowlist, error) {
 		}
 		a.ids[id] = struct{}{}
 	}
-	if len(a.ids) == 0 && chatID != 0 {
-		a.ids[chatID] = struct{}{}
+	if len(a.ids) == 0 {
+		if id, err := strconv.ParseInt(chatID, 10, 64); err == nil && id > 0 {
+			a.ids[id] = struct{}{}
+		}
 	}
 	return a, nil
 }

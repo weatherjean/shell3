@@ -47,7 +47,7 @@ func TestShell3ControlToolRegisteredAndRoutesActions(t *testing.T) {
 	}
 
 	out, err := b.controlToolHandler(context.Background(), `{"action":"nope"}`)
-	if err != nil || !strings.HasPrefix(out, "error: action must be") {
+	if err == nil || !strings.HasPrefix(err.Error(), "action must be") {
 		t.Fatalf("invalid action = (%q, %v)", out, err)
 	}
 }
@@ -135,7 +135,7 @@ func TestRestartGateRejectsNewTurnsWithoutLosingThemSilently(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.armRestart()
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "9", Text: "new work"})
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, ID: "9", Text: "new work"})
 	fc.mu.Lock()
 	gotNotice := len(fc.html) > 0 && strings.Contains(fc.html[len(fc.html)-1], "please resend")
 	fc.mu.Unlock()

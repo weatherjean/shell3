@@ -16,7 +16,7 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	ctx := context.Background()
-	b.handleMsg(ctx, Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hi"})
+	b.handleMsg(ctx, Msg{ChatID: "42", SenderID: 42, ID: "1", Text: "hi"})
 
 	if !waitForReply(t, fc, "hello from agent") {
 		t.Fatalf("expected agent reply, got: %q", strings.Join(fc.sentTexts(), "\n"))
@@ -72,7 +72,7 @@ func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "got your file")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, Media: []Media{
+	b.handleMsg(context.Background(), Msg{ChatID: "42", SenderID: 42, Media: []Media{
 		{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"},
 	}})
 
@@ -81,15 +81,15 @@ func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
 	}
 }
 
-func TestHandleMsg_WrongChatDropped(t *testing.T) {
+func TestHandleMsg_MissingSenderDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "should not run")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 999, Text: "hi"})
+	b.handleMsg(context.Background(), Msg{ChatID: "999", Text: "hi"})
 
 	if len(fc.sentTexts()) != 0 {
-		t.Fatalf("expected no output for unauthorized chat, got %v", fc.sentTexts())
+		t.Fatalf("expected no output for unattributed message, got %v", fc.sentTexts())
 	}
 }
 

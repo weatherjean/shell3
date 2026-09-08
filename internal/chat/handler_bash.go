@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/procutil"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // defaultBashTimeoutSeconds caps bash tool runtime when caller does not set timeout_seconds.
@@ -32,12 +32,7 @@ const maxBashOutputBytes = 30 * 1024
 // hold the buffer copy goroutines open forever.
 const bashWaitDelay = 2 * time.Second
 
-// BashHandler executes a bash command and returns its combined stdout+stderr.
-// It respects context cancellation — callers set timeouts before invoking Execute.
-// Exit codes are not returned as errors; a non-zero exit prefixes the output
-// with an "error: command exited N" line (one convention shared by every dispatch path), so
-// the model — and the tool_result error flag — can tell the call failed even
-// when the command wrote nothing to stderr.
+// BashHandler executes a command and returns its combined output and exit error.
 type BashHandler struct{}
 
 func (BashHandler) Name() string { return "bash" }
@@ -45,12 +40,12 @@ func (BashHandler) Name() string { return "bash" }
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	command, timeout, err := parseBashArgsFull(string(args))
 	if err != nil {
-		return "error: invalid bash arguments: " + err.Error(), nil
+		return "", fmt.Errorf("invalid bash arguments: %w", err)
 	}
 	argv := []string{"bash", "-c", command}
 	out, code := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
 	if code != 0 {
-		return fmt.Sprintf("error: command exited %d\n%s", code, out), nil
+		return out, fmt.Errorf("command exited %d", code)
 	}
 	return out, nil
 }
@@ -72,7 +67,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 		c.Env = append(os.Environ(), extraEnv...)
 	}
 	procutil.ConfigureGroupCancel(c, bashWaitDelay)
-	var buf bytes.Buffer
+	buf := strutil.Capture{Limit: maxBashOutputBytes}
 	c.Stdout = &buf
 	c.Stderr = &buf
 	exit := 0
@@ -96,20 +91,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 	if buf.Len() == 0 {
 		return "(no output)", exit
 	}
-	return elideMiddle(buf.Bytes(), maxBashOutputBytes), exit
-}
-
-// elideMiddle returns out unchanged if within max, otherwise keeps the
-// first and last half and elides the middle with a marker line.
-func elideMiddle(out []byte, max int) string {
-	if len(out) <= max {
-		return string(out)
-	}
-	half := max / 2
-	head := out[:half]
-	tail := out[len(out)-half:]
-	elided := len(out) - 2*half
-	return fmt.Sprintf("%s\n... [%d bytes elided] ...\n%s", head, elided, tail)
+	return buf.String(), exit
 }
 
 // parseBashArgsFull extracts command and timeout. Timeout defaults to

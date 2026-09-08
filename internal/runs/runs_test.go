@@ -112,16 +112,26 @@ func TestEndSessionKeepsJobLogs(t *testing.T) {
 	}
 }
 
-func TestHasMessages(t *testing.T) {
-	st, _ := Open(t.TempDir())
-	id, _ := st.NewSession()
-	if st.hasMessages(id) {
-		t.Fatal("fresh session must report no messages")
-	}
-	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+func TestEndSessionPreservesStateOnInspectionFailure(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !st.hasMessages(id) {
-		t.Fatal("stored message was not found")
+	defer st.Close()
+	id, err := st.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(st.runDir(id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.jobsDir(id), []byte("obstructed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err == nil {
+		t.Fatal("expected log inspection failure")
+	}
+	if !sessionExists(t, st, id) {
+		t.Fatal("deleted uninspectable session")
 	}
 }

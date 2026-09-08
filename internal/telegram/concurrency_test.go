@@ -23,7 +23,7 @@ func TestRoomsRunTurnsConcurrently(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	a, second := b.conv(-100), b.conv(-200)
+	a, second := b.conv("-100"), b.conv("-200")
 	a.mu.Lock()
 	_, cancelA, okA := a.takeSlotLocked(ctx)
 	a.mu.Unlock()
@@ -49,7 +49,7 @@ func TestCapQueuesAndDrains(t *testing.T) {
 	b.SetMaxConcurrentTurns(1)
 	ctx := context.Background()
 
-	a := b.conv(-100)
+	a := b.conv("-100")
 	a.mu.Lock()
 	_, cancelA, ok := a.takeSlotLocked(ctx)
 	a.mu.Unlock()
@@ -57,9 +57,9 @@ func TestCapQueuesAndDrains(t *testing.T) {
 		t.Fatal("the first room must get the slot")
 	}
 
-	b.handleMsg(ctx, Msg{ChatID: -200, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot hello"})
+	b.handleMsg(ctx, Msg{ChatID: "-200", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot hello"})
 	waitFor(t, func() bool {
-		c := b.peekConv(-200)
+		c := b.peekConv("-200")
 		if c == nil {
 			return false
 		}
@@ -71,8 +71,8 @@ func TestCapQueuesAndDrains(t *testing.T) {
 	a.releaseSlot(cancelA)
 	b.startNextWorkAll(ctx, a)
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
-	if r, _ := fc.lastReply(); r.chatID != -200 {
-		t.Fatalf("the drained turn answered chat %d, want -200", r.chatID)
+	if r, _ := fc.lastReply(); r.chatID != "-200" {
+		t.Fatalf("the drained turn answered chat %s, want -200", r.chatID)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestStopScopesToItsRoom(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	a, other := b.conv(-100), b.conv(-200)
+	a, other := b.conv("-100"), b.conv("-200")
 	a.mu.Lock()
 	_, cancelA, _ := a.takeSlotLocked(ctx)
 	a.mu.Unlock()
@@ -94,7 +94,7 @@ func TestStopScopesToItsRoom(t *testing.T) {
 	defer cancelA()
 	defer cancelB()
 
-	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/stop@mybot"})
+	b.handleMsg(ctx, Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/stop@mybot"})
 
 	select {
 	case <-turnCtxB.Done():
@@ -111,7 +111,7 @@ func TestCommandForAnotherBotIsIgnored(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	c := b.conv(-100)
+	c := b.conv("-100")
 	c.mu.Lock()
 	_, cancel, _ := c.takeSlotLocked(ctx)
 	turnCtx := context.Background()
@@ -119,7 +119,7 @@ func TestCommandForAnotherBotIsIgnored(t *testing.T) {
 	defer cancel()
 	_ = turnCtx
 
-	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/stop@otherbot"})
+	b.handleMsg(ctx, Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/stop@otherbot"})
 	if got := len(fc.sentTexts()) + len(fc.htmlTexts()); got != 0 {
 		t.Fatalf("a command for another bot produced %d posts, want silence", got)
 	}
@@ -133,8 +133,8 @@ func TestUnaddressedChatterCreatesNoRoom(t *testing.T) {
 	if err := b.SetAllowFrom([]string{"7"}); err != nil {
 		t.Fatal(err)
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "lunch?"})
-	if b.peekConv(-100) != nil {
+	b.handleMsg(context.Background(), Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "lunch?"})
+	if b.peekConv("-100") != nil {
 		t.Fatal("chatter that never reaches a turn must leave no room behind")
 	}
 }
@@ -147,18 +147,18 @@ func TestAskOpensAConversationInAGroup(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1",
+	b.handleMsg(ctx, Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1",
 		Text: "/ask@mybot what is the deploy status"})
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
 
 	r, _ := fc.lastReply()
-	if r.chatID != -100 {
-		t.Fatalf("/ask answered chat %d, want the room it was typed in", r.chatID)
+	if r.chatID != "-100" {
+		t.Fatalf("/ask answered chat %s, want the room it was typed in", r.chatID)
 	}
-	if b.conv(-100).session() == nil {
+	if b.conv("-100").session() == nil {
 		t.Fatal("/ask must open that room's conversation")
 	}
-	if !b.conv(-100).wasSent(r.msgID) {
+	if !b.conv("-100").wasSent(r.msgID) {
 		t.Fatal("the answer must be recorded as ours, or replying to it won't count as addressing the bot")
 	}
 }
@@ -169,7 +169,7 @@ func TestAskWithoutTextExplainsItself(t *testing.T) {
 	if err := b.SetAllowFrom([]string{"7"}); err != nil {
 		t.Fatal(err)
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/ask"})
+	b.handleMsg(context.Background(), Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/ask"})
 	all := strings.Join(append(fc.sentTexts(), fc.htmlTexts()...), "\n")
 	if !strings.Contains(all, "usage") {
 		t.Fatalf("bare /ask said %q, want usage", all)
@@ -182,7 +182,7 @@ func TestHelpExplainsRoomsAndTheMentionCaveat(t *testing.T) {
 	if err := b.SetAllowFrom([]string{"7"}); err != nil {
 		t.Fatal(err)
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/help@mybot"})
+	b.handleMsg(context.Background(), Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/help@mybot"})
 	all := strings.Join(append(fc.sentTexts(), fc.htmlTexts()...), "\n")
 	for _, want := range []string{"privacy", "/ask", "Separate conversations", "its own memory", "/new"} {
 		if !strings.Contains(strings.ToLower(all), strings.ToLower(want)) {
@@ -197,7 +197,7 @@ func TestHelpNamesTheAdminRequirementForDescriptions(t *testing.T) {
 	if err := b.SetAllowFrom([]string{"7"}); err != nil {
 		t.Fatal(err)
 	}
-	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/help@mybot"})
+	b.handleMsg(context.Background(), Msg{ChatID: "-100", ChatType: "supergroup", SenderID: 7, ID: "1", Text: "/help@mybot"})
 	all := strings.ToLower(strings.Join(append(fc.sentTexts(), fc.htmlTexts()...), "\n"))
 	if !strings.Contains(all, "admin") || !strings.Contains(all, "description") {
 		t.Fatalf("help must explain that a description needs admin rights:\n%s", all)

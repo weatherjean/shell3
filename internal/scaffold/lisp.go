@@ -174,7 +174,7 @@ A wrkfile is inert data with exactly one root (task "name" ...) form: no wrk wra
 
 Use the smallest dependency graph that expresses the work, explicit access, one writer per shared area, bounded loops, meaningful deterministic acceptance checks, and waits only for real external events. Keep decisions in agent turns and acceptance in checks; a worker's success claim alone is not proof.
 
-Run shell3 wrk check and shell3 wrk compile with absolute config paths before run. Inspect generated Bash when risk warrants it. Run with explicit config, state, and notification paths, then report the durable run id. Use beat, status, signal, and cancel against that exact state and id. Put task-specific wrkfiles in the task project, not beside the portable kit.
+Run shell3 wrk check before run. shell3 wrk compile emits a launcher pinned to the config and workflow sources at their absolute paths; regenerate it after edits. Review the workflow's commands and checks before execution. Run with explicit config, state, and notification paths, then report the durable run id. Use beat, status, signal, and cancel against that exact state and id. Put task-specific wrkfiles in the task project, not beside the portable kit.
 """))
 
   (skill wrk-scheduling

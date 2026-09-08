@@ -34,7 +34,7 @@ func mkSessionIndex(t *testing.T) *SessionIndex {
 
 func newBot(t *testing.T, fc *fakeClient, rt *shell3.Runtime) *Bot {
 	t.Helper()
-	b := NewBot(fc, rt, 42, mkSessionIndex(t))
+	b := NewBot(fc, rt, "42", mkSessionIndex(t))
 	b.debounce = time.Millisecond
 	return b
 }

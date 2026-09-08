@@ -36,8 +36,8 @@ func Open(ctx context.Context, configPath, workDir string) (*shell3.Runtime, err
 
 // OpenTelegram builds the same orchestrator runtime with reminders for the
 // host-control and Telegram file-delivery tools installed by the adapter.
-func OpenTelegram(ctx context.Context, configPath, workDir string) (*shell3.Runtime, error) {
-	return openWithClientMode(ctx, configPath, workDir, true, defaultClient)
+func OpenTelegram(ctx context.Context, configPath, workDir string, cfg *lispconfig.Config) (*shell3.Runtime, error) {
+	return openConfig(ctx, configPath, workDir, cfg, true, defaultClient)
 }
 
 // Reload validates and resolves a complete kit generation before atomically
@@ -97,6 +97,11 @@ func openWithClientMode(ctx context.Context, configPath, workDir string, telegra
 	if err != nil {
 		return nil, err
 	}
+	return openConfig(ctx, configPath, workDir, cfg, telegram, makeClient)
+}
+
+func openConfig(ctx context.Context, configPath, workDir string, cfg *lispconfig.Config, telegram bool, makeClient clientFactory) (*shell3.Runtime, error) {
+	var err error
 	if _, err := scheduler.Resolve(configPath, cfg); err != nil {
 		return nil, err
 	}

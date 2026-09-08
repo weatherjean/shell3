@@ -10,35 +10,25 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// newTestRuntime builds a Runtime around fakellm-backed configs, bypassing
-// runtime assembly the same way newTestSession does for single sessions. It opens a
-// real runs.Store in a temp dir so sessions can persist messages, and
-// initialises rt.jobs for background-job tests.
+// newTestRuntime uses production lifecycle wiring and owns its store.
 func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
 	store, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("newTestRuntime: runs.Open: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	rt := &Runtime{
-		sessionConfig: func(o SessionOpts) (chat.Config, error) {
-			cfg := mk()
-			cfg.Headless = o.Headless
-			if cfg.Store == nil {
-				cfg.Store = store
-			}
-			return cfg, nil
-		},
-		jobCompletions: make(chan struct{}, defaultMaxConcurrent),
-		workDir:        t.TempDir(),
-		store:          store,
-		ctx:            ctx,
-		cancel:         cancel,
-		cleanup:        func() {},
-		sessions:       map[string]*Session{},
+	rt, err := NewConfiguredRuntime(context.Background(), t.TempDir(), store, 0, func() { _ = store.Close() }, func(o SessionOpts) (chat.Config, error) {
+		cfg := mk()
+		cfg.Headless = o.Headless
+		if cfg.Store == nil {
+			cfg.Store = store
+		}
+		return cfg, nil
+	})
+	if err != nil {
+		_ = store.Close()
+		t.Fatal(err)
 	}
-	rt.jobs = newJobManager(rt, 0)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

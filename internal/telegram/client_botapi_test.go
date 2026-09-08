@@ -40,7 +40,7 @@ func TestBotAPIClientSendHTMLReplyOnWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &BotAPIClient{b: b}
-	id, err := c.SendHTMLReply(context.Background(), 42, "<b>hello</b>", "7", SendOpt{Silent: true})
+	id, err := c.SendHTMLReply(context.Background(), "42", "<b>hello</b>", "7", SendOpt{Silent: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestNormalizeMessage_CaptionIsTheText(t *testing.T) {
 	if got.Text != "translate this into English" {
 		t.Fatalf("Text = %q, want the caption", got.Text)
 	}
-	if got.ChatID != 42 || got.ID != "7" {
+	if got.ChatID != "42" || got.ID != "7" {
 		t.Fatalf("unexpected envelope: %+v", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/weatherjean/shell3/internal/shell3"
 )
@@ -62,7 +63,7 @@ func (b *Bot) controlToolHandler(ctx context.Context, argsJSON string) (string, 
 		Action string `json:"action"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "error: invalid arguments: " + err.Error(), nil
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	b.mu.Lock()
@@ -80,10 +81,10 @@ func (b *Bot) controlToolHandler(ctx context.Context, argsJSON string) (string, 
 	case "restart":
 		run = control.PrepareRestart
 	default:
-		return "error: action must be status, validate, reload, or restart", nil
+		return "", fmt.Errorf("action must be status, validate, reload, or restart")
 	}
 	if run == nil {
-		return "error: shell3 host control is unavailable", nil
+		return "", fmt.Errorf("shell3 host control is unavailable")
 	}
 	result, err := run(ctx)
 	if err != nil {

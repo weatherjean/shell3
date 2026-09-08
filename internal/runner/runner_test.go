@@ -4,6 +4,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,5 +119,27 @@ func TestExecutorReportsFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "exited with code 7") || !strings.Contains(err.Error(), "broken") {
 		t.Fatalf("result = %+v, error = %v", result, err)
+	}
+}
+
+func TestExecutorConfiguredSuccessExit(t *testing.T) {
+	for _, code := range []int{0, 7, 8} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			cfg, err := lispconfig.Parse("test.lisp", []byte(fmt.Sprintf(`(shell3 (version 1)
+  (runner fake (command "/bin/sh" "-c" "printf done; exit %d") (result stdout) (success (exit 7)))
+  (agent a (using fake)))`, code)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			result, err := (Executor{Config: cfg}).Run(t.Context(), Request{Agent: "a", WorkDir: dir, RunDir: filepath.Join(dir, "run")})
+			if code == 7 {
+				if err != nil || result.Text != "done" {
+					t.Fatalf("result=%+v err=%v", result, err)
+				}
+			} else if err == nil {
+				t.Fatal("unexpected exit succeeded")
+			}
+		})
 	}
 }

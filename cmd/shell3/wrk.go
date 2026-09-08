@@ -34,6 +34,7 @@ func newWrkCommand() *cobra.Command {
 
 func newWrkRunCommand() *cobra.Command {
 	var configPath, stateRoot, runID, shell3Bin, notifyTo, notifyState string
+	var configHash, definitionHash string
 	c := &cobra.Command{
 		Use:   "run <file.wrk.lisp> [request]",
 		Short: "Start and drive a durable workflow until terminal or waiting",
@@ -60,6 +61,7 @@ func newWrkRunCommand() *cobra.Command {
 			runDir, err := wrk.Start(configPath, args[0], wrk.StartOptions{
 				StateRoot: stateRoot, RunID: runID, Shell3Bin: shell3Bin, Request: request,
 				NotifyTo: notifyTo, NotifyState: notifyState,
+				ConfigHash: configHash, DefinitionHash: definitionHash,
 			})
 			if err != nil {
 				return err
@@ -81,6 +83,8 @@ func newWrkRunCommand() *cobra.Command {
 					return nil
 				case "failed":
 					return fmt.Errorf("wrk: workflow %s/%s failed", beat.Task, beat.RunID)
+				case "cancelled":
+					return fmt.Errorf("wrk: workflow %s/%s cancelled", beat.Task, beat.RunID)
 				case "waiting":
 					return nil
 				}
@@ -90,7 +94,9 @@ func newWrkRunCommand() *cobra.Command {
 	c.Flags().StringVarP(&configPath, "config", "c", "shell3.lisp", "Path to shell3.lisp")
 	c.Flags().StringVar(&stateRoot, "state", "", "Override workflow state root")
 	c.Flags().StringVar(&runID, "run-id", "", "Use an explicit run identifier")
-	c.Flags().StringVar(&shell3Bin, "shell3-bin", "", "Override shell3 executable used by compiled Bash")
+	c.Flags().StringVar(&shell3Bin, "shell3-bin", "", "Override shell3 executable used to dispatch runners")
+	c.Flags().StringVar(&configHash, "config-sha256", "", "Require this configuration digest")
+	c.Flags().StringVar(&definitionHash, "workflow-sha256", "", "Require this workflow digest")
 	c.Flags().StringVar(&notifyTo, "notify-to", "", "Notify this destination when the workflow finishes")
 	c.Flags().StringVar(&notifyState, "notify-state", "", "State root used for the completion notification")
 	return c

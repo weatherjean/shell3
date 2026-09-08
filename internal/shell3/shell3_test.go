@@ -73,7 +73,11 @@ func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Sessi
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = t.TempDir()
 	}
-	return newSession(cfg, SessionOpts{})
+	s, err := newSession(cfg, SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func TestSession_ID_NoStoreReportsEmpty(t *testing.T) {

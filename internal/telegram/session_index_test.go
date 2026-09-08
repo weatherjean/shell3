@@ -116,7 +116,7 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 	t.Cleanup(func() { _ = rt.Close() })
 
 	idx := NewSessionIndex(func() *runs.Store { return st }, "telegram")
-	b := NewBot(newFakeClient(), rt, 42, idx)
+	b := NewBot(newFakeClient(), rt, "42", idx)
 	b.debounce = time.Millisecond
 	return b, st
 }
@@ -214,7 +214,7 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 
 	idx := NewSessionIndex(func() *runs.Store { return st }, "telegram")
 	fc := newFakeClient()
-	b := NewBot(fc, rt, 42, idx)
+	b := NewBot(fc, rt, "42", idx)
 	b.debounce = time.Millisecond
 
 	big := strings.Repeat("x", 2000)
@@ -223,7 +223,7 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 	for i := 0; i < builderTurns+1; i++ {
 		id := strconv.Itoa(i + 1)
 		want := i + 1
-		b.handleMsg(ctx, Msg{ChatID: 42, SenderID: 42, ID: id, Text: big})
+		b.handleMsg(ctx, Msg{ChatID: "42", SenderID: 42, ID: id, Text: big})
 		waitFor(t, func() bool { return len(fc.sentReplies()) >= want })
 		if i == 0 {
 			c := tconv(b)

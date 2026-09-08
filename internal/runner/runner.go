@@ -154,7 +154,9 @@ func (e Executor) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	_ = stdout.Sync()
 	_ = stderr.Sync()
-	if runErr != nil || exitCode != configured.SuccessExit {
+	var exitErr *exec.ExitError
+	unexpectedErr := runErr != nil && !errors.As(runErr, &exitErr)
+	if unexpectedErr || runCtx.Err() != nil || exitCode != configured.SuccessExit {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return result, fmt.Errorf("runner: agent %q timed out after %s", req.Agent, timeout)
 		}
@@ -214,21 +216,7 @@ func runnerEnvironment(cfg *lispconfig.Config) []string {
 }
 
 func taskEnvironment(slots map[string]string) []string {
-	names := map[string]string{
-		"task-artifacts": "TASK_ARTIFACTS",
-		"task-attempt":   "TASK_ATTEMPT",
-		"task-id":        "TASK_ID",
-		"task-root":      "TASK_ROOT",
-		"task-run":       "TASK_RUN",
-	}
-	out := make([]string, 0, len(names)+1)
-	out = append(out, "SHELL3_WRK_WORKER=1")
-	for slot, env := range names {
-		if value, ok := slots[slot]; ok {
-			out = append(out, env+"="+value)
-		}
-	}
-	return out
+	return append(lispconfig.TaskEnvironment(slots), "SHELL3_WRK_WORKER=1")
 }
 
 func readLimited(path string, limit int64) (string, error) {

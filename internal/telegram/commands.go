@@ -127,13 +127,14 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 		c.sendReply(ctx, "⚠️ a turn is running — /stop it first, then /new")
 		return
 	}
-	c.mu.Unlock()
 	// Clear the marker before detaching so a restart cannot resurrect the
 	// conversation being replaced.
-	if err := c.setCurrentSession(""); err != nil {
+	if err := c.index.SetCurrent(""); err != nil {
+		c.mu.Unlock()
 		c.b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
+		c.sendReply(ctx, "⚠️ could not persist the new conversation; try /new again")
+		return
 	}
-	c.mu.Lock()
 	old := c.main
 	c.main = nil
 	c.mainAnchor = ""

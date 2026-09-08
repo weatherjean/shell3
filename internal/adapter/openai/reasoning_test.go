@@ -14,7 +14,7 @@ func replayCorpus(t *testing.T, name string) (visible, reasoning string) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "minimax", name+".jsonl"))
 	if err != nil {
-		t.Skipf("no corpus %s: %v", name, err)
+		t.Fatalf("missing corpus %s: %v", name, err)
 	}
 	var vis, rea strings.Builder
 	var part tagPartitioner

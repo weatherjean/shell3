@@ -43,7 +43,7 @@ func TestSaveAttachments_WritesFiles(t *testing.T) {
 	}
 }
 
-func TestAttachmentNoteNamesNoTool(t *testing.T) {
+func TestAttachmentNoteNamesBashAndSavedPaths(t *testing.T) {
 	note := attachmentNote([]savedFile{
 		{Name: "photo.jpg", MIME: "image/jpeg", Size: 84 * 1024, Path: "/m/tg-1.jpg"},
 	})
@@ -73,7 +73,7 @@ func TestMediaMessage_AttachmentNoteReachesTurnPrompt(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	m := Msg{
-		ChatID: 42, SenderID: 42, ID: "1",
+		ChatID: "42", SenderID: 42, ID: "1",
 		Media: []Media{{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"}},
 	}
 	b.handleMsg(context.Background(), m)

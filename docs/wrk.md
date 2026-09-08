@@ -109,8 +109,10 @@ shell3 wrk compile --config shell3.lisp change.wrk.lisp
 shell3 wrk run --config shell3.lisp change.wrk.lisp 'request'
 ```
 
-`compile` emits inspectable Bash. `run` creates a durable run, then advances it
-until it completes, fails, or waits. Foreground runs stream lifecycle and
+`compile` emits a Bash launcher that pins the config and workflow source hashes
+and calls `shell3 wrk run`. Keep those source files at their original paths;
+regenerate the launcher after edits. `run` creates a durable run, then advances it
+until it completes, fails, is cancelled, or waits. Foreground runs stream lifecycle and
 runner output while retaining the same data in the run directory.
 
 Each run snapshots the config and wrkfile sources, their hashes, the task root,

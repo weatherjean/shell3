@@ -40,7 +40,10 @@ func TestTelegramToolRegisteredAndSends(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","caption":"here"}`)
+	out, err := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","caption":"here"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "sent report.txt") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -78,7 +81,10 @@ func TestSendMediaTool_KindOmittedSendsDocument(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt"}`)
+	out, err := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "sent report.txt") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -112,7 +118,14 @@ func TestSendMediaToolKinds(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := fmt.Sprintf(`{"path":%q,"kind":%q}`, tc.file, tc.kind)
-			out, _ := b.sendMediaHandler(context.Background(), sess, args)
+			out, err := b.sendMediaHandler(context.Background(), sess, args)
+			wantErr := strings.HasPrefix(tc.want, "error:")
+			if (err != nil) != wantErr {
+				t.Fatalf("error = %v, want failure %t", err, wantErr)
+			}
+			if err != nil {
+				out = "error: " + err.Error()
+			}
 			if !strings.Contains(out, tc.want) {
 				t.Fatalf("result = %q, want it to contain %q", out, tc.want)
 			}
@@ -137,10 +150,10 @@ func TestSendMediaTool_KindUnknownReturnsEnumError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","kind":"banana"}`)
-	want := "error: kind must be photo, voice, audio, video, or document"
-	if out != want {
-		t.Fatalf("got %q, want %q", out, want)
+	_, err := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","kind":"banana"}`)
+	want := "kind must be photo, voice, audio, video, or document"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
 	}
 }
 
@@ -179,7 +192,7 @@ func TestValidateKind(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || err.Error() != c.wantErr {
+			if err == nil || err.Error() != strings.TrimPrefix(c.wantErr, "error: ") {
 				t.Fatalf("got %v, want %q", err, c.wantErr)
 			}
 		})
@@ -197,9 +210,9 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("SECRET=x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"`+name+`"}`)
-		if !strings.Contains(out, "refusing") {
-			t.Fatalf("expected refusal for %s, got %q", name, out)
+		_, err := b.sendMediaHandler(context.Background(), sess, `{"path":"`+name+`"}`)
+		if err == nil || !strings.Contains(err.Error(), "refusing") {
+			t.Fatalf("expected refusal for %s, got %v", name, err)
 		}
 		if _, ok := fc.lastDoc(); ok {
 			t.Fatalf("%s must not be sent", name)

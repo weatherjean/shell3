@@ -8,7 +8,7 @@ import "context"
 // are opaque strings owned by the transport: the Telegram client stringifies
 // the API's int message_ids, the console client renders its own counter.
 type Msg struct {
-	ChatID int64
+	ChatID string
 	// SenderID is who sent this, 0 when the transport cannot tell (a channel
 	// post has no author). Authorization is decided on it because Telegram
 	// sets it and the sender cannot. In a DM it equals ChatID; in a group it
@@ -26,7 +26,7 @@ type Msg struct {
 	// MigratedTo is the new chat id when the group became a supergroup
 	// (migrate_to_chat_id). Every id-keyed thing — the conversation, its
 	// current-session marker — must follow or it is stranded under a dead id.
-	MigratedTo int64
+	MigratedTo string
 	// ChatType is "private", "group", "supergroup" or "channel". Anything but
 	// private holds other people, so a message must be addressed to the bot
 	// to count (trigger.go).
@@ -78,38 +78,38 @@ type tgClient interface {
 	// Updates delivers normalized inbound messages until ctx is cancelled.
 	Updates(ctx context.Context) <-chan Msg
 	// Send posts plain text (no parse mode); returns the sent message id.
-	Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (msgID string, err error)
+	Send(ctx context.Context, chatID string, text string, opts ...SendOpt) (msgID string, err error)
 	// SendHTML posts a valid Telegram HTML subset; callers fall back to Send
 	// with plain text on any API error.
-	SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (msgID string, err error)
+	SendHTML(ctx context.Context, chatID string, html string, opts ...SendOpt) (msgID string, err error)
 	// SendReply threads plain text onto replyTo, falling back to a plain Send
 	// if that message is gone — a vanished anchor must not fail a turn.
-	SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (msgID string, err error)
+	SendReply(ctx context.Context, chatID string, text string, replyTo string, opts ...SendOpt) (msgID string, err error)
 	// SendHTMLReply is SendReply with parse_mode=HTML; callers fall back to
 	// SendReply with plain text on an HTML rejection.
-	SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (msgID string, err error)
+	SendHTMLReply(ctx context.Context, chatID string, html string, replyTo string, opts ...SendOpt) (msgID string, err error)
 	// Typing shows the "typing…" chat action.
-	Typing(ctx context.Context, chatID int64) error
+	Typing(ctx context.Context, chatID string) error
 
 	// Username is the bot's own @name without the "@", for @mention matching.
 	Username(ctx context.Context) (string, error)
 
 	// ChatInfo is a chat's title and description, the room brief's raw
 	// material. A private chat has no description.
-	ChatInfo(ctx context.Context, chatID int64) (title, description string, err error)
+	ChatInfo(ctx context.Context, chatID string) (title, description string, err error)
 	// SendDocument uploads a file, returning its id so an anchor can advance.
-	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (msgID string, err error)
+	SendDocument(ctx context.Context, chatID string, filename string, data []byte, caption string, opts ...SendOpt) (msgID string, err error)
 	// SendPhoto uploads an image.
-	SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	SendPhoto(ctx context.Context, chatID string, filename string, data []byte, caption string) error
 	// SendVoice uploads an ogg/opus voice note.
-	SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error
+	SendVoice(ctx context.Context, chatID string, data []byte, caption string) error
 	// SendAudio uploads a music/audio file.
-	SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	SendAudio(ctx context.Context, chatID string, filename string, data []byte, caption string) error
 	// SendVideo uploads a video file.
-	SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	SendVideo(ctx context.Context, chatID string, filename string, data []byte, caption string) error
 	// DeleteMessage removes a sent message (the progress bubble's cleanup).
 	// Best-effort — an already-deleted or too-old message is not actionable.
-	DeleteMessage(ctx context.Context, chatID int64, msgID string) error
+	DeleteMessage(ctx context.Context, chatID string, msgID string) error
 	// EditPlain replaces a message's text (the progress bubble's own edits).
-	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error
+	EditPlain(ctx context.Context, chatID string, msgID string, text string) error
 }

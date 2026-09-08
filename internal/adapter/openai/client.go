@@ -82,7 +82,6 @@ type Client struct {
 	model  string
 	tap    *bodyTap
 	params llm.RequestParams
-	extra  map[string]any
 }
 
 // NewClient creates a Client targeting baseURL with the given apiKey and model.
@@ -111,7 +110,6 @@ const (
 )
 
 func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
-func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
 
 func (c *Client) LastTraffic() (req, res []byte) {
 	if c.tap == nil {
@@ -150,15 +148,10 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		params.MaxCompletionTokens = openai.Int(int64(c.params.MaxTokens))
 	}
 
-	extraOpts := make([]option.RequestOption, 0, len(c.extra)+1)
-	for k, v := range c.extra {
-		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
-	}
 	// Surface the SDK's otherwise-invisible retries to the caller. The SDK only
 	// retries getting the initial response, so this fires for pre-stream failures
 	// (connection/5xx/429), never mid-stream after tokens emit.
-	extraOpts = append(extraOpts, option.WithMiddleware(retryObserver(onEvent)))
-	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
+	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, option.WithMiddleware(retryObserver(onEvent)))
 	defer func() { _ = stream.Close() }()
 
 	// emitParts forwards a partitioner's split (one delta, or the final flush):
@@ -264,7 +257,7 @@ func wrapStreamErr(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+
 			"Common causes: out of credits/quota, a rate limit, or an upstream proxy/timeout. "+
-			"Check your provider balance and any ~/.shell3/proxy-*.log: %w", err)
+			"Check your provider balance and the project application log: %w", err)
 	}
 	wrapped := fmt.Errorf("llm: stream: %w", err)
 	var oe *openai.Error

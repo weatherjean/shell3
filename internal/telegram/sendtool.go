@@ -87,15 +87,15 @@ func validateKind(kind, ext string, size int64) error {
 		switch ext {
 		case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		default:
-			return fmt.Errorf("error: kind=photo requires an image file (jpg, jpeg, png, gif, webp)")
+			return fmt.Errorf("kind=photo requires an image file (jpg, jpeg, png, gif, webp)")
 		}
 		if size > maxPhotoBytes {
-			return fmt.Errorf("error: kind=photo requires an image file under 10 MB")
+			return fmt.Errorf("kind=photo requires an image file under 10 MB")
 		}
 		return nil
 	case "voice":
 		if ext != ".ogg" && ext != ".opus" {
-			return fmt.Errorf("error: kind=voice requires an .ogg/.opus file — use kind=audio for mp3")
+			return fmt.Errorf("kind=voice requires an .ogg/.opus file — use kind=audio for mp3")
 		}
 		return nil
 	case "audio":
@@ -103,22 +103,21 @@ func validateKind(kind, ext string, size int64) error {
 		case ".mp3", ".m4a", ".ogg", ".opus", ".wav":
 			return nil
 		default:
-			return fmt.Errorf("error: kind=audio requires an audio file (mp3, m4a, ogg, opus, wav)")
+			return fmt.Errorf("kind=audio requires an audio file (mp3, m4a, ogg, opus, wav)")
 		}
 	case "video":
 		switch ext {
 		case ".mp4", ".webm", ".mov":
 			return nil
 		default:
-			return fmt.Errorf("error: kind=video requires an .mp4/.webm/.mov file")
+			return fmt.Errorf("kind=video requires an .mp4/.webm/.mov file")
 		}
 	default:
-		return fmt.Errorf("error: kind must be photo, voice, audio, video, or document")
+		return fmt.Errorf("kind must be photo, voice, audio, video, or document")
 	}
 }
 
-// sendMediaHandler implements the telegram tool. Failures are returned as
-// "error: …" tool-result strings (not Go errors), matching the engine's tools.
+// sendMediaHandler implements the telegram file-send tool.
 func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJSON string) (string, error) {
 	c := b.roomOrHome(sess.ID())
 	var args struct {
@@ -127,11 +126,11 @@ func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJS
 		Kind    string `json:"kind"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "error: invalid arguments: " + err.Error(), nil
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	path := strings.TrimSpace(args.Path)
 	if path == "" {
-		return "error: path is required", nil
+		return "", fmt.Errorf("path is required")
 	}
 	base := filepath.Base(path)
 	// safeOpen carries the whole security argument (symlink laundering,
@@ -139,24 +138,24 @@ func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJS
 	// its doc before changing anything here.
 	in, info, err := safeOpen(path, b.workDir, b.configDir)
 	if err != nil {
-		return "error: " + err.Error(), nil
+		return "", fmt.Errorf("%w", err)
 	}
 	defer in.Close()
 	if info.Size() > maxSendBytes {
-		return fmt.Sprintf("error: file too large (%d MB, max 50 MB)", info.Size()>>20), nil
+		return "", fmt.Errorf("file too large (%d MB, max 50 MB)", info.Size()>>20)
 	}
 	kind := strings.TrimSpace(args.Kind)
 	if kind == "" {
 		kind = "document"
 	}
 	if err := validateKind(kind, filepath.Ext(base), info.Size()); err != nil {
-		return err.Error(), nil
+		return "", err
 	}
 	// Bounded again at read time: the Stat above is an optimization, not the
 	// defense — the file can grow, and a character device reports size 0.
 	data, err := readLimited(ctx, in, maxSendBytes)
 	if err != nil {
-		return "error: cannot read file: " + err.Error(), nil
+		return "", fmt.Errorf("cannot read file: %w", err)
 	}
 	switch kind {
 	case "photo":
@@ -172,7 +171,7 @@ func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJS
 		_, err = b.client.SendDocument(ctx, c.chatIDValue(), base, data, args.Caption)
 	}
 	if err != nil {
-		return "error: failed to send: " + err.Error(), nil
+		return "", fmt.Errorf("failed to send: %w", err)
 	}
 	return "sent " + base + " to the user", nil
 }

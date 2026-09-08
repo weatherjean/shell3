@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 fail=0
-have() { command -v "$1" >/dev/null 2>&1 || { echo "· $1 not installed — go install $2@latest"; return 1; }; }
+have() { command -v "$1" >/dev/null 2>&1 || { echo "· $1 not installed — go install $2@latest"; fail=1; return 1; }; }
 
 echo "== make lint (the per-commit gate) =="
 make lint || fail=1
@@ -26,28 +26,28 @@ make lint || fail=1
 echo
 echo "== deadcode (unreachable functions) =="
 if have deadcode golang.org/x/tools/cmd/deadcode; then
-  out=$(deadcode -test ./... 2>&1)
-  if [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
+  if ! out=$(deadcode -test ./... 2>&1); then
+    printf '%s\n' "$out" "deadcode failed"; fail=1
+  elif [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
 
   echo "-- production entry points --"
   # These packages/files are explicit cross-package test fixtures. Everything
   # else must be reachable without tests; otherwise tests are propping up dead
   # production surface and `deadcode -test` alone would hide it.
-  out=$(deadcode ./... 2>&1 | sed \
+  if ! out=$(deadcode ./... 2>&1 | sed \
     -e '/internal\/llm\/fakellm\//d' \
-    -e '/internal\/shell3\/shell3test\//d' \
-    -e '/internal\/shell3\/testsupport.go:/d')
-  if [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
+    -e '/internal\/shell3\/shell3test\//d'); then
+    printf '%s\n' "$out" "deadcode failed"; fail=1
+  elif [ -n "$out" ]; then echo "$out"; fail=1; else echo "clean"; fi
 fi
 
 echo
 echo "== dupl (clones ≥ 100 tokens; report-only) =="
 if have dupl github.com/mibk/dupl; then
-  # Only the repo's own production code: skip tests, hidden dirs (a stale
-  # .claude/worktrees copy would report every file as its own clone), and
-  # anything untracked-vendored.
-  out=$(find . -path './.*' -prune -o -name '*_test.go' -prune -o -name '*.go' -print | xargs dupl -t 100 2>&1)
-  if [ -n "$out" ]; then echo "$out"; else echo "clean"; fi
+  # Scan tracked production code only.
+  if ! out=$(git ls-files -z -- '*.go' ':!:*_test.go' | xargs -0 dupl -t 100 2>&1); then
+    printf '%s\n' "$out" "dupl failed"; fail=1
+  elif [ -n "$out" ]; then echo "$out"; else echo "clean"; fi
 fi
 
 echo

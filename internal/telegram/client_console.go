@@ -15,7 +15,7 @@ import (
 // ConsoleChatID is the fixed chat id stamped on every inbound console message
 // (and expected by the Bot). Console mode has no real Telegram chat, so a single
 // constant stands in for one.
-const ConsoleChatID int64 = 1
+const ConsoleChatID = "1"
 
 // ConsoleClient drives the bot loop over stdin/stdout for development and tests.
 //
@@ -34,7 +34,7 @@ const ConsoleChatID int64 = 1
 // monotonic ID sequence, so scripts can reply to printed IDs.
 type ConsoleClient struct {
 	in     chan Msg
-	chatID int64
+	chatID string
 
 	mu  sync.Mutex // guards seq and serializes writes to out
 	out io.Writer
@@ -51,7 +51,7 @@ type flusher interface{ Flush() error }
 // NewConsoleClient builds a console transport reading messages from r and
 // printing outbound messages to out. chatID is stamped on every inbound message
 // (pass ConsoleChatID, which the Bot must be constructed with).
-func NewConsoleClient(r io.Reader, out io.Writer, chatID int64) *ConsoleClient {
+func NewConsoleClient(r io.Reader, out io.Writer, chatID string) *ConsoleClient {
 	return &ConsoleClient{
 		in:     make(chan Msg, 16),
 		chatID: chatID,
@@ -97,7 +97,8 @@ func (c *ConsoleClient) parseLine(line string) Msg {
 	// The console has no Telegram identity. Treat input as coming from the
 	// configured chat's owner: the operator is already at the keyboard, and
 	// pretending otherwise would only lock them out of their own console.
-	m := Msg{ChatID: c.chatID, SenderID: c.chatID, ID: strconv.Itoa(c.nextID()), ChatType: "private"}
+	senderID, _ := strconv.ParseInt(c.chatID, 10, 64)
+	m := Msg{ChatID: c.chatID, SenderID: senderID, ID: strconv.Itoa(c.nextID()), ChatType: "private"}
 	// A "#<chatid> " prefix routes the line into another room, so the whole
 	// multi-room loop — separate conversations, concurrent turns, per-room
 	// /new — is drivable with no credentials and no network. The room is
@@ -106,7 +107,7 @@ func (c *ConsoleClient) parseLine(line string) Msg {
 	// what a live group demands.
 	if rest, ok := strings.CutPrefix(line, "#"); ok {
 		idStr, text, found := strings.Cut(rest, " ")
-		if id, err := strconv.ParseInt(idStr, 10, 64); err == nil && found {
+		if id := idStr; found && id != "" {
 			m.ChatID = id
 			if id != c.chatID {
 				m.ChatType = "supergroup"
@@ -120,7 +121,7 @@ func (c *ConsoleClient) parseLine(line string) Msg {
 			// prefix
 			if strings.HasPrefix(line, "@") {
 				idStr, text, _ := strings.Cut(line[1:], " ")
-				if _, err := strconv.Atoi(idStr); err == nil {
+				if idStr != "" && idStr != "shell3console" {
 					m.ReplyToID, m.ReplyToBot = idStr, true
 					m.Text = strings.TrimSpace(text)
 				}
@@ -194,25 +195,25 @@ func silentTag(opts []SendOpt) string {
 	return ""
 }
 
-func (c *ConsoleClient) Send(_ context.Context, _ int64, text string, opts ...SendOpt) (string, error) {
+func (c *ConsoleClient) Send(_ context.Context, _ string, text string, opts ...SendOpt) (string, error) {
 	return c.emit("", silentTag(opts), text), nil
 }
 
-func (c *ConsoleClient) SendHTML(_ context.Context, _ int64, html string, opts ...SendOpt) (string, error) {
+func (c *ConsoleClient) SendHTML(_ context.Context, _ string, html string, opts ...SendOpt) (string, error) {
 	return c.emit("", silentTag(opts), html), nil
 }
 
-func (c *ConsoleClient) SendReply(_ context.Context, _ int64, text string, replyTo string, opts ...SendOpt) (string, error) {
+func (c *ConsoleClient) SendReply(_ context.Context, _ string, text string, replyTo string, opts ...SendOpt) (string, error) {
 	return c.emit(replyTo, silentTag(opts), text), nil
 }
 
-func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, replyTo string, opts ...SendOpt) (string, error) {
+func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ string, html string, replyTo string, opts ...SendOpt) (string, error) {
 	return c.emit(replyTo, silentTag(opts), html), nil
 }
 
-func (c *ConsoleClient) Typing(_ context.Context, _ int64) error { return nil }
+func (c *ConsoleClient) Typing(_ context.Context, _ string) error { return nil }
 
-func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string, opts ...SendOpt) (string, error) {
+func (c *ConsoleClient) SendDocument(_ context.Context, _ string, filename string, _ []byte, caption string, opts ...SendOpt) (string, error) {
 	tag := "document " + filename
 	if s := silentTag(opts); s != "" {
 		tag = s + " " + tag
@@ -220,32 +221,32 @@ func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string
 	return c.emit("", tag, caption), nil
 }
 
-func (c *ConsoleClient) SendPhoto(_ context.Context, _ int64, filename string, _ []byte, caption string) error {
+func (c *ConsoleClient) SendPhoto(_ context.Context, _ string, filename string, _ []byte, caption string) error {
 	c.mark("[media photo %s] %s", filename, caption)
 	return nil
 }
 
-func (c *ConsoleClient) SendVoice(_ context.Context, _ int64, _ []byte, caption string) error {
+func (c *ConsoleClient) SendVoice(_ context.Context, _ string, _ []byte, caption string) error {
 	c.mark("[media voice] %s", caption)
 	return nil
 }
 
-func (c *ConsoleClient) SendAudio(_ context.Context, _ int64, filename string, _ []byte, caption string) error {
+func (c *ConsoleClient) SendAudio(_ context.Context, _ string, filename string, _ []byte, caption string) error {
 	c.mark("[media audio %s] %s", filename, caption)
 	return nil
 }
 
-func (c *ConsoleClient) SendVideo(_ context.Context, _ int64, filename string, _ []byte, caption string) error {
+func (c *ConsoleClient) SendVideo(_ context.Context, _ string, filename string, _ []byte, caption string) error {
 	c.mark("[media video %s] %s", filename, caption)
 	return nil
 }
 
-func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {
+func (c *ConsoleClient) EditPlain(_ context.Context, _ string, msgID string, text string) error {
 	c.mark("[edit #%s] %s", msgID, text)
 	return nil
 }
 
-func (c *ConsoleClient) DeleteMessage(_ context.Context, _ int64, msgID string) error {
+func (c *ConsoleClient) DeleteMessage(_ context.Context, _ string, msgID string) error {
 	c.mark("[delete #%s]", msgID)
 	return nil
 }
@@ -256,6 +257,6 @@ func (c *ConsoleClient) Username(context.Context) (string, error) { return "shel
 
 // ChatInfo gives the console transport's rooms a stable title so a room brief
 // renders in --console exactly as it does live.
-func (c *ConsoleClient) ChatInfo(_ context.Context, chatID int64) (string, string, error) {
+func (c *ConsoleClient) ChatInfo(_ context.Context, chatID string) (string, string, error) {
 	return "console", "", nil
 }

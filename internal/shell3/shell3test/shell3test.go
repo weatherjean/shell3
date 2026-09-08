@@ -39,13 +39,14 @@ func NewRuntimeForTestClient(t *testing.T, client chat.LLMClient) *shell3.Runtim
 }
 
 // NewRuntimeForTestConfig builds a runtime from a caller-supplied config
-// factory. It keeps test-only construction out of the shell3 package API.
+// factory. It closes the runtime; the caller owns any store returned by factory.
 func NewRuntimeForTestConfig(t *testing.T, factory func(shell3.SessionOpts) (chat.Config, error)) *shell3.Runtime {
 	t.Helper()
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), t.TempDir(), nil, 0, func() {}, factory)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
 

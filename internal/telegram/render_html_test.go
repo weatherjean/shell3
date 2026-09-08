@@ -9,7 +9,7 @@ import (
 
 func TestSendReplyConvertsMarkdownToHTML(t *testing.T) {
 	f := newFakeClient()
-	b := &Bot{client: f, homeChat: 1, convs: map[int64]*conversation{}}
+	b := &Bot{client: f, homeChat: "1", convs: map[string]*conversation{}}
 
 	tconv(b).sendReply(context.Background(), "**hi** and `code`")
 
@@ -25,7 +25,7 @@ func TestSendReplyConvertsMarkdownToHTML(t *testing.T) {
 func TestSendReplyFallsBackToPlainOnHTMLError(t *testing.T) {
 	f := newFakeClient()
 	f.failHTML = true
-	b := &Bot{client: f, homeChat: 1, convs: map[int64]*conversation{}}
+	b := &Bot{client: f, homeChat: "1", convs: map[string]*conversation{}}
 
 	tconv(b).sendReply(context.Background(), "**hi**")
 

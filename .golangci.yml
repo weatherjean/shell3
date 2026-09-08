@@ -1,4 +1,4 @@
-# golangci-lint configuration (schema v2). Deeper than CI's gofmt + go vet:
+# golangci-lint configuration (schema v2), run locally and in CI:
 # catches unchecked errors, dead code, needless params, and common correctness
 # smells. Formatters that fight gofmt are deliberately left off, as is misspell
 # (the codebase uses British spelling by choice — not a correctness concern).
@@ -14,13 +14,6 @@ linters:
     - staticcheck  # the staticcheck suite
     - unparam      # unused function parameters
     - unused       # unused code
-
-  settings:
-    gocritic:
-      disabled-checks:
-        # `L` is the gopher-lua convention for *lua.LState; renaming it would
-        # fight the library idiom across every Lua binding.
-        - captLocal
 
   exclusions:
     generated: lax
