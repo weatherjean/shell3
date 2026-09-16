@@ -53,6 +53,34 @@ func TestProgressBubbleLifecycle(t *testing.T) {
 	}
 }
 
+func TestHostActionProgressNamesActionAndOutcome(t *testing.T) {
+	for _, action := range []string{"status", "validate", "reload", "restart", "poll", "cancel_poll"} {
+		if got := toolLine("shell3", `{"action":"`+action+`"}`); got == "⚙️ shell3" || got == "⚙️ Shell3 host action" {
+			t.Fatalf("unhelpful action line: %s", got)
+		}
+	}
+	for _, tc := range []struct {
+		out    string
+		failed bool
+		want   string
+	}{
+		{`{"action":"restart","ok":true,"restart":"queued_after_active_replies"}`, false, "restart queued"},
+		{`{"action":"restart","ok":true,"restart":"already_queued"}`, false, "already queued"},
+		{`{"action":"reload","ok":false,"reload":"rejected"}`, false, "❌"},
+		{"error", true, "❌"},
+		{`{"action":"reload","ok":true}`, false, "reloaded for future turns"},
+	} {
+		fc := newFakeClient()
+		b := newBot(t, fc, storeRuntime(t, "unused"))
+		p := &progressBubble{c: tconv(b)}
+		p.add(t.Context(), toolLine("shell3", `{"action":"restart"}`))
+		p.hostResult(t.Context(), tc.out, tc.failed)
+		if !strings.Contains(p.render(), tc.want) {
+			t.Fatalf("bubble=%s", p.render())
+		}
+	}
+}
+
 func TestProgressBubbleKeptOnError(t *testing.T) {
 	fc := newFakeClient()
 	b := newBot(t, fc, storeRuntime(t, "unused"))

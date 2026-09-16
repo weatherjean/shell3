@@ -115,10 +115,45 @@ regenerate the launcher after edits. `run` creates a durable run, then advances 
 until it completes, fails, is cancelled, or waits. Foreground runs stream lifecycle and
 runner output while retaining the same data in the run directory.
 
+From the attached agent, use `bash_bg` for `wrk run`, `wrk beat`, and
+`schedule run`, optionally with `poll_in: "2m"`. The short-lived `bash` tool
+marks its process environment as foreground; these execution commands reject
+that context before admission. Direct terminal execution remains supported.
+This inherited marker is an execution contract, not a security boundary.
+Closing a progress consumer such as `head` does not stop execution or truncate
+the durable logs. The driver still needs to remain alive.
+
 Each run snapshots the config and wrkfile sources, their hashes, the task root,
 request, and executable path. Later beats use the snapshots. A run lock
-serializes beats, and state files are replaced atomically. After interruption,
-a node left `running` returns to `pending` and may execute again.
+serializes beats, and state files are replaced atomically. Graceful driver
+cancellation records `interrupted`; the original deadline is retained. A later
+beat resets interrupted or abandoned running nodes to pending and may execute
+them again. Inspect prior attempts and side effects before recovery.
+
+`wrk status` checks the execution lock, rather than treating durable markers or
+artifacts as evidence of a live worker:
+
+| Status | Meaning |
+| --- | --- |
+| `running` | An execution owner holds the lock. This does not prove useful progress. |
+| `ready` | No execution owner; a beat can advance the run. |
+| `waiting` | No execution owner; waiting for an external event. |
+| `interrupted` | No execution owner; unfinished execution needs recovery or cancellation. |
+| `expired` | No execution owner and the deadline has elapsed; a beat records failure without launching work. |
+| `completed`, `failed`, `cancelled` | Persisted terminal outcome. |
+
+JSON includes `execution_active`, `persisted_status`, `observed_at`, `deadline`,
+`deadline_exceeded`, and `recovery_required`, plus exact attempt/log/result paths.
+Those paths may not exist yet. Inspection does not rewrite state or start work.
+An active owner past its deadline remains visibly active with an explicit
+deadline warning, so shutdown is not mistaken for completion.
+
+The external-runner helper watches a driver-lifetime pipe. If the driver dies,
+including by SIGKILL, the helper cancels and reaps its runner process group. It
+retains the execution lock through cleanup, preventing a new beat from starting
+the same work meanwhile. Liveness and output attribution are separate: shared
+artifact files can be written by other processes. Put reproductions in their own
+run or scratch directory; inspect the exact attempt logs for evidence.
 
 Useful controls:
 

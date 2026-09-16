@@ -174,7 +174,7 @@ func (e *Executor) drive(ctx context.Context, record runs.ScheduleRun) (runs.Sch
 			return e.finishTerminal(ctx, record, snapshot.Status, nil)
 		}
 		beat, beatErr := wrk.Beat(ctx, record.RunDir)
-		if beatErr != nil && errors.Is(beatErr, context.DeadlineExceeded) && ctx.Err() == nil {
+		if beatErr != nil && beat.Status != "failed" && errors.Is(beatErr, context.DeadlineExceeded) && ctx.Err() == nil {
 			// The invocation deadline cancelled its active process. A second
 			// beat observes the expired durable deadline and records failure.
 			beat, beatErr = wrk.Beat(context.Background(), record.RunDir)

@@ -65,3 +65,22 @@ func TestHostReminders_Environment(t *testing.T) {
 	}
 
 }
+
+func TestHostContextSurvivesReload(t *testing.T) {
+	rt := newHostRemindersRuntime(t, hostRemindersCfg())
+	s, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetHostContext(func() string { return "authoritative state" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.ReloadConfig(func(SessionOpts) (chat.Config, error) { return hostRemindersCfg()(), nil }); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.HostContext == nil || s.cfg.HostContext() != "authoritative state" {
+		t.Fatal("reload dropped host context")
+	}
+}

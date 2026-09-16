@@ -169,10 +169,14 @@ func (b *Bot) Run(ctx context.Context) {
 	// fresh subscription on demand, in which case repeated calls compete for
 	// the same upstream and silently lose messages.
 	updates := b.client.Updates(ctx)
+	polls := time.NewTicker(time.Second)
+	defer polls.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-polls.C:
+			b.startNextWorkAll(ctx, nil)
 		case m, ok := <-updates:
 			if !ok {
 				return

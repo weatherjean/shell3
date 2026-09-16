@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -29,8 +30,10 @@ type ToolConfig struct {
 	// Headless marks turns without an attached human.
 	Headless bool
 	// StartBashBg runs a command on the job runtime, returning its id. env is
-	// extra "K=V" entries (bash_bg passes nil). Nil disables background jobs.
+	// extra "K=V" entries (including the tool context). Nil disables background jobs.
 	StartBashBg func(command, workdir string, argv, env []string) (string, error)
+	// StartBashBgPolled is installed only by hosts that can start timed turns.
+	StartBashBgPolled func(command, workdir string, argv, env []string, pollIn time.Duration) (string, error)
 	// Log records genuine handler faults. Nil is safe via LogOrNoop.
 	Log applog.Logger
 }

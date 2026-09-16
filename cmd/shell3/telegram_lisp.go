@@ -37,6 +37,7 @@ func newTelegramCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			restartRequested := false
+			var feedback *hostFeedback
 			// Registered before every resource defer, so a requested re-exec is
 			// the final lifecycle step: replies, markers, schedules, sessions and
 			// logs all close first. Exec keeps restart independent of launchd or
@@ -47,9 +48,15 @@ func newTelegramCommand() *cobra.Command {
 				}
 				executable, err := os.Executable()
 				if err == nil {
-					err = syscall.Exec(executable, os.Args, os.Environ())
+					err = feedback.executing()
+				}
+				if err == nil {
+					err = syscall.Exec(executable, os.Args, append(os.Environ(), restartReceiptEnv+"="+feedback.instance))
 				}
 				if err != nil {
+					if feedback != nil {
+						_ = feedback.record("restart", "", err)
+					}
 					fmt.Fprintf(cmd.ErrOrStderr(), "shell3: deferred restart failed: %v\n", err)
 				}
 			}()
@@ -110,6 +117,8 @@ func newTelegramCommand() *cobra.Command {
 			bot.SetHostControl(telegram.HostControl{
 				Status: control.status, Validate: control.validate,
 				Reload: control.reload, PrepareRestart: control.prepareRestart,
+				Context: func() string { return feedback.context() },
+				Record:  func(action, output string, err error) error { return feedback.record(action, output, err) },
 			})
 			bot.SetReload(control.reloadCommand)
 			rt.SetSessionDecorator(func(sess *shell3.Session) {
@@ -153,6 +162,13 @@ func newTelegramCommand() *cobra.Command {
 					}
 				}()
 				fmt.Fprintf(cmd.OutOrStdout(), "shell3 telegram: remote control attached (home chat %d)\n", cfg.Telegram.HomeChat)
+			}
+			// Initialize receipts only after configuration, transports and owners
+			// are ready. A startup failure must not claim restart completion.
+			feedback, err = openHostFeedback(filepath.Join(mailbox.Root, "host-actions.json"), os.Getenv(restartReceiptEnv))
+			_ = os.Unsetenv(restartReceiptEnv)
+			if err != nil {
+				rt.Logger().Warn("host action receipts unavailable; continuing with in-memory feedback", "error", err)
 			}
 			go notifyTelegramInbox(ctx, bot, mailbox, mainHints, !console, 30*time.Second, rt.Logger())
 			botDone := make(chan struct{})

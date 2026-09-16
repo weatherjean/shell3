@@ -304,6 +304,42 @@ func (c *conversation) startNextWork(ctx context.Context) {
 	if c.startSteerCatchup(ctx) {
 		return
 	}
+	c.startJobPoll(ctx, time.Now())
+}
+
+// startJobPoll leaves due checks pending until a turn slot is free.
+// User messages, including an accepted debounce burst, have priority.
+func (c *conversation) startJobPoll(ctx context.Context, now time.Time) bool {
+	c.mu.Lock()
+	if ctx.Err() != nil || c.turnActive || c.main == nil || len(c.pendingMessages) > 0 || len(c.burst) > 0 || c.main.HasQueuedSteer() || c.b.RestartPending() {
+		c.mu.Unlock()
+		return false
+	}
+	turnCtx, cancel, ok := c.takeSlotLocked(ctx)
+	if !ok {
+		c.mu.Unlock()
+		return false
+	}
+	sess, anchor := c.main, c.mainAnchor
+	polls := sess.TakeDueJobPolls(now)
+	if len(polls) == 0 {
+		// Release while holding c.mu so a concurrent dispatcher cannot observe
+		// a phantom busy slot and strand an incoming message behind it.
+		c.cancelTurn = nil
+		c.turnActive = false
+		c.b.freeTurn()
+		c.mu.Unlock()
+		cancel()
+		return false
+	}
+	c.mu.Unlock()
+	go func() {
+		stopTyping := c.keepTyping(ctx)
+		reply, _ := c.drainTurnProgress(ctx, sess.Send(turnCtx, shell3.JobPollPrompt(polls)))
+		stopTyping()
+		c.finishPostedTurn(ctx, sess, anchor, reply, cancel)
+	}()
+	return true
 }
 
 // startSteerCatchup runs a posted turn over steering that landed after the

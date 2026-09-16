@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -78,10 +79,11 @@ func (b *bodyTap) snapshot() (req, res []byte) {
 
 // Client is an OpenAI-compatible streaming LLM client using the official SDK.
 type Client struct {
-	oc     openai.Client
-	model  string
-	tap    *bodyTap
-	params llm.RequestParams
+	oc          openai.Client
+	model       string
+	tap         *bodyTap
+	params      llm.RequestParams
+	idleTimeout time.Duration
 }
 
 // NewClient creates a Client targeting baseURL with the given apiKey and model.
@@ -96,10 +98,11 @@ func NewClient(baseURL, apiKey, model string) *Client {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
 	return &Client{
-		oc:     openai.NewClient(opts...),
-		model:  model,
-		tap:    tap,
-		params: llm.RequestParams{ReasoningEffort: defaultReasoningEffort, MaxTokens: defaultMaxTokens},
+		oc:          openai.NewClient(opts...),
+		model:       model,
+		tap:         tap,
+		params:      llm.RequestParams{ReasoningEffort: defaultReasoningEffort, MaxTokens: defaultMaxTokens},
+		idleTimeout: modelIdleTimeout,
 	}
 }
 
@@ -120,6 +123,12 @@ func (c *Client) LastTraffic() (req, res []byte) {
 
 // Stream sends msgs to the LLM and calls onEvent for each delta and completion.
 func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
+	timeout := c.idleTimeout
+	if timeout <= 0 {
+		timeout = modelIdleTimeout
+	}
+	ctx, progress, stop := watchIdle(ctx, timeout)
+	defer stop()
 	params := openai.ChatCompletionNewParams{
 		Model:    c.model,
 		Messages: toMessages(msgs),
@@ -175,6 +184,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		chunk := stream.Current()
 
 		if u := chunk.Usage; u.PromptTokens > 0 || u.CompletionTokens > 0 {
+			progress()
 			onEvent(llm.StreamEvent{Usage: &llm.Usage{
 				PromptTokens:     int(u.PromptTokens),
 				CompletionTokens: int(u.CompletionTokens),
@@ -196,6 +206,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		// it. The partitioner combines both signals (see pushDelta) and is the
 		// single place that decides what is answer and what is thought.
 		reasoning := deltaReasoning(delta)
+		if delta.Content != "" || reasoning != "" || len(delta.ToolCalls) > 0 || chunk.Choices[0].FinishReason != "" {
+			progress()
+		}
 		if reasoning != "" {
 			onEvent(llm.StreamEvent{ReasoningDelta: reasoning})
 		}
@@ -218,6 +231,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		}
 	}
 
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
 	if err := stream.Err(); err != nil {
 		return wrapStreamErr(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -52,6 +53,8 @@ type Session struct {
 	// closed is set by doClose so a late queued-input drain racing teardown is
 	// rejected rather than run against the ended store record.
 	closed bool
+	// jobPolling is a host capability, retained across config reloads.
+	jobPolling bool
 }
 
 // newSession wires a Session around a built chat.Config. Split out from Start
@@ -214,6 +217,9 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 		// No forwarding can happen once the turn returns, so clearing cur and
 		// busy and closing out here is race-free.
 		defer func() {
+			if turnCtx.Err() != nil {
+				s.ClearJobPolls()
+			}
 			s.mu.Lock()
 			if s.cur == out {
 				s.cur = nil
@@ -268,6 +274,7 @@ func (s *Session) reloadConfigLocked(cfg chat.Config) {
 	}
 	cfg.HostTool = s.cfg.HostTool
 	cfg.HostToolNames = s.cfg.HostToolNames
+	cfg.HostContext = s.cfg.HostContext
 	s.cfg = cfg
 	s.applyHostReminders()
 }
@@ -360,6 +367,11 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		parent := s
 		tc.StartBashBg = func(command, workdir string, argv, env []string) (string, error) {
 			return rt.jobs.startCommand(parent, command, workdir, argv, env)
+		}
+		if s.jobPolling {
+			tc.StartBashBgPolled = func(command, workdir string, argv, env []string, pollIn time.Duration) (string, error) {
+				return rt.jobs.startCommand(parent, command, workdir, argv, env, pollIn)
+			}
 		}
 	}
 	return tc

@@ -43,7 +43,7 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 		return "", fmt.Errorf("invalid bash arguments: %w", err)
 	}
 	argv := []string{"bash", "-c", command}
-	out, code := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
+	out, code := runBashCapture(ctx, argv, cfg.WorkDir, []string{"SHELL3_TOOL_CONTEXT=foreground"}, timeout)
 	if code != 0 {
 		return out, fmt.Errorf("command exited %d", code)
 	}

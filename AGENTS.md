@@ -12,6 +12,7 @@ code, tests, and public documentation aligned.
   `bash_bg`; a persistent attached host additionally exposes one bounded
   operational tool named `shell3`. File editing uses project commands through
   `bash` and lazily-loaded skill guidance.
+  The interactive console exposes `shell3` for job progress checks.
 - Multi-agent work belongs in checked `*.wrk.lisp` workflows that dispatch
   typed external runners. Workers are leaves and may not launch workflows.
 - Bare `shell3` is the primary local line-oriented interface. Telegram is an
@@ -59,13 +60,23 @@ Core invariants:
   direct completion-post path.
 - `/stop` cancels a turn; `/superstop` additionally kills managed background
   commands and suppresses their manufactured inbox notices.
+- Agent-requested `bash_bg` `poll_in` checks are one-shot. They start a normal
+  turn when due and idle, stay pending while busy, and survive command exit so
+  the agent can report the outcome. Stop, conversation reset, or host shutdown
+  cancels pending checks. Completion notices themselves never wake the model.
 - Workflow inbox claims use atomic rename and acknowledge only after successful
-  ledger recording. Main notices stay passive until the user asks the agent to
-  use the inbox skill, fully read them, and archive them. Datagram wakeups are
+  ledger recording. Main notices stay passive; the agent uses the inbox skill
+  when asked or when following up on the user's ongoing task, fully reads
+  relevant notices, and archives them after handling. Datagram wakeups are
   advisory; filesystem state is authoritative.
 - Wrk runs snapshot and hash config and workflow data. A beat advances one
   dependency wave; writers run alone, readers may share `parallel`, and
   cancellation reaches the active process group.
+- Workflow execution from the attached foreground tool fails before admission;
+  use `bash_bg`. Status checks the execution lock and distinguishes active,
+  interrupted, and expired work. External runner helpers retain that lock while
+  cancelling their worker group after driver loss. Artifact files alone never
+  prove liveness or output provenance.
 - Schedule forms name only wrkfiles, required artifact-relative outputs,
   timeouts, notification routes, overlap policy, cron expressions, and IANA
   timezones. SQLite records running/done/failed invocations and output paths;

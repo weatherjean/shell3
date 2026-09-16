@@ -2,6 +2,23 @@
 
 ## Runtime state
 
+The working bubble names host actions and shows their immediate outcomes.
+`shell3` action `restart` initially reports **queued**, not completed. The bot
+receives authoritative system context with recent action receipts and the
+current runtime instance on every model round, including after a restart.
+Receipts live in `.shell3_project/host-actions.json` (the latest 12 events).
+
+Internal restart preserves the PID and environment and does not rerun your
+service launcher. To pick up credential-injection or launcher changes, restart
+through the service manager. `/superstop` cancels work; it does not restart the
+service. A matching PID alone is not evidence that internal restart failed.
+
+If the model makes no progress for five minutes, shell3 cancels that provider
+request, reports an inactivity error, and releases the conversation's turn.
+This also covers requests that never begin responding. Active reasoning and
+output keep the request alive; keepalive traffic alone does not. Ask to continue
+after the error; shell3 does not automatically replay a timed-out response.
+
 For a selected workdir, shell3 stores project state under `.shell3_project/`:
 
 ```text
@@ -80,6 +97,15 @@ notice before removing the marker.
 The `main` inbox is passive. The console prints a pending count; Telegram sends
 a host-owned pending alert. Neither action starts a model turn or inserts the
 notice into a prompt.
+
+Agent-requested `bash_bg` progress checks are separate: `poll_in: "2m"` requests
+one future model turn. A busy conversation defers it. If the command finishes
+first, the requested check still runs when due to report its outcome.
+The agent may re-arm a running job with `shell3` action `poll`. These checks
+spend a model turn when due and do not survive host restart.
+`/stop` clears the conversation's pending checks; `/superstop` also kills managed
+commands. Completion notices still remain passive. The inbox skill permits
+reading relevant notices as part of the user's ongoing task.
 
 Inspect and archive notices explicitly:
 

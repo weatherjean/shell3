@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+func TestBashDeclaresForegroundContext(t *testing.T) {
+	t.Setenv("SHELL3_TOOL_CONTEXT", "background")
+	out, err := (BashHandler{}).Execute(t.Context(), "mode", json.RawMessage(`{"command":"printf %s \"$SHELL3_TOOL_CONTEXT\""}`), ToolConfig{})
+	if err != nil || out != "foreground" {
+		t.Fatalf("context=%q err=%v", out, err)
+	}
+}
+
 func TestBashHandler_Execute_echo(t *testing.T) {
 	h := BashHandler{}
 	args := json.RawMessage(`{"command":"echo hello"}`)

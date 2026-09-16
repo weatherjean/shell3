@@ -22,6 +22,9 @@ var version = "dev"
 // main wires the cobra command tree and executes it through fang, which owns
 // help, usage, error, and --version styling.
 func main() {
+	// A consumer such as head may close progress output early. Workflows still
+	// own their durable result and must finish or cancel through their context.
+	signal.Ignore(syscall.SIGPIPE)
 	root := newRootCommand()
 
 	// Print the brand header (the ๑ï snail): the full two-line banner when a

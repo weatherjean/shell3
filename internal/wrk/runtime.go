@@ -245,7 +245,7 @@ func BeatWithProgress(ctx context.Context, runDir string, progress io.Writer) (B
 	return beat(ctx, runDir, progress)
 }
 
-func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, error) {
+func beat(ctx context.Context, runDir string, progress io.Writer) (result BeatResult, resultErr error) {
 	lock, err := lockRun(runDir)
 	if err != nil {
 		return BeatResult{}, err
@@ -255,7 +255,7 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 	if err != nil {
 		return BeatResult{}, err
 	}
-	result := BeatResult{Task: manifest.Task, RunID: manifest.RunID}
+	result = BeatResult{Task: manifest.Task, RunID: manifest.RunID}
 	runStatus, err := readStatus(runDir)
 	if err != nil {
 		return result, err
@@ -264,12 +264,15 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 	case "completed", "failed", "cancelled":
 		result.Status = runStatus
 		return result, notifyTerminal(runDir, manifest, runStatus)
-	case "ready", "waiting":
+	case "ready", "waiting", "running", "interrupted":
 	default:
 		return result, fmt.Errorf("wrk: run has invalid status %q", runStatus)
 	}
 	if isCancelled(runDir) {
 		return finishCancelled(runDir, manifest, result)
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	deadline := manifest.Deadline
 	if deadline.IsZero() && def.Timeout > 0 {
@@ -291,6 +294,22 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 		beatParent, cancelDeadline = context.WithDeadline(ctx, deadline)
 	}
 	defer cancelDeadline()
+	// Mark ownership durably before doing work. If normal unwinding fails to
+	// publish a new state, leave a recoverable interruption, never a live claim.
+	if err := writeStatus(runDir, "running"); err != nil {
+		return result, err
+	}
+	defer func() {
+		state, err := readStatus(runDir)
+		if err != nil {
+			resultErr = errors.Join(resultErr, err)
+			return
+		}
+		if state == "running" {
+			result.Status = "interrupted"
+			resultErr = errors.Join(resultErr, writeStatus(runDir, result.Status))
+		}
+	}()
 	beatCtx, cancelBeat := context.WithCancel(beatParent)
 	watchDone := make(chan struct{})
 	defer close(watchDone)
@@ -303,11 +322,11 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 			return result, err
 		}
 		switch state {
-		case "pending", "running", "waiting", "passed", "failed":
+		case "pending", "running", "interrupted", "waiting", "passed", "failed":
 		default:
 			return result, fmt.Errorf("wrk: node %s has invalid status %q", node.Name, state)
 		}
-		if state == "running" {
+		if state == "running" || state == "interrupted" {
 			state = "pending"
 			if err := writeStatus(filepath.Join(runDir, "nodes", node.Name), state); err != nil {
 				return result, err
@@ -399,7 +418,7 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 		go func() {
 			defer wg.Done()
 			progressf(progress, "[wrk] %s: starting\n", node.Name)
-			state, runErr := executeNode(beatCtx, runDir, manifest, node, progress)
+			state, runErr := executeNode(beatCtx, runDir, manifest, node, progress, lock)
 			progressf(progress, "[wrk] %s: %s\n", node.Name, state)
 			mu.Lock()
 			states[node.Name] = state
@@ -413,6 +432,22 @@ func beat(ctx context.Context, runDir string, progress io.Writer) (BeatResult, e
 	wg.Wait()
 	if isCancelled(runDir) {
 		return finishCancelled(runDir, manifest, result)
+	}
+	if err := beatParent.Err(); err != nil {
+		result.Status = "interrupted"
+		// A workflow's own deadline is terminal. Host/foreground cancellation
+		// is recoverable, retaining the original deadline for a later beat.
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			result.Status = "failed"
+			err = fmt.Errorf("wrk: task timeout exceeded: %w", err)
+		}
+		if writeErr := writeStatus(runDir, result.Status); writeErr != nil {
+			return result, errors.Join(err, writeErr)
+		}
+		if result.Status == "failed" {
+			return result, errors.Join(err, notifyTerminal(runDir, manifest, result.Status))
+		}
+		return result, err
 	}
 	sort.Strings(result.Ran)
 	result.Status = terminalStatus(states)
@@ -468,7 +503,7 @@ func validateRequiredOutput(runDir string, manifest Manifest) error {
 	return nil
 }
 
-func executeNode(ctx context.Context, runDir string, manifest Manifest, node Node, progress io.Writer) (string, error) {
+func executeNode(ctx context.Context, runDir string, manifest Manifest, node Node, progress io.Writer, lease *os.File) (string, error) {
 	nodeDir := filepath.Join(runDir, "nodes", node.Name)
 	if err := writeStatus(nodeDir, "running"); err != nil {
 		return "failed", err
@@ -490,10 +525,18 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 		}
 		args := []string{"wrk", "_agent", "--config", filepath.Join(runDir, "shell3.lisp"), "--agent", node.Using,
 			"--workdir", manifest.WorkDir, "--run-dir", attemptDir,
+			"--parent-fd", "3", "--lease-fd", "4",
 			"--slot", "task-id=" + manifest.Task, "--slot", "task-run=" + manifest.RunID,
 			"--slot", "task-root=" + manifest.WorkDir, "--slot", "task-artifacts=" + filepath.Join(runDir, "artifacts"),
 			"--slot", fmt.Sprintf("task-attempt=%d", attempt)}
 		cmd := exec.CommandContext(nodeCtx, manifest.Shell3Bin, args...)
+		parentRead, parentWrite, err := os.Pipe()
+		if err != nil {
+			return transitionNode(nodeDir, "failed", err)
+		}
+		defer parentRead.Close()
+		defer parentWrite.Close()
+		cmd.ExtraFiles = []*os.File{parentRead, lease}
 		cmd.Stdin = strings.NewReader(prompt)
 		var output strings.Builder
 		// _agent reserves stdout for the final result. Its live runner stream is
@@ -520,7 +563,7 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 			return transitionNode(nodeDir, "failed", err)
 		}
 		if ctx.Err() != nil {
-			return transitionNode(nodeDir, "pending", ctx.Err())
+			return transitionNode(nodeDir, "interrupted", ctx.Err())
 		}
 		if runErr != nil {
 			return retryOrFail(nodeDir, node, attempt, fmt.Errorf("node %s agent attempt %d: %w", node.Name, attempt, runErr))
@@ -542,7 +585,7 @@ func executeNode(ctx context.Context, runDir string, manifest Manifest, node Nod
 	case CommandNode:
 		ok, err := runShell(nodeCtx, manifest.WorkDir, taskEnv(runDir, manifest, 1), node.Run, filepath.Join(nodeDir, "command.log"), progress)
 		if ctx.Err() != nil {
-			return transitionNode(nodeDir, "pending", ctx.Err())
+			return transitionNode(nodeDir, "interrupted", ctx.Err())
 		}
 		if err != nil || !ok {
 			return transitionNode(nodeDir, "failed", err)
@@ -619,14 +662,21 @@ func runShell(ctx context.Context, dir string, env []string, script, logPath str
 }
 
 type progressWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu   sync.Mutex
+	w    io.Writer
+	dead bool
 }
 
 func (w *progressWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.w.Write(p)
+	if !w.dead {
+		n, err := w.w.Write(p)
+		w.dead = err != nil || n != len(p)
+	}
+	// Durable logs are written before this best-effort mirror. Dropping a
+	// broken display must not close the worker's pipes or falsify its result.
+	return len(p), nil
 }
 
 func progressf(w io.Writer, format string, args ...any) {
@@ -749,11 +799,33 @@ func lockRun(runDir string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	// A status reader must not make an advisory wake disappear as though
+	// another beat had accepted it. Briefly retry reader-only contention;
+	// an exclusive owner still returns immediately, without waiting on work.
+	readerDeadline := time.Now().Add(100 * time.Millisecond)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = f.Close()
+			return nil, err
+		}
+		readErr := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
+		if readErr == nil {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			if time.Now().Before(readerDeadline) {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+		} else if !errors.Is(readErr, syscall.EWOULDBLOCK) && !errors.Is(readErr, syscall.EAGAIN) {
+			_ = f.Close()
+			return nil, readErr
+		}
 		_ = f.Close()
 		return nil, ErrBeatOwned
 	}
-	return f, nil
 }
 
 func lockRunBlocking(runDir string) (*os.File, error) {

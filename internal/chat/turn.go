@@ -170,7 +170,16 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 	var totalUsage llm.Usage
 	for {
-		text, reasoning, toolCalls, usage, truncated, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, sess)
+		requestMsgs := allMsgs
+		if cfg.HostContext != nil {
+			if state := cfg.HostContext(); state != "" {
+				requestMsgs = append([]llm.Message(nil), allMsgs...)
+				// Keep tool-call/result ordering intact; refresh the main system
+				// message without accumulating stale snapshots in history.
+				requestMsgs[0].Content += "\n\n" + state
+			}
+		}
+		text, reasoning, toolCalls, usage, truncated, err := streamOnce(ctx, cfg.LLM, requestMsgs, toolList, sess)
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage)
@@ -179,7 +188,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			sess.lastPromptTokens = usage.PromptTokens
 		}
 		if err != nil {
-			logStreamError(cfg, sess.id, allMsgs, err)
+			logStreamError(cfg, sess.id, requestMsgs, err)
 			// Capture into a fresh local so terminalEmit carries the value
 			// itself and errors.Is/As survives the public boundary.
 			streamErr := err

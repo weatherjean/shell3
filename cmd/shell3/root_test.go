@@ -74,7 +74,7 @@ func TestRootInteractiveCoexistsWithPersistentWakeListener(t *testing.T) {
 		t.Fatalf("authorization used wrong secret source: %q", authorization)
 	}
 	tools, ok := request["tools"].([]any)
-	if !ok || len(tools) != 2 {
+	if !ok || len(tools) != 3 {
 		t.Fatalf("request tools = %#v", request["tools"])
 	}
 	var names []string
@@ -83,7 +83,7 @@ func TestRootInteractiveCoexistsWithPersistentWakeListener(t *testing.T) {
 		fn := tool["function"].(map[string]any)
 		names = append(names, fn["name"].(string))
 	}
-	if strings.Join(names, ",") != "bash,bash_bg" {
+	if strings.Join(names, ",") != "bash,bash_bg,shell3" {
 		t.Fatalf("tool names = %v", names)
 	}
 }

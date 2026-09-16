@@ -18,6 +18,18 @@ type HostTool struct {
 	Handler     func(ctx context.Context, argsJSON string) (string, error)
 }
 
+// SetHostContext installs a host-owned state snapshot, refreshed each provider
+// round. Call between turns; it survives configuration reloads.
+func (s *Session) SetHostContext(render func() string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy {
+		return ErrBusy
+	}
+	s.cfg.HostContext = render
+	return nil
+}
+
 // RegisterHostTool adds a host tool to this session's schema and dispatch. Call
 // before the first turn; it mutates session config and is not safe to call
 // concurrently with a turn. Multiple registrations compose.

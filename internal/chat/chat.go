@@ -24,6 +24,9 @@ type AgentProfile struct {
 // AgentKnobs carries the resolved per-agent runtime settings as one unit from
 // assembly into each turn.
 type AgentKnobs struct {
+	// HostContext supplies authoritative host state before each provider round.
+	// It must be concurrency-safe and contain no credentials or user output.
+	HostContext func() string
 	// HostToolNames routes to the HostTool dispatcher. Entries must match the
 	// names in the LLM tool schema.
 	HostToolNames map[string]bool

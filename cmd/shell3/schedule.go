@@ -193,6 +193,9 @@ func newScheduleRunCommand() *cobra.Command {
 		Short: "Run one declared schedule immediately",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireWorkflowHost(); err != nil {
+				return err
+			}
 			if os.Getenv("SHELL3_WRK_WORKER") == "1" {
 				return errors.New("schedule: nested scheduled launch denied: dispatched agents are leaf workers")
 			}

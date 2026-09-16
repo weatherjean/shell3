@@ -44,6 +44,11 @@ ordinary commands through `bash`, with conventions supplied by embedded
 skills. A persistent Telegram host registers the bounded `shell3` lifecycle
 tool plus `telegram` for sending a local file.
 
+Interactive hosts support `bash_bg`'s optional `poll_in` delay. Telegram extends
+its `shell3` tool with `poll` and `cancel_poll`; the console exposes those two
+actions through its own bounded `shell3` tool. One-shot mode rejects `poll_in`
+before starting the command because it cannot service future turns.
+
 Skill names and descriptions enter the prompt. Bodies remain in the parsed kit
 until `shell3 config skill` retrieves one. Memory is rendered into every turn.
 
@@ -55,6 +60,28 @@ restart. The `shell3` host tool validates and classifies the on-disk
 generation, applies reloadable changes through the same atomic path as
 `/reload`, and defers a requested restart until active replies have been
 persisted and delivered.
+
+Telegram's working bubble names each `shell3` action and replaces it with its
+result, distinguishing a queued restart from an executed restart and rejected
+reloads from successful ones. Host actions have a bounded, atomically persisted
+receipt journal in `.shell3_project/host-actions.json`. A fresh host-owned
+snapshot is appended to the system prompt before every provider round, including
+the round after a control tool, without accumulating snapshots in chat history.
+The host context callback survives config reloads. Journal errors are surfaced;
+they do not imply an already-applied action was undone.
+Unreadable or oversized receipt history does not prevent startup. The host
+reports the persistence error in system context, retains new receipts in memory,
+and leaves the unreadable file untouched for repair. It does not infer a restart
+confirmation from missing history. Receipt reads are bounded to 64 KiB.
+
+Internal restart re-execs the shell3 binary with the same PID and environment;
+it does not rerun a service launcher. An opaque instance-ID handoff confirms
+restart only after the replacement host initializes successfully. Queuing or
+draining alone is not success. Failed reply delivery cancels the queued restart
+and records that outcome. A startup without the matching handoff reports a new
+host instance without claiming the requested restart completed. Environment or
+launcher changes require an operator service-manager restart. `/superstop`
+stops work, not the host service.
 
 ## Runtime and sessions
 
@@ -116,6 +143,14 @@ recent tail.
 
 Provider stream failures write bounded diagnostic context to
 `runs/<session-id>/last_error.json` and record the path in the project log.
+Each provider round has a five-minute inactivity watchdog covering connection
+setup, SDK retries, and streaming. Answer, reasoning, tool-call, usage, or finish
+events extend the deadline; SSE heartbeats and empty chunks do not. On timeout,
+the request is cancelled and the ordinary error path ends the turn with an
+explicit inactivity message. Incomplete tool calls are never dispatched.
+Active streams may run longer than five minutes. The watchdog is scoped to the
+provider round, not tool execution or the whole task; user cancellation keeps
+its original cause. There is no automatic replay after an inactivity timeout.
 
 ## Commands
 
@@ -127,6 +162,12 @@ Attached Bash tools and workflow commands inherit the host environment.
 Process cancellation sends group TERM, allows a bounded grace period, then
 sends group KILL before returning. Pipe shutdown is bounded separately.
 shell3 is not an OS sandbox.
+
+The attached `bash` handler sets `SHELL3_TOOL_CONTEXT=foreground`; `bash_bg`
+sets it to `background`. CLI `wrk run`, `wrk beat`, and `schedule run` reject
+foreground execution before admission, directing the agent to managed
+background work. Direct terminal commands remain valid. This marker is a host
+contract and can be overridden by shell code; it is not a security boundary.
 
 `bash_bg` admission and the positive `WaitGroup.Add` happen under the job
 manager lock. Shutdown closes admission before cancellation and waiting.
@@ -154,6 +195,28 @@ running marker. Restart recovery writes the failure notice before removing the
 marker, giving at-least-once reporting. `/superstop` marks jobs suppressed,
 kills their process groups, and removes their markers without manufacturing
 notices.
+
+Agent-requested progress checks are independent of completion reporting. Each
+background job may request one in-memory deadline, from 1 minute to 24 hours.
+`poll_in` arms it at admission; `shell3` action `poll` replaces it and
+`cancel_poll` clears it. The interactive host checks deadlines once per second.
+Telegram reserves the room and global turn slots before consuming due checks;
+user messages and steering have priority. Busy rooms leave deadlines pending,
+so checks coalesce and remain cancellable. The console consumes checks
+between turns. One host-labelled continuation includes all due job IDs and log
+paths, and uses the normal persisted turn and reply pipeline.
+
+Checks are one-shot; only an explicit re-arm of a running job schedules another.
+The job manager stores checks separately from live jobs. Command success or
+failure preserves an already-requested check at its original deadline, allowing
+the agent to report the outcome without occupying a live-job slot. Completion
+never creates or accelerates a check. Failed process admission discards its check.
+`cancel_poll` can cancel a retained check after completion. `/superstop`,
+conversation reset, and host shutdown discard pending checks. `/stop` and turn
+cancellation clear the conversation's checks without killing its commands.
+Checks are not durable schedules and do not survive host restart. A workflow
+that exits into an external-event wait retains its requested follow-up, but
+cannot re-arm a job check after its `bash_bg` process exits.
 
 ## Inbox and wakeups
 
@@ -189,6 +252,29 @@ runnable wave, atomically replaces each state file, and exits when quiescent.
 Durable state writes use unique temporary files, file sync, rename, and directory
 sync. Wait-node deadlines persist across beats and restarts. Compiled launchers
 pin config and workflow hashes and invoke this same runtime.
+
+A beat persists `running` while it owns execution, then records its resulting
+state. Host cancellation records `interrupted`; the task's own deadline records
+terminal failure. Unexpected unwinding also replaces an unfinished `running`
+marker with `interrupted`. Abrupt death can leave stale markers, so `Inspect`
+probes `beat.lock` with a shared nonblocking lock: idle inspectors coexist and
+cannot impersonate an executing beat. Unowned running markers are reported as
+interrupted; unowned expired runs are reported as expired pending a finalizing
+beat. Inspection is read-only and returns persisted state separately from this
+observed liveness. A deadline never implies an ETA or autonomous execution.
+
+External-agent dispatch passes a driver-lifetime pipe and the held execution
+lock to `_agent`. The helper marks both descriptors close-on-exec and watches
+the pipe; EOF cancels its runner group even when the driver dies without cleanup.
+The helper retains the lock until its runner has been reaped. No credential or
+prompt body travels on the pipe. Direct command nodes remain children managed
+by their beat's process cancellation; forcible termination of a supervisor is
+not an OS guarantee against independently detached descendants.
+
+CLI processes ignore SIGPIPE. Workflow progress mirrors stop writing after a
+consumer error, while durable logs remain authoritative. Closing a display
+pipe must not interrupt work. Exact attempt log paths are included in status;
+shared artifact presence is not proof of its author or of process liveness.
 
 Independent `read` nodes may share a wave up to the task limit. A `write` node
 runs alone. Every loop attempt creates a fresh runner process. External checks

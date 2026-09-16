@@ -121,6 +121,13 @@ func (p *progressBubble) finish(ctx context.Context, keep bool) {
 
 // toolLine renders one tool call as a compact single line.
 func toolLine(name, rawArgs string) string {
+	if name == "shell3" {
+		var args struct {
+			Action string `json:"action"`
+		}
+		_ = json.Unmarshal([]byte(rawArgs), &args)
+		return "⚙️ " + hostActionLabel(args.Action)
+	}
 	detail := ""
 	var args map[string]any
 	if json.Unmarshal([]byte(rawArgs), &args) == nil {
@@ -136,6 +143,62 @@ func toolLine(name, rawArgs string) string {
 		line += " — " + strutil.Truncate(strings.Join(strings.Fields(detail), " "), 64)
 	}
 	return line
+}
+
+func hostActionLabel(action string) string {
+	switch action {
+	case "status":
+		return "Checking shell3 host status"
+	case "validate":
+		return "Validating shell3 configuration"
+	case "reload":
+		return "Reloading shell3 configuration"
+	case "restart":
+		return "Requesting shell3 restart"
+	case "poll":
+		return "Scheduling a progress check"
+	case "cancel_poll":
+		return "Cancelling a progress check"
+	default:
+		return "Shell3 host action"
+	}
+}
+
+// Host outcomes replace their pending line. Never echo arbitrary tool output
+// into the bubble; detailed errors remain in the tool result and host context.
+func (p *progressBubble) hostResult(ctx context.Context, output string, failed bool) {
+	if len(p.lines) == 0 {
+		return
+	}
+	var result struct {
+		Action  string `json:"action"`
+		OK      *bool  `json:"ok"`
+		Restart string `json:"restart"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil && !failed {
+		return
+	}
+	if failed || (result.OK != nil && !*result.OK) {
+		p.markError()
+	} else {
+		label := map[string]string{
+			"status": "Shell3 host status checked", "validate": "Shell3 configuration valid",
+			"reload": "Shell3 configuration reloaded for future turns", "poll": "Progress check scheduled",
+			"cancel_poll": "Progress check cancelled",
+		}[result.Action]
+		if result.Action == "restart" {
+			label = "Shell3 restart queued — after this reply"
+			if result.Restart == "already_queued" {
+				label = "Shell3 restart already queued — after this reply"
+			}
+		}
+		if label == "" {
+			return
+		}
+		p.lines[len(p.lines)-1] = "✓ " + label
+		p.dirty = true
+	}
+	p.flush(ctx, true)
 }
 
 // drainTurnProgress drains a POSTED turn: the shared drain with a progress

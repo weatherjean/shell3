@@ -9,7 +9,32 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
+
+func TestForegroundWorkflowCommandsRejectBeforeAdmission(t *testing.T) {
+	t.Setenv("SHELL3_TOOL_CONTEXT", "foreground")
+	for name, makeCmd := range map[string]func() *cobra.Command{
+		"run": newWrkRunCommand, "beat": newWrkBeatCommand, "schedule run": newScheduleRunCommand,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := makeCmd()
+			cmd.SetArgs([]string{"does-not-exist"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), "requires bash_bg") || !strings.Contains(err.Error(), "nothing was started") {
+				t.Fatalf("foreground %s: %v", name, err)
+			}
+		})
+	}
+	// There is no gate on a normal terminal or managed background invocation.
+	for _, mode := range []string{"", "background"} {
+		t.Setenv("SHELL3_TOOL_CONTEXT", mode)
+		if err := requireWorkflowHost(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestReadWrkRequestDoesNotWaitForInteractiveInput(t *testing.T) {
 	got, err := readWrkRequest(strings.NewReader("ignored"), true)

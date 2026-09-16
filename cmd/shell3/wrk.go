@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/weatherjean/shell3/internal/lispconfig"
 	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/procutil"
 	"github.com/weatherjean/shell3/internal/runner"
 	"github.com/weatherjean/shell3/internal/wrk"
 	"golang.org/x/term"
@@ -40,6 +42,9 @@ func newWrkRunCommand() *cobra.Command {
 		Short: "Start and drive a durable workflow until terminal or waiting",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireWorkflowHost(); err != nil {
+				return err
+			}
 			if os.Getenv("SHELL3_WRK_WORKER") == "1" {
 				return fmt.Errorf("wrk: nested workflow launch denied: dispatched agents are leaf workers")
 			}
@@ -123,6 +128,9 @@ func newWrkBeatCommand() *cobra.Command {
 		Short: "Advance one runnable workflow wave and exit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireWorkflowHost(); err != nil {
+				return err
+			}
 			if os.Getenv("SHELL3_WRK_WORKER") == "1" {
 				return fmt.Errorf("wrk: nested workflow beat denied: dispatched agents are leaf workers")
 			}
@@ -147,6 +155,16 @@ func newWrkBeatCommand() *cobra.Command {
 	}
 	c.Flags().StringVar(&stateRoot, "state", paths.NewLocal(".").Wrk, "Workflow state root")
 	return c
+}
+
+// Foreground tool calls are deliberately short-lived. Reject before admission,
+// rather than creating durable state whose driver the tool will soon kill.
+// This inherited marker is a host contract, not an OS security boundary.
+func requireWorkflowHost() error {
+	if os.Getenv("SHELL3_TOOL_CONTEXT") == "foreground" {
+		return fmt.Errorf("workflow execution requires bash_bg, not the short-lived bash tool; nothing was started. Reissue this command with bash_bg; in an interactive host add poll_in (for example 2m). Keep the driver attached to that job; use wrk status for inspection instead of piping execution through head")
+	}
+	return nil
 }
 
 func newWrkStatusCommand() *cobra.Command {
@@ -232,12 +250,36 @@ func newWrkCancelCommand() *cobra.Command {
 func newWrkAgentCommand() *cobra.Command {
 	var configPath, agent, workdir, runDir string
 	var rawSlots []string
+	var parentFD, leaseFD int
 	c := &cobra.Command{
 		Use:    "_agent",
 		Short:  "Execute one resolved external agent invocation",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if parentFD >= 0 || leaseFD >= 0 {
+				if parentFD < 3 || leaseFD < 3 || parentFD == leaseFD {
+					return fmt.Errorf("wrk: parent and lease descriptors must be distinct inherited descriptors")
+				}
+				lease := os.NewFile(uintptr(leaseFD), "beat-lease")
+				defer lease.Close()
+				if _, err := lease.Stat(); err != nil {
+					return err
+				}
+				// Retain the beat's lock until the runner group has been reaped,
+				// even if the beat itself dies. Never pass it to an external runner.
+				syscall.CloseOnExec(leaseFD)
+				parent := os.NewFile(uintptr(parentFD), "parent-lifetime")
+				defer parent.Close()
+				var cancel func()
+				var err error
+				ctx, cancel, err = procutil.ParentContext(ctx, parent)
+				if err != nil {
+					return err
+				}
+				defer cancel()
+			}
 			prompt, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), (4<<20)+1))
 			if err != nil {
 				return err
@@ -257,7 +299,7 @@ func newWrkAgentCommand() *cobra.Command {
 				}
 				slots[name] = value
 			}
-			result, err := (runner.Executor{Config: cfg}).Run(cmd.Context(), runner.Request{
+			result, err := (runner.Executor{Config: cfg}).Run(ctx, runner.Request{
 				Agent: agent, Prompt: string(prompt), WorkDir: workdir, RunDir: runDir, Slots: slots,
 				Progress: cmd.ErrOrStderr(),
 			})
@@ -273,6 +315,8 @@ func newWrkAgentCommand() *cobra.Command {
 	c.Flags().StringVar(&workdir, "workdir", ".", "Agent working directory")
 	c.Flags().StringVar(&runDir, "run-dir", "", "Invocation state directory")
 	c.Flags().StringArrayVar(&rawSlots, "slot", nil, "Runtime value in name=value form")
+	c.Flags().IntVar(&parentFD, "parent-fd", -1, "Inherited driver lifetime pipe")
+	c.Flags().IntVar(&leaseFD, "lease-fd", -1, "Inherited execution lock")
 	_ = c.MarkFlagRequired("agent")
 	_ = c.MarkFlagRequired("run-dir")
 	return c

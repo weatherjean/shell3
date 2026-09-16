@@ -77,6 +77,34 @@ endpoint.
 
 ## Inbox and notifications
 
+### Timed progress checks
+
+In Telegram and the interactive console, the agent can schedule a one-shot
+check when it starts background work:
+
+```json
+{"command":"shell3 wrk run task.wrk.lisp --config /path/shell3.lisp --state /path/state 'request'","poll_in":"2m"}
+```
+
+This is a `bash_bg` tool call, not a shell command. The agent finishes its turn;
+if the job still runs when the check is due, the host starts a progress-check
+turn once the conversation is free. The agent can re-arm through `shell3`:
+
+```json
+{"action":"poll","job_id":"bg-…","poll_in":"5m"}
+```
+
+Use `action: "cancel_poll"` with `job_id` to cancel a check. Delays range from
+`1m` to `24h`. An already-scheduled check survives command success or failure
+and runs at its requested time so the agent can report the outcome. Completion
+does not create a new check. `/superstop`, conversation reset, and host shutdown
+cancel pending checks; `/stop` also clears them while leaving commands running.
+Checks do not survive restart. Only running jobs can be re-armed; `cancel_poll`
+can also remove a retained check after completion.
+One-shot CLI mode does not accept `poll_in`.
+
+### Durable notices
+
 ```sh
 shell3 notify --to main 'message'
 shell3 notify --to wrk:TASK/RUN --event ready < body.txt

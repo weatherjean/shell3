@@ -38,6 +38,19 @@ func RunWithReload(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.
 }
 
 func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, sess *shell3.Session, store inbox.Store, reload func() error) error {
+	polls := time.NewTicker(time.Second)
+	defer polls.Stop()
+	return runWithPollTicks(ctx, in, out, rt, sess, store, reload, polls.C)
+}
+
+func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, sess *shell3.Session, store inbox.Store, reload func() error, pollTicks <-chan time.Time) error {
+	if err := sess.EnableJobPolling(); err != nil {
+		return err
+	}
+	if err := sess.RegisterHostTool(sess.JobPollTool()); err != nil {
+		return err
+	}
+	defer sess.ClearJobPolls()
 	theme := newTheme(in, out)
 	printStartup(out, theme)
 	input := newConsoleInput(in)
@@ -48,6 +61,22 @@ func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, s
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case now := <-pollTicks:
+			// The console loop runs only between turns. Due checks remain
+			// cancellable on their jobs while a foreground turn is active.
+			if due := sess.TakeDueJobPolls(now); len(due) > 0 {
+				fmt.Fprintln(out)
+				err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
+					return sess.Send(turnCtx, shell3.JobPollPrompt(due))
+				}, theme)
+				if errors.Is(err, errTurnCancelled) {
+					sess.ClearJobPolls()
+				}
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+			}
 		case err, ok := <-scanErr:
 			if !ok {
 				scanErr = nil
@@ -66,6 +95,16 @@ func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, s
 			}
 			if line == "/quit" || line == "/exit" {
 				return nil
+			}
+			if line == "/stop" || line == "/superstop" {
+				sess.ClearJobPolls()
+				if line == "/superstop" {
+					fmt.Fprintf(out, "stopped %d background job(s); pending checks cancelled\n", len(rt.KillAllForStop()))
+				} else {
+					fmt.Fprintln(out, "pending checks cancelled; background commands keep running")
+				}
+				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+				continue
 			}
 			if line == "/" || line == "/h" || line == "/help" {
 				printHelp(out, theme)
@@ -87,6 +126,9 @@ func run(ctx context.Context, in io.Reader, out io.Writer, rt *shell3.Runtime, s
 			if err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
 				return sess.Send(turnCtx, line)
 			}, theme); err != nil {
+				if errors.Is(err, errTurnCancelled) {
+					sess.ClearJobPolls()
+				}
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -257,6 +299,8 @@ func printHelp(out io.Writer, theme consoleTheme) {
 	fmt.Fprintln(out, theme.info.Render("commands"))
 	fmt.Fprintln(out, "  /, /h, /help  show this help")
 	fmt.Fprintln(out, "  /reload       validate and reload shell3.lisp")
+	fmt.Fprintln(out, "  /stop         cancel pending progress checks")
+	fmt.Fprintln(out, "  /superstop    also stop background commands")
 	fmt.Fprintln(out, "  /exit, /quit  exit shell3")
 	fmt.Fprintln(out, "  Esc           cancel the active turn")
 }

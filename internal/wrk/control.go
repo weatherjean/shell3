@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/inbox"
@@ -23,24 +24,36 @@ type ExternalEvent struct {
 }
 
 type NodeSnapshot struct {
-	Name     string   `json:"name"`
-	Kind     NodeKind `json:"kind"`
-	Status   string   `json:"status"`
-	Attempts int      `json:"attempts,omitempty"`
-	After    []string `json:"after,omitempty"`
-	Event    string   `json:"event,omitempty"`
-	Message  string   `json:"message,omitempty"`
+	Name            string   `json:"name"`
+	Kind            NodeKind `json:"kind"`
+	Status          string   `json:"status"`
+	Attempts        int      `json:"attempts,omitempty"`
+	After           []string `json:"after,omitempty"`
+	Event           string   `json:"event,omitempty"`
+	Message         string   `json:"message,omitempty"`
+	PersistedStatus string   `json:"persisted_status"`
+	AttemptDir      string   `json:"attempt_dir,omitempty"`
+	Stdout          string   `json:"stdout,omitempty"`
+	Stderr          string   `json:"stderr,omitempty"`
+	Result          string   `json:"result,omitempty"`
 }
 
 type Snapshot struct {
-	Task      string         `json:"task"`
-	RunID     string         `json:"run_id"`
-	Status    string         `json:"status"`
-	Created   time.Time      `json:"created"`
-	WorkDir   string         `json:"workdir"`
-	RunDir    string         `json:"run_dir"`
-	Artifacts string         `json:"artifacts"`
-	Nodes     []NodeSnapshot `json:"nodes"`
+	Task             string         `json:"task"`
+	RunID            string         `json:"run_id"`
+	Status           string         `json:"status"`
+	Created          time.Time      `json:"created"`
+	WorkDir          string         `json:"workdir"`
+	RunDir           string         `json:"run_dir"`
+	Artifacts        string         `json:"artifacts"`
+	Nodes            []NodeSnapshot `json:"nodes"`
+	PersistedStatus  string         `json:"persisted_status"`
+	ExecutionActive  bool           `json:"execution_active"`
+	ObservedAt       time.Time      `json:"observed_at"`
+	Deadline         time.Time      `json:"deadline,omitzero"`
+	DeadlineExceeded bool           `json:"deadline_exceeded"`
+	RecoveryRequired bool           `json:"recovery_required"`
+	Message          string         `json:"message,omitempty"`
 }
 
 type cancellation struct {
@@ -120,11 +133,22 @@ func Cancel(runDir string) error {
 	return notifyTerminal(runDir, manifest, "cancelled")
 }
 
-// Inspect returns a stable machine-readable view without changing run state.
+// Inspect checks the execution lease as well as durable state. A free lease
+// proves no beat or supervised external runner owns this run. Hold a shared
+// lease while reading idle state; concurrent inspectors must not look like
+// executing beats. Active state is a point-in-time observation, not a promise
+// of future progress. Artifact files alone are never evidence of liveness.
 func Inspect(runDir string) (Snapshot, error) {
 	manifest, def, err := loadRun(runDir)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	lease, active, err := inspectLease(runDir)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if lease != nil {
+		defer lease.Close()
 	}
 	status, err := readFileStatus(filepath.Join(runDir, "status"))
 	if err != nil {
@@ -133,19 +157,89 @@ func Inspect(runDir string) (Snapshot, error) {
 	snapshot := Snapshot{
 		Task: manifest.Task, RunID: manifest.RunID, Status: status, Created: manifest.Created,
 		WorkDir: manifest.WorkDir, RunDir: runDir, Artifacts: filepath.Join(runDir, "artifacts"),
+		PersistedStatus: status, ExecutionActive: active, ObservedAt: time.Now().UTC(), Deadline: manifest.Deadline,
 	}
+	if snapshot.Deadline.IsZero() && def.Timeout > 0 {
+		snapshot.Deadline = manifest.Created.Add(def.Timeout)
+	}
+	unfinished := status != "completed" && status != "failed" && status != "cancelled"
+	snapshot.DeadlineExceeded = unfinished && !snapshot.Deadline.IsZero() && !snapshot.ObservedAt.Before(snapshot.Deadline)
+	interrupted := status == "running" || status == "interrupted"
 	for _, node := range def.Nodes {
 		nodeDir := filepath.Join(runDir, "nodes", node.Name)
 		state, err := readStatus(nodeDir)
 		if err != nil {
 			return Snapshot{}, err
 		}
-		snapshot.Nodes = append(snapshot.Nodes, NodeSnapshot{
+		switch state {
+		case "pending", "running", "interrupted", "waiting", "passed", "failed":
+		default:
+			return Snapshot{}, fmt.Errorf("wrk: node %s has invalid status %q", node.Name, state)
+		}
+		interrupted = interrupted || state == "running" || state == "interrupted"
+		ns := NodeSnapshot{
 			Name: node.Name, Kind: node.Kind, Status: state, Attempts: nextAttempt(nodeDir) - 1,
 			After: append([]string(nil), node.After...), Event: node.Event, Message: node.Message,
-		})
+			PersistedStatus: state,
+		}
+		if ns.Attempts > 0 && (node.Kind == AgentNode || node.Kind == LoopNode) {
+			ns.AttemptDir = filepath.Join(nodeDir, fmt.Sprintf("attempt-%d", ns.Attempts))
+			ns.Stdout = filepath.Join(ns.AttemptDir, "stdout.log")
+			ns.Stderr = filepath.Join(ns.AttemptDir, "stderr.log")
+			ns.Result = filepath.Join(nodeDir, fmt.Sprintf("result-%d.md", ns.Attempts))
+		}
+		if node.Kind == CommandNode {
+			ns.Stdout = filepath.Join(nodeDir, "command.log")
+		}
+		if !active && (state == "running" || state == "interrupted") {
+			ns.Status = "interrupted"
+			if !unfinished {
+				ns.Status = status
+			}
+		}
+		snapshot.Nodes = append(snapshot.Nodes, ns)
+	}
+	if unfinished {
+		switch {
+		case active:
+			snapshot.Status = "running"
+			snapshot.Message = "An execution owner holds the run lock. This proves ownership, not useful progress; inspect the exact attempt logs."
+			if snapshot.DeadlineExceeded {
+				snapshot.Message = "The deadline has elapsed but an execution owner still holds the run lock; shutdown may be in progress. Do not estimate completion from the deadline."
+			}
+		case snapshot.DeadlineExceeded:
+			snapshot.Status = "expired"
+			snapshot.RecoveryRequired = true
+			snapshot.Message = "No execution owner; the deadline has elapsed. A beat will record failure without starting another worker."
+		case interrupted:
+			snapshot.Status = "interrupted"
+			snapshot.RecoveryRequired = true
+			snapshot.Message = "No execution owner; the recorded execution was interrupted. Nothing is advancing this run. Use bash_bg to resume with wrk beat, or cancel it. Recovery may repeat work; inspect previous attempts first."
+		case status == "ready":
+			snapshot.Message = "No execution owner; this run is ready for a beat. Durable state alone does not schedule execution."
+		case status == "waiting":
+			snapshot.Message = "Waiting for an external event; no execution owner is currently active."
+		}
 	}
 	return snapshot, nil
+}
+
+func inspectLease(runDir string) (*os.File, bool, error) {
+	f, err := os.Open(filepath.Join(runDir, "beat.lock"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return f, false, nil
 }
 
 func loadEvents(runDir string) ([]ExternalEvent, error) {
@@ -242,7 +336,7 @@ func readFileStatus(path string) (string, error) {
 	}
 	status := strings.TrimSpace(string(data))
 	switch status {
-	case "ready", "waiting", "completed", "failed", "cancelled":
+	case "ready", "running", "interrupted", "waiting", "completed", "failed", "cancelled":
 		return status, nil
 	default:
 		return "", fmt.Errorf("wrk: invalid run status %q", status)

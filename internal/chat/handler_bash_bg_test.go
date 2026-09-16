@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBashBgHandler_Execute_happyPath(t *testing.T) {
@@ -13,6 +14,9 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	cfg := ToolConfig{
 		WorkDir: wd,
 		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+			if len(env) != 1 || env[0] != "SHELL3_TOOL_CONTEXT=background" {
+				t.Fatalf("background context = %v", env)
+			}
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -27,6 +31,40 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	}
 	if !strings.Contains(out, "bg_1") {
 		t.Fatalf("expected job id in output, got %q", out)
+	}
+}
+
+func TestBashBgPollInValidationAndAdmission(t *testing.T) {
+	starts := 0
+	var delay time.Duration
+	cfg := ToolConfig{
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+			t.Fatal("polled job used the unpolled start callback")
+			return "", nil
+		},
+		StartBashBgPolled: func(command, workdir string, argv, env []string, pollIn time.Duration) (string, error) {
+			if len(env) != 1 || env[0] != "SHELL3_TOOL_CONTEXT=background" {
+				t.Fatalf("polled background context = %v", env)
+			}
+			starts++
+			delay = pollIn
+			return "bg-polled", nil
+		},
+	}
+	for _, value := range []string{`""`, `null`, `2`, `"0s"`, `"-2m"`, `"59s"`, `"25h"`, `"later"`} {
+		_, err := (BashBgHandler{}).Execute(t.Context(), "call", json.RawMessage(`{"command":"sleep 60","poll_in":`+value+`}`), cfg)
+		if err == nil || starts != 0 {
+			t.Fatalf("invalid delay %s admitted: starts=%d err=%v", value, starts, err)
+		}
+	}
+	out, err := (BashBgHandler{}).Execute(t.Context(), "call", json.RawMessage(`{"command":"sleep 60","poll_in":"2m"}`), cfg)
+	if err != nil || starts != 1 || delay != 2*time.Minute || !strings.Contains(out, "one-shot follow-up") {
+		t.Fatalf("poll start: starts=%d delay=%s out=%q err=%v", starts, delay, out, err)
+	}
+	cfg.StartBashBgPolled = nil
+	_, err = (BashBgHandler{}).Execute(t.Context(), "call", json.RawMessage(`{"command":"sleep 60","poll_in":"3m"}`), cfg)
+	if err == nil || !strings.Contains(err.Error(), "command was not started") {
+		t.Fatalf("unsupported host = %v", err)
 	}
 }
 

@@ -20,6 +20,8 @@ type ControlResult map[string]any
 // shell3 tool. No action accepts a path, command, PID or service-manager name:
 // every operation is pinned to the running host.
 type HostControl struct {
+	Context        func() string
+	Record         func(action, output string, err error) error
 	Status         func(context.Context) (ControlResult, error)
 	Validate       func(context.Context) (ControlResult, error)
 	Reload         func(context.Context) (ControlResult, error)
@@ -35,6 +37,12 @@ func (b *Bot) SetHostControl(control HostControl) {
 }
 
 func (b *Bot) registerControlTool(s *shell3.Session) {
+	b.mu.Lock()
+	control := b.control
+	b.mu.Unlock()
+	_ = s.SetHostContext(control.Context)
+	_ = s.EnableJobPolling()
+	pollTool := s.JobPollTool()
 	_ = s.RegisterHostTool(shell3.HostTool{
 		Name: "shell3",
 		Description: "Inspect and safely operate this running shell3 host. This is a host-provided control tool, " +
@@ -42,23 +50,52 @@ func (b *Bot) registerControlTool(s *shell3.Session) {
 			"Use status to compare the active and on-disk configuration, validate after editing shell3.lisp, " +
 			"and reload to atomically activate reloadable changes for future turns. If reload reports that " +
 			"restart-only fields changed, use restart; restart drains active turns and is deferred until replies " +
-			"are persisted and delivered. Never kill shell3 or invoke its service manager through bash.",
+			"are persisted and delivered. Queued means not yet executed. Internal restart preserves the PID and inherited environment; it does not rerun the service launcher or reload credentials. Consult the current host system context for actual outcomes. /superstop stops work, not the service. Never kill shell3 or invoke its service manager through bash. " + pollTool.Description,
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type": "string",
-					"enum": []string{"status", "validate", "reload", "restart"},
+					"enum": []string{"status", "validate", "reload", "restart", "poll", "cancel_poll"},
 				},
+				"job_id":  map[string]any{"type": "string", "description": "Required for poll and cancel_poll."},
+				"poll_in": map[string]any{"type": "string", "description": "Required for poll: delay from 1m to 24h, typically 2m, 3m, or 5m."},
 			},
 			"required":             []string{"action"},
 			"additionalProperties": false,
 		},
-		Handler: b.controlToolHandler,
+		Handler: func(ctx context.Context, raw string) (out string, callErr error) {
+			var args struct {
+				Action string `json:"action"`
+			}
+			if err := json.Unmarshal([]byte(raw), &args); err != nil {
+				return "", err
+			}
+			defer func() {
+				if control.Record != nil {
+					if err := control.Record(args.Action, out, callErr); err != nil {
+						callErr = errors.Join(callErr, fmt.Errorf("host action feedback persistence failed (action may already have taken effect): %w", err))
+					}
+				}
+			}()
+			if args.Action == "poll" || args.Action == "cancel_poll" {
+				return pollTool.Handler(ctx, raw)
+			}
+			return b.controlToolHandler(ctx, raw)
+		},
 	})
 }
 
 func (b *Bot) controlToolHandler(ctx context.Context, argsJSON string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(argsJSON), &fields); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	for key := range fields {
+		if key != "action" {
+			return "", fmt.Errorf("field %q is not accepted by lifecycle actions", key)
+		}
+	}
 	var args struct {
 		Action string `json:"action"`
 	}
@@ -151,18 +188,27 @@ func (b *Bot) RestartPending() bool {
 
 func (b *Bot) finishRestartDrain(deliveryErr error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if !b.restartPending || b.restartSignaled {
+		b.mu.Unlock()
 		return
 	}
 	if deliveryErr != nil {
 		b.restartPending = false
+		record := b.control.Record
+		b.mu.Unlock()
+		if record != nil {
+			if err := record("restart", `{"ok":false,"restart":"cancelled_reply_delivery_failed"}`, nil); err != nil {
+				b.log.Warn("host action feedback persistence failed", "error", err)
+			}
+		}
 		b.log.Warn("deferred restart cancelled because a turn reply was not delivered", "error", deliveryErr)
 		return
 	}
 	if b.activeTurns != 0 {
+		b.mu.Unlock()
 		return
 	}
 	b.restartSignaled = true
 	close(b.restartReady)
+	b.mu.Unlock()
 }

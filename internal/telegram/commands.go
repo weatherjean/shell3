@@ -15,7 +15,7 @@ func (b *Bot) BotCommands() []Command {
 	return []Command{
 		{"ask", "Talk to shell3 in a group: /ask <message>"},
 		{"help", "How this remote control works"},
-		{"stop", "Stop the current turn"},
+		{"stop", "Stop the current turn and pending progress checks"},
 		{"superstop", "Stop the turn and background commands"},
 		{"new", "Start a fresh conversation"},
 		{"reload", "Validate and reload shell3.lisp"},
@@ -48,17 +48,20 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 	case "/help":
 		c.sendReply(ctx, c.helpText())
 	case "/stop":
-		// Turn-only. Background jobs are NEVER killed here: they keep running
+		// Background jobs are NEVER killed here: they keep running
 		// and write passive inbox notices on completion. /superstop kills
 		// those too.
 		c.mu.Lock()
 		cancel := c.cancelTurn
+		if c.main != nil {
+			c.main.ClearJobPolls()
+		}
 		c.mu.Unlock()
 		if cancel != nil {
 			cancel()
 			c.sendReply(ctx, "⏹ stopped the turn — background jobs keep running (/superstop kills those too)")
 		} else {
-			c.sendReply(ctx, "nothing is running")
+			c.sendReply(ctx, "no active turn; pending progress checks cancelled")
 		}
 	case "/superstop":
 		c.handleSuperstop(ctx)
@@ -136,6 +139,9 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 		return
 	}
 	old := c.main
+	if old != nil {
+		old.ClearJobPolls()
+	}
 	c.main = nil
 	c.mainAnchor = ""
 	c.steerAnchor = ""

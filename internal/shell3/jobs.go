@@ -146,6 +146,7 @@ type bgJob struct {
 	// markerID is the job's background_jobs row (0 = none), deleted when the
 	// job finishes unless shutdownCancel left it for boot-time recovery.
 	markerID int64
+	finished bool
 }
 
 type jobManager struct {
@@ -153,7 +154,9 @@ type jobManager struct {
 	wg   sync.WaitGroup // tracks live job goroutines for Close ordering
 	rt   *Runtime
 	jobs map[string]*bgJob
-	max  int
+	// checks outlive completed jobs until their requested deadline or cancellation.
+	checks map[string]jobCheck
+	max    int
 
 	// closing is set by cancelAll so shutdown cannot admit new work.
 	closing bool
@@ -164,7 +167,7 @@ func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {
 		maxConcurrent = defaultMaxConcurrent
 	}
 	return &jobManager{
-		rt: rt, jobs: map[string]*bgJob{},
+		rt: rt, jobs: map[string]*bgJob{}, checks: map[string]jobCheck{},
 		max: maxConcurrent,
 	}
 }
@@ -180,7 +183,7 @@ func (m *jobManager) runningCount() int {
 
 // startCommand launches argv as a managed background job. env appends "K=V"
 // entries to the inherited environment; nil inherits it unchanged.
-func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string) (string, error) {
+func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, pollIn ...time.Duration) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")
 	}
@@ -223,6 +226,9 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		startedAt: time.Now(), cancel: cancel, out: out,
 		logPath: logPath, store: jobStore,
 	}
+	if len(pollIn) > 0 && pollIn[0] > 0 {
+		m.checks[id] = jobCheck{parentID: j.parentID, poll: JobPoll{JobID: id, LogPath: logPath, PollAt: j.startedAt.Add(pollIn[0])}}
+	}
 	m.jobs[id] = j
 	// Count the job before publishing it outside m.mu. cancelAll takes this
 	// same lock before calling Wait, so shutdown can never observe a job whose
@@ -241,6 +247,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	if err := cmd.Start(); err != nil {
 		m.mu.Lock()
 		delete(m.jobs, id)
+		delete(m.checks, id)
 		mid := j.markerID
 		m.mu.Unlock()
 		m.deleteRunningMarker(mid, j.store, j.id)
@@ -282,6 +289,9 @@ const bgNoticeTailCap = 1500
 
 // finishCommand delivers a command completion and removes its live marker.
 func (m *jobManager) finishCommand(j *bgJob, exit int) {
+	m.mu.Lock()
+	j.finished = true
+	m.mu.Unlock()
 	if j.out != nil && j.out.file != nil {
 		j.out.file.Close()
 	}
@@ -301,6 +311,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 func (m *jobManager) cancelAll() {
 	m.mu.Lock()
 	m.closing = true
+	clear(m.checks)
 	jobs := make([]*bgJob, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		// Mark before cancelling, so the finish site can tell a
@@ -319,6 +330,7 @@ func (m *jobManager) cancelAll() {
 // killAllForStop kills every live command with its completion notice suppressed.
 func (m *jobManager) killAllForStop() []KilledJob {
 	m.mu.Lock()
+	clear(m.checks)
 	var killed []KilledJob
 	var cancels []context.CancelFunc
 	for _, j := range m.jobs {

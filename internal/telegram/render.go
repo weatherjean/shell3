@@ -42,7 +42,9 @@ func (c *conversation) drainTurn(ctx context.Context, ch <-chan shell3.Event, p 
 				p.add(ctx, toolLine(ev.ToolName, ev.ToolInput))
 			}
 		case shell3.ToolResult:
-			if ev.ToolError && p != nil {
+			if ev.ToolName == "shell3" && p != nil {
+				p.hostResult(ctx, ev.ToolOutput, ev.ToolError)
+			} else if ev.ToolError && p != nil {
 				p.markError()
 				p.flush(ctx, false)
 			}

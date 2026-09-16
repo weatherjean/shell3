@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,75 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
+
+func TestConsoleRunsOneShotJobPollBetweenTurns(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "launch", Name: "bash_bg", RawArgs: `{"command":"sleep 60","poll_in":"2m"}`}}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Checking in two minutes."}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Still working."}}},
+	)
+	rt, err := shell3.NewConfiguredRuntime(t.Context(), t.TempDir(), nil, 1, nil,
+		func(shell3.SessionOpts) (chat.Config, error) {
+			return chat.Config{LLM: fake, Profile: chat.AgentProfile{Tools: []llm.ToolDefinition{{Name: "bash_bg"}}}}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	sess, err := rt.Session(shell3.SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, writer := io.Pipe()
+	defer in.Close()
+	defer writer.Close()
+	ticks := make(chan time.Time)
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- runWithPollTicks(t.Context(), in, &out, rt, sess, inbox.Store{}, nil, ticks) }()
+	if _, err := io.WriteString(writer, "start work\n"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for fake.CallCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("launch turn never ran")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// The loop cannot receive this tick until the launch turn has finished.
+	select {
+	case ticks <- time.Now().Add(3 * time.Minute):
+	case <-time.After(3 * time.Second):
+		t.Fatal("console never returned to idle")
+	}
+	// A second due tick must not repeat the one-shot check.
+	select {
+	case ticks <- time.Now().Add(4 * time.Minute):
+	case <-time.After(3 * time.Second):
+		t.Fatal("poll turn never finished")
+	}
+	_ = writer.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("console did not close")
+	}
+	if fake.CallCount() != 3 || !strings.Contains(out.String(), "Still working.") {
+		t.Fatalf("calls=%d output=%s", fake.CallCount(), out.String())
+	}
+	calls := fake.CallsSnapshot()
+	last := calls[2].Msgs
+	if !strings.Contains(last[len(last)-1].Content, "scheduled progress check") {
+		t.Fatal("missing timer context")
+	}
+	if err := llm.ValidateToolOrder(last); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRunLineConversationEndToEnd(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "plain reply"}}})
