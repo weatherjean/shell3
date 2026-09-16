@@ -12,6 +12,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"github.com/weatherjean/shell3/internal/inbox"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,10 @@ type conversation struct {
 	contextMilestone int
 	cancelTurn       context.CancelFunc // non-nil while a turn runs in this room
 	turnActive       bool
+	inboxStore       *inbox.Store
+	inboxPending     bool
+	inboxPaused      bool
+	inboxRetryAt     time.Time
 	pendingMessages  []inboundMessage
 	burst            []inboundMessage
 	burstTimer       *time.Timer
@@ -302,6 +307,9 @@ func (c *conversation) startNextWork(ctx context.Context) {
 		return
 	}
 	if c.startSteerCatchup(ctx) {
+		return
+	}
+	if c.startInboxTurn(ctx, time.Now()) {
 		return
 	}
 	c.startJobPoll(ctx, time.Now())

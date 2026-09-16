@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -247,35 +246,11 @@ func notifyTelegramInbox(ctx context.Context, bot *telegram.Bot, store inbox.Sto
 			}
 		}
 	}
-	last := ""
 	notify := func() bool {
-		_, count, err := store.List("main", inbox.StatusPending, 0, 1)
-		if err != nil {
-			log.Warn("inbox status failed", "error", err)
+		if err := bot.WakeInbox(ctx, store); err != nil {
+			log.Warn("inbox dispatch failed", "error", err)
 			return false
 		}
-		if count == 0 {
-			last = ""
-			return true
-		}
-		latest, _, err := store.List("main", inbox.StatusPending, count-1, 1)
-		if err != nil || len(latest) != 1 {
-			if err == nil {
-				err = errors.New("pending inbox changed while counting")
-			}
-			log.Warn("inbox status failed", "error", err)
-			return false
-		}
-		signature := fmt.Sprintf("%d/%s", count, latest[0].Message.ID)
-		if signature == last {
-			return true
-		}
-		msg := latest[0].Message
-		if err := bot.NotifyInbox(ctx, count, msg.Event, msg.Body); err != nil {
-			log.Warn("telegram inbox notification failed", "pending", count, "error", err)
-			return false
-		}
-		last = signature
 		return true
 	}
 	retry := time.NewTimer(time.Hour)

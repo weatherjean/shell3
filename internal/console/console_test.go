@@ -16,7 +16,50 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
+
+func TestConsoleAutomaticallyDeliversAndClearsInbox(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "Task finished."}}})
+	rt := shell3test.NewRuntimeForTestClient(t, fake)
+	sess, err := rt.Session(shell3.SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := inbox.Store{Root: t.TempDir()}
+	if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "complete result"}); err != nil {
+		t.Fatal(err)
+	}
+	in, writer := io.Pipe()
+	defer in.Close()
+	defer writer.Close()
+	ticks := make(chan time.Time)
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- runWithPollTicks(t.Context(), in, &out, rt, sess, store, nil, ticks) }()
+	for range 2 {
+		select {
+		case ticks <- time.Now():
+		case <-time.After(3 * time.Second):
+			t.Fatal("console delivery did not finish")
+		}
+	}
+	_ = writer.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("console did not stop")
+	}
+	if fake.CallCount() != 1 || !strings.Contains(out.String(), "Task finished.") {
+		t.Fatalf("calls=%d output=%s", fake.CallCount(), out.String())
+	}
+	if _, count, err := store.List("main", inbox.StatusPending, 0, 10); err != nil || count != 0 {
+		t.Fatalf("pending=%d err=%v", count, err)
+	}
+}
 
 func TestConsoleRunsOneShotJobPollBetweenTurns(t *testing.T) {
 	fake := fakellm.New(
@@ -275,7 +318,7 @@ func TestRunInteractiveTurnEscapeCancels(t *testing.T) {
 	}
 }
 
-func TestRunReportsInboxWithoutStartingTurnOrInjectingContent(t *testing.T) {
+func TestRunPrioritizesReadyUserInputOverInbox(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ordinary reply"}}})
 	dir := t.TempDir()
 	rt, err := shell3.NewConfiguredRuntime(context.Background(), dir, nil, 1, nil,
@@ -301,8 +344,8 @@ func TestRunReportsInboxWithoutStartingTurnOrInjectingContent(t *testing.T) {
 	if err := RunWithReload(context.Background(), strings.NewReader("hello\n/exit\n"), &out, rt, sess, store, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); strings.Count(got, "inbox · 2 pending · ask me to check it") != 2 {
-		t.Fatalf("startup and per-message inbox status missing: %q", got)
+	if got := out.String(); strings.Count(got, "inbox · 2 pending · automatic review queued") != 1 {
+		t.Fatalf("startup inbox status missing: %q", got)
 	}
 	calls := fake.CallsSnapshot()
 	if len(calls) != 1 {

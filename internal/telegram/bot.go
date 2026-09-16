@@ -252,6 +252,10 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	}
 	c = b.conv(m.ChatID)
 	c.setGroup(m.ChatType)
+	c.mu.Lock()
+	c.inboxPaused = false
+	c.inboxRetryAt = time.Time{}
+	c.mu.Unlock()
 	if b.RestartPending() {
 		c.sendReply(ctx, "shell3 restart is pending; please resend this message after the startup notice")
 		return

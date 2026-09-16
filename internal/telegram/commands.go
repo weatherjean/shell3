@@ -49,9 +49,10 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 		c.sendReply(ctx, c.helpText())
 	case "/stop":
 		// Background jobs are NEVER killed here: they keep running
-		// and write passive inbox notices on completion. /superstop kills
+		// and write durable inbox notices on completion. /superstop kills
 		// those too.
 		c.mu.Lock()
+		c.inboxPaused = true
 		cancel := c.cancelTurn
 		if c.main != nil {
 			c.main.ClearJobPolls()
@@ -90,6 +91,7 @@ func (c *conversation) handleCommand(ctx context.Context, m Msg) {
 // so the next turn knows without spending one now.
 func (c *conversation) handleSuperstop(ctx context.Context) {
 	c.mu.Lock()
+	c.inboxPaused = true
 	cancel := c.cancelTurn
 	main := c.main
 	c.mu.Unlock()
@@ -139,6 +141,7 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 		return
 	}
 	old := c.main
+	c.inboxPaused = true
 	if old != nil {
 		old.ClearJobPolls()
 	}

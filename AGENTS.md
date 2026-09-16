@@ -54,21 +54,23 @@ Core invariants:
   provider-valid order, including cancellation and error paths.
 - Foreground and background cancellation terminate process groups and bound
   inherited-pipe shutdown. shell3 is not an OS sandbox.
-- Every background command completion is one passive `main` filesystem-inbox
+- Every background command completion is one durable `main` filesystem-inbox
   notice. Running markers are deleted only after that notice is durable;
-  restart recovery is intentionally at-least-once. There is no model wake or
-  direct completion-post path.
+  restart recovery is intentionally at-least-once. Producers never directly call the model or post completions; attached hosts
+  dispatch durable notices through normal turn slots.
 - `/stop` cancels a turn; `/superstop` additionally kills managed background
   commands and suppresses their manufactured inbox notices.
 - Agent-requested `bash_bg` `poll_in` checks are one-shot. They start a normal
   turn when due and idle, stay pending while busy, and survive command exit so
   the agent can report the outcome. Stop, conversation reset, or host shutdown
-  cancels pending checks. Completion notices themselves never wake the model.
+  cancels pending checks. Successful automatic inbox delivery cancels redundant
+  completion checks for the same session.
 - Workflow inbox claims use atomic rename and acknowledge only after successful
-  ledger recording. Main notices stay passive; the agent uses the inbox skill
-  when asked or when following up on the user's ongoing task, fully reads
-  relevant notices, and archives them after handling. Datagram wakeups are
-  advisory; filesystem state is authoritative.
+  ledger recording. Attached hosts coalesce main notices into automatic turns
+  under a shared reader lease. Only successfully delivered chunks verified in
+  durable conversation history advance; full reads auto-archive. Failure is
+  retryable and may repeat delivery. Stop pauses inbox turns until user input
+  or host restart. Datagram wakeups are advisory; filesystem state is authoritative.
 - Wrk runs snapshot and hash config and workflow data. A beat advances one
   dependency wave; writers run alone, readers may share `parallel`, and
   cancellation reaches the active process group.

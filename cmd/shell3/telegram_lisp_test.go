@@ -33,102 +33,44 @@ type lockedBuffer struct {
 	b  bytes.Buffer
 }
 
-func TestTelegramInboxNotifierPostsCountWithoutClaiming(t *testing.T) {
-	rt := shell3test.NewRuntimeForTest(t, "must not run")
-	var out lockedBuffer
-	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
-	store := inbox.Store{Root: t.TempDir()}
-	receipt, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "workflow complete"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	hints := make(chan struct{}, 1)
-	hints <- struct{}{}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		notifyTelegramInbox(ctx, bot, store, hints, false, time.Hour, applog.Noop{})
-		close(done)
-	}()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(out.String(), "Inbox: 1 pending notice") {
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
-	<-done
-	pending, err := store.Read("main", receipt.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pending.Status != inbox.StatusNew || pending.Message.Body != "workflow complete" {
-		t.Fatalf("pending notice = %+v", pending)
-	}
-	if !strings.Contains(out.String(), "✉️ Inbox: 1 pending notice") ||
-		!strings.Contains(out.String(), "Latest: done — workflow complete") ||
-		strings.Contains(out.String(), "must not run") {
-		t.Fatalf("Telegram output = %q", out.String())
-	}
-	if strings.Count(out.String(), "Inbox: 1 pending notice") != 1 {
-		t.Fatalf("duplicate notification = %q", out.String())
-	}
-}
-
-func TestTelegramInboxNotifierReconcilesDroppedWake(t *testing.T) {
-	rt := shell3test.NewRuntimeForTest(t, "must not run")
-	var out lockedBuffer
-	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
-	store := inbox.Store{Root: t.TempDir()}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		notifyTelegramInbox(ctx, bot, store, make(chan struct{}), false, 10*time.Millisecond, applog.Noop{})
-		close(done)
-	}()
-	time.Sleep(20 * time.Millisecond)
-	if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "durable"}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(out.String(), "Inbox: 1 pending notice") {
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
-	<-done
-	if !strings.Contains(out.String(), "✉️ Inbox: 1 pending notice") ||
-		!strings.Contains(out.String(), "Latest: done — durable") ||
-		strings.Contains(out.String(), "must not run") {
-		t.Fatalf("Telegram output = %q", out.String())
-	}
-}
-
-func TestTelegramInboxNotifierPostsStartupBeforePendingNotice(t *testing.T) {
-	rt := shell3test.NewRuntimeForTest(t, "must not run")
-	var out lockedBuffer
-	bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt,
-		telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
-	store := inbox.Store{Root: t.TempDir()}
-	if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "ready"}); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		notifyTelegramInbox(ctx, bot, store, make(chan struct{}), true, time.Hour, applog.Noop{})
-		close(done)
-	}()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(out.String(), "Inbox: 1 pending notice") {
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
-	<-done
-	got := out.String()
-	startup := strings.Index(got, telegram.StartupNotice)
-	pending := strings.Index(got, "Inbox: 1 pending notice")
-	if startup < 0 || pending < 0 || startup >= pending {
-		t.Fatalf("startup must precede inbox notice: %q", got)
+func TestTelegramInboxNotifierDispatchesAndReconciles(t *testing.T) {
+	for _, mode := range []string{"initial", "dropped-wake", "startup"} {
+		t.Run(mode, func(t *testing.T) {
+			rt := shell3test.NewRuntimeForTest(t, "inbox handled")
+			var out lockedBuffer
+			bot := telegram.NewBot(telegram.NewConsoleClient(strings.NewReader(""), &out, telegram.ConsoleChatID), rt, telegram.ConsoleChatID, telegram.NewSessionIndex(func() *runs.Store { return rt.Store() }, "telegram"))
+			store := inbox.Store{Root: t.TempDir()}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan struct{})
+			go func() {
+				notifyTelegramInbox(ctx, bot, store, make(chan struct{}), mode == "startup", 10*time.Millisecond, applog.Noop{})
+				close(done)
+			}()
+			if mode == "dropped-wake" {
+				time.Sleep(20 * time.Millisecond)
+			}
+			receipt, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "workflow complete"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) && !strings.Contains(out.String(), "inbox handled") {
+				time.Sleep(10 * time.Millisecond)
+			}
+			cancel()
+			<-done
+			n, err := store.Read("main", receipt.ID)
+			if err != nil || n.Status != inbox.StatusArchived {
+				t.Fatalf("notice not automatically cleared: %+v %v", n, err)
+			}
+			if strings.Count(out.String(), "inbox handled") != 1 {
+				t.Fatalf("reply=%q", out.String())
+			}
+			if mode == "startup" && strings.Index(out.String(), telegram.StartupNotice) > strings.Index(out.String(), "inbox handled") {
+				t.Fatal("startup after delivery")
+			}
+		})
 	}
 }
 

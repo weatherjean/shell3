@@ -188,13 +188,14 @@ text remains the assistant reply. `service` opens no model session. Keep the
 selected foreground process alive with the host service manager.
 
 Inbox notices and background-command completions are durable and at-least-once.
-Notices addressed to `main` stay passive. The agent uses the inbox skill when
-asked or when relevant notices are needed for the user's ongoing task.
+Telegram and the interactive console queue a turn for `main` notices, waiting
+until idle. Fully read notices clear after a successful turn saves them in
+conversation history; failed deliveries remain pending for retry.
 
 For long-running work, the agent can set `poll_in: "2m"` on `bash_bg` (including
 workflow commands). Telegram and the interactive console then run one progress
 check when due and idle. The agent can re-arm it with the bounded `shell3` tool.
-Completion, stop, and host shutdown cancel pending checks. See
+Successful inbox delivery, stop, and host shutdown cancel pending checks. See
 [timed progress checks](docs/cli.md#timed-progress-checks).
 
 ## Reference

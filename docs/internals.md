@@ -232,17 +232,23 @@ Workflow handling atomically renames `new` to `processing`, records the event
 in the run ledger, then acknowledges the claim. Restart recovery returns
 abandoned workflow claims to consideration, so delivery is at-least-once.
 
-`main` notices are passive. They remain pending while list/read commands expose
-bounded metadata and contiguous body chunks. Read progress is durable and
-cannot skip bytes. Archive validates the whole requested batch, then atomically
-moves each fully read notice. Notice bodies never enter SQLite or a model prompt
-automatically.
+Attached Telegram and interactive console hosts deliver `main` notices through
+normal turn slots, after queued user input and steering. A shared nonblocking
+filesystem reader lease serializes automatic consumers. Each batch includes at
+most eight notices and 32 KiB of body text; large bodies use UTF-8-safe chunks.
+Automatic progress is separate from CLI read progress and includes a body hash.
+After a successful turn, the exact unique delivery input must exist in durable
+conversation history before progress advances. Fully delivered notices archive
+automatically. Failed turns, cancellation, or failed history writes leave the
+chunk pending. Crash windows can repeat a chunk, never skip unsaved content.
+Failures retry after one minute. Stop and reset pause review until ordinary user
+input; this pause does not survive host restart.
 
-Exactly one persistent host owns the wake socket. Telegram turns a `main` hint
-into a host-rendered pending alert; service ignores `main`. Both route workflow
-hints. Periodic route reconciliation covers dropped hints and restarts. A local
-console owns no socket.
-
+Exactly one persistent host owns the wake socket. Telegram queues main review;
+service ignores main. Both route workflow hints. Periodic reconciliation covers
+dropped hints and restarts. The console owns no socket and checks between turns.
+Standalone list/read/archive remain available for explicit inspection; CLI reads
+track contiguous progress but cannot prove saved conversation history.
 ## Workflows and runners
 
 `internal/wrk` parses one strict task graph, validates dependencies and access

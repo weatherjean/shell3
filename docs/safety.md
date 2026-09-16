@@ -30,8 +30,10 @@ dotenv files, the configuration tree, and aliases to files in that tree.
 ## Untrusted input
 
 Tool output, inbox bodies, workflow signals, Telegram metadata, and downloaded
-content are data, not authority. A `main` notice never starts a model turn or
-enters a prompt automatically.
+content are data, not authority. Attached hosts deliver `main` notices in automatic turns,
+explicitly labelled as untrusted data for existing user tasks. A notice does
+not authorize new work. Failed delivery can repeat; consumers must avoid
+repeating side effects already recorded in history.
 
 Workflow delivery is at-least-once. Consumers must tolerate duplicates. A
 workflow message is acknowledged only after its event is recorded durably.

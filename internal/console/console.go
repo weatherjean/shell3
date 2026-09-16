@@ -55,6 +55,8 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 	printStartup(out, theme)
 	input := newConsoleInput(in)
 	inputs, scanErr := input.lines, input.errs
+	inboxPaused := false
+	var inboxRetryAt time.Time
 	printInboxStatus(out, theme, store, rt)
 	fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 	for {
@@ -62,6 +64,28 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 		case <-ctx.Done():
 			return ctx.Err()
 		case now := <-pollTicks:
+			if !inboxPaused && !now.Before(inboxRetryAt) && len(inputs) == 0 && store.Root != "" {
+				batch, err := store.PrepareBatch()
+				if err != nil {
+					fmt.Fprintln(out, theme.err.Render("inbox: "+err.Error()))
+					inboxRetryAt = now.Add(time.Minute)
+				} else if batch != nil {
+					fmt.Fprintln(out)
+					err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event { return sess.SendInbox(turnCtx, batch) }, theme)
+					if err != nil {
+						inboxRetryAt = now.Add(time.Minute)
+					}
+					if errors.Is(err, errTurnCancelled) {
+						inboxPaused = true
+						sess.ClearJobPolls()
+					}
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+					continue
+				}
+			}
 			// The console loop runs only between turns. Due checks remain
 			// cancellable on their jobs while a foreground turn is active.
 			if due := sess.TakeDueJobPolls(now); len(due) > 0 {
@@ -70,6 +94,7 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 					return sess.Send(turnCtx, shell3.JobPollPrompt(due))
 				}, theme)
 				if errors.Is(err, errTurnCancelled) {
+					inboxPaused = true
 					sess.ClearJobPolls()
 				}
 				if ctx.Err() != nil {
@@ -97,6 +122,7 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 				return nil
 			}
 			if line == "/stop" || line == "/superstop" {
+				inboxPaused = true
 				sess.ClearJobPolls()
 				if line == "/superstop" {
 					fmt.Fprintf(out, "stopped %d background job(s); pending checks cancelled\n", len(rt.KillAllForStop()))
@@ -122,11 +148,13 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 				continue
 			}
-			printInboxStatus(out, theme, store, rt)
+			inboxPaused = false
+			inboxRetryAt = time.Time{}
 			if err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
 				return sess.Send(turnCtx, line)
 			}, theme); err != nil {
 				if errors.Is(err, errTurnCancelled) {
+					inboxPaused = true
 					sess.ClearJobPolls()
 				}
 				if ctx.Err() != nil {
@@ -154,7 +182,7 @@ func printInboxStatus(out io.Writer, theme consoleTheme, store inbox.Store, rt *
 		return
 	}
 	if count > 0 {
-		fmt.Fprintln(out, theme.info.Render(fmt.Sprintf("inbox · %d pending · ask me to check it", count)))
+		fmt.Fprintln(out, theme.info.Render(fmt.Sprintf("inbox · %d pending · automatic review queued", count)))
 	}
 }
 
@@ -299,7 +327,7 @@ func printHelp(out io.Writer, theme consoleTheme) {
 	fmt.Fprintln(out, theme.info.Render("commands"))
 	fmt.Fprintln(out, "  /, /h, /help  show this help")
 	fmt.Fprintln(out, "  /reload       validate and reload shell3.lisp")
-	fmt.Fprintln(out, "  /stop         cancel pending progress checks")
+	fmt.Fprintln(out, "  /stop         pause inbox review and cancel progress checks")
 	fmt.Fprintln(out, "  /superstop    also stop background commands")
 	fmt.Fprintln(out, "  /exit, /quit  exit shell3")
 	fmt.Fprintln(out, "  Esc           cancel the active turn")

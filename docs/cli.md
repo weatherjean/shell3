@@ -121,6 +121,9 @@ durable; the JSON receipt reports wake delivery separately.
 Inbox commands load no model or config. `list` returns bounded metadata and
 previews. `read` returns a bounded UTF-8-safe chunk and records contiguous read
 progress. `archive` requires every named notice to be pending and fully read.
+Standalone CLI reads do not auto-clear. Attached Telegram and interactive console
+hosts automatically deliver pending main notices and clear them only after a
+successful turn verifies their complete contents in saved conversation history.
 
 ## Workflows
 

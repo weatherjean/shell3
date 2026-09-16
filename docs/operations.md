@@ -94,18 +94,19 @@ notice before removing the marker.
 
 ## Inbox
 
-The `main` inbox is passive. The console prints a pending count; Telegram sends
-a host-owned pending alert. Neither action starts a model turn or inserts the
-notice into a prompt.
+Telegram and the interactive console automatically queue review of `main`
+notices. Busy turns finish first; queued user messages take priority. Bounded
+batches coalesce notices, with large bodies delivered in chunks. Fully read
+notices clear only after a successful turn saves their contents in conversation
+history. Failed or cancelled delivery stays pending; failures retry after one
+minute. Recovery may repeat delivery. The headless service opens no model session.
 
-Agent-requested `bash_bg` progress checks are separate: `poll_in: "2m"` requests
-one future model turn. A busy conversation defers it. If the command finishes
-first, the requested check still runs when due to report its outcome.
-The agent may re-arm a running job with `shell3` action `poll`. These checks
-spend a model turn when due and do not survive host restart.
-`/stop` clears the conversation's pending checks; `/superstop` also kills managed
-commands. Completion notices still remain passive. The inbox skill permits
-reading relevant notices as part of the user's ongoing task.
+Agent-requested `bash_bg` progress checks remain useful for unfinished work:
+`poll_in: "2m"` requests one future turn, deferred while busy. Successful inbox
+delivery cancels the same session's redundant completion check. Checks do not
+survive host restart. `/stop` pauses inbox review and cancels pending checks;
+`/superstop` also kills managed commands. `/new` also pauses inbox review. Ordinary
+user input or host restart resumes review.
 
 Inspect and archive notices explicitly:
 
