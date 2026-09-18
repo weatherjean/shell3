@@ -24,6 +24,10 @@ manifest, and embedded version. Download and checksum the artifacts; smoke-test
 the native binary and run local acceptance against it before publishing the
 draft. Never move or force-push a published tag to repair a release.
 
+Verify each archive checksum and inspect `go version -m` on its binary: the
+revision must match the tag and `vcs.modified` must be `false`. Keep GoReleaser's
+`dist/` output ignored so generated artifacts cannot dirty the source stamp.
+
 A public release does not itself replace any running installation. Deployment
 requires its own authorized quiet window, coherent binary/configuration changes,
 rollback preparation, and observation after startup.
