@@ -53,28 +53,56 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 	defer sess.ClearJobPolls()
 	theme := newTheme(in, out)
 	printStartup(out, theme)
-	input := newConsoleInput(in)
+	return runConsoleInput(ctx, out, rt, sess, store, reload, pollTicks, newConsoleInput(in), theme)
+}
+
+func runConsoleInput(ctx context.Context, out io.Writer, rt *shell3.Runtime, sess *shell3.Session, store inbox.Store, reload func() error, pollTicks <-chan time.Time, input *consoleInput, theme consoleTheme) error {
 	inputs, scanErr := input.lines, input.errs
 	inboxPaused := false
 	var inboxRetryAt time.Time
 	printInboxStatus(out, theme, store, rt)
 	fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 	for {
+		var line string
+		var ok bool
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case now := <-pollTicks:
-			if !inboxPaused && !now.Before(inboxRetryAt) && len(inputs) == 0 && store.Root != "" {
-				batch, err := store.PrepareBatch()
-				if err != nil {
-					fmt.Fprintln(out, theme.err.Render("inbox: "+err.Error()))
-					inboxRetryAt = now.Add(time.Minute)
-				} else if batch != nil {
-					fmt.Fprintln(out)
-					err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event { return sess.SendInbox(turnCtx, batch) }, theme)
+			// A waiting sender on an unbuffered channel has len zero. Receive
+			// ready user input before admitting either kind of automatic turn.
+			select {
+			case line, ok = <-inputs:
+			default:
+				if !inboxPaused && !now.Before(inboxRetryAt) && store.Root != "" {
+					batch, err := store.PrepareBatch()
 					if err != nil {
+						fmt.Fprintln(out, theme.err.Render("inbox: "+err.Error()))
 						inboxRetryAt = now.Add(time.Minute)
+					} else if batch != nil {
+						fmt.Fprintln(out)
+						err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event { return sess.SendInbox(turnCtx, batch) }, theme)
+						if err != nil {
+							inboxRetryAt = now.Add(time.Minute)
+						}
+						if errors.Is(err, errTurnCancelled) {
+							inboxPaused = true
+							sess.ClearJobPolls()
+						}
+						if ctx.Err() != nil {
+							return ctx.Err()
+						}
+						fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+						continue
 					}
+				}
+				// The console loop runs only between turns. Due checks remain
+				// cancellable on their jobs while a foreground turn is active.
+				if due := sess.TakeDueJobPolls(now); len(due) > 0 {
+					fmt.Fprintln(out)
+					err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
+						return sess.Send(turnCtx, shell3.JobPollPrompt(due))
+					}, theme)
 					if errors.Is(err, errTurnCancelled) {
 						inboxPaused = true
 						sess.ClearJobPolls()
@@ -83,24 +111,8 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 						return ctx.Err()
 					}
 					fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-					continue
 				}
-			}
-			// The console loop runs only between turns. Due checks remain
-			// cancellable on their jobs while a foreground turn is active.
-			if due := sess.TakeDueJobPolls(now); len(due) > 0 {
-				fmt.Fprintln(out)
-				err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
-					return sess.Send(turnCtx, shell3.JobPollPrompt(due))
-				}, theme)
-				if errors.Is(err, errTurnCancelled) {
-					inboxPaused = true
-					sess.ClearJobPolls()
-				}
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+				continue
 			}
 		case err, ok := <-scanErr:
 			if !ok {
@@ -108,66 +120,66 @@ func runWithPollTicks(ctx context.Context, in io.Reader, out io.Writer, rt *shel
 				continue
 			}
 			return err
-		case line, ok := <-inputs:
-			if !ok {
-				fmt.Fprintln(out)
-				return nil
-			}
-			line = strings.TrimSpace(line)
-			if line == "" {
-				fmt.Fprint(out, theme.prompt.Render("you› "))
-				continue
-			}
-			if line == "/quit" || line == "/exit" {
-				return nil
-			}
-			if line == "/stop" || line == "/superstop" {
-				inboxPaused = true
-				sess.ClearJobPolls()
-				if line == "/superstop" {
-					fmt.Fprintf(out, "stopped %d background job(s); pending checks cancelled\n", len(rt.KillAllForStop()))
-				} else {
-					fmt.Fprintln(out, "pending checks cancelled; background commands keep running")
-				}
-				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-				continue
-			}
-			if line == "/" || line == "/h" || line == "/help" {
-				printHelp(out, theme)
-				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-				continue
-			}
-			if line == "/reload" {
-				if reload == nil {
-					fmt.Fprintln(out, theme.err.Render("reload is unavailable"))
-				} else if err := reload(); err != nil {
-					fmt.Fprintln(out, theme.err.Render("reload failed: "+err.Error()))
-				} else {
-					fmt.Fprintln(out, theme.info.Render("config reloaded"))
-				}
-				fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
-				continue
-			}
-			inboxPaused = false
-			inboxRetryAt = time.Time{}
-			if err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
-				return sess.Send(turnCtx, line)
-			}, theme); err != nil {
-				if errors.Is(err, errTurnCancelled) {
-					inboxPaused = true
-					sess.ClearJobPolls()
-				}
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-			}
-			for sess.HasQueuedSteer() {
-				if err := runInteractiveTurn(ctx, out, input, sess.RunQueued, theme); err != nil && ctx.Err() != nil {
-					return ctx.Err()
-				}
+		case line, ok = <-inputs:
+		}
+		if !ok {
+			fmt.Fprintln(out)
+			return nil
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			fmt.Fprint(out, theme.prompt.Render("you› "))
+			continue
+		}
+		if line == "/quit" || line == "/exit" {
+			return nil
+		}
+		if line == "/stop" || line == "/superstop" {
+			inboxPaused = true
+			sess.ClearJobPolls()
+			if line == "/superstop" {
+				fmt.Fprintf(out, "stopped %d background job(s); pending checks cancelled\n", len(rt.KillAllForStop()))
+			} else {
+				fmt.Fprintln(out, "pending checks cancelled; background commands keep running")
 			}
 			fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+			continue
 		}
+		if line == "/" || line == "/h" || line == "/help" {
+			printHelp(out, theme)
+			fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+			continue
+		}
+		if line == "/reload" {
+			if reload == nil {
+				fmt.Fprintln(out, theme.err.Render("reload is unavailable"))
+			} else if err := reload(); err != nil {
+				fmt.Fprintln(out, theme.err.Render("reload failed: "+err.Error()))
+			} else {
+				fmt.Fprintln(out, theme.info.Render("config reloaded"))
+			}
+			fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
+			continue
+		}
+		inboxPaused = false
+		inboxRetryAt = time.Time{}
+		if err := runInteractiveTurn(ctx, out, input, func(turnCtx context.Context) <-chan shell3.Event {
+			return sess.Send(turnCtx, line)
+		}, theme); err != nil {
+			if errors.Is(err, errTurnCancelled) {
+				inboxPaused = true
+				sess.ClearJobPolls()
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+		for sess.HasQueuedSteer() {
+			if err := runInteractiveTurn(ctx, out, input, sess.RunQueued, theme); err != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+		fmt.Fprint(out, "\n"+theme.prompt.Render("you› "))
 	}
 }
 

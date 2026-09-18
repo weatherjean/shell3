@@ -61,6 +61,54 @@ func TestConsoleAutomaticallyDeliversAndClearsInbox(t *testing.T) {
 	}
 }
 
+func TestReadyConsoleInputWinsOverReadyInboxTick(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("queued=%t", queued), func(t *testing.T) {
+			fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "reply"}}})
+			rt := shell3test.NewRuntimeForTestClient(t, fake)
+			store := inbox.Store{Root: t.TempDir()}
+			if _, err := store.Notify(inbox.Request{To: "main", Source: "test", Event: "done", Body: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+			// Both channels are ready at admission. Exercise either select
+			// outcome; EOF is ready input too, even though its channel len is 0.
+			for n := range 32 {
+				sess, err := rt.Session(shell3.SessionOpts{Name: fmt.Sprintf("priority-%d", n)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				input := &consoleInput{lines: make(chan string, 2), errs: make(chan error)}
+				if queued {
+					input.lines <- "user request"
+					input.lines <- "/exit"
+				}
+				close(input.lines)
+				ticks := make(chan time.Time, 1)
+				ticks <- time.Now()
+				var out bytes.Buffer
+				if err := runConsoleInput(t.Context(), &out, rt, sess, store, nil, ticks, input, consoleTheme{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := 0
+			if queued {
+				want = 32
+			}
+			if fake.CallCount() != want {
+				t.Fatalf("calls=%d want=%d", fake.CallCount(), want)
+			}
+			for _, call := range fake.CallsSnapshot() {
+				if call.Msgs[len(call.Msgs)-1].Content != "user request" {
+					t.Fatal("automatic turn preempted user input")
+				}
+			}
+			if _, count, err := store.List("main", inbox.StatusPending, 0, 10); err != nil || count != 1 {
+				t.Fatalf("pending=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
 func TestConsoleRunsOneShotJobPollBetweenTurns(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "launch", Name: "bash_bg", RawArgs: `{"command":"sleep 60","poll_in":"2m"}`}}}},
