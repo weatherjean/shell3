@@ -79,6 +79,12 @@ func (c *conversation) startInboxTurn(ctx context.Context, now time.Time) bool {
 			c.inboxRetryAt = time.Now().Add(time.Minute)
 		} else {
 			c.inboxRetryAt = time.Time{}
+			// Reconcile before releasing the turn slot. Otherwise an idle room
+			// briefly advertises pending work after the final notice archived,
+			// competing with checks until a second empty turn clears the flag.
+			if _, count, err := store.List("main", inbox.StatusPending, 0, 1); err == nil {
+				c.inboxPending = count > 0
+			}
 		}
 		c.mu.Unlock()
 		c.finishPostedTurn(ctx, sess, anchor, reply, cancel)

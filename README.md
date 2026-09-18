@@ -44,8 +44,8 @@ commands require Bash. Building from source requires the Go version declared in
 ### Installer
 
 The installer selects the latest release for the current OS and architecture,
-downloads its prebuilt archive, and verifies it against the release checksum
-when `sha256sum` or `shasum` is available:
+downloads its prebuilt archive, and requires its exact release checksum to match
+before installation. Either `sha256sum` or `shasum` must be available:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/weatherjean/shell3/main/install.sh | sh

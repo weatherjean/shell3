@@ -67,19 +67,21 @@ trap 'rm -rf "$tmp"' EXIT
 say "Downloading $asset ($version)..."
 dl_file "$url" "$tmp/$asset" || err "download failed: $url"
 
-# Best-effort checksum verification against the release's checksums.txt.
-if dl_file "https://github.com/$REPO/releases/download/$version/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
-  sum=""
-  if command -v sha256sum >/dev/null 2>&1; then
-    sum="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then
-    sum="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"
-  fi
-  if [ -n "$sum" ]; then
-    grep -q "$sum" "$tmp/checksums.txt" || err "checksum mismatch for $asset"
-    say "Checksum OK."
-  fi
+# Verify the exact asset before extracting or touching an installed binary.
+dl_file "https://github.com/$REPO/releases/download/$version/checksums.txt" "$tmp/checksums.txt" \
+  || err "could not download release checksums; nothing installed"
+expected="$(awk -v asset="$asset" 'NF == 2 && $2 == asset {print $1}' "$tmp/checksums.txt")"
+[ -n "$expected" ] || err "no checksum for $asset"
+if command -v sha256sum >/dev/null 2>&1; then
+  sum="$(sha256sum "$tmp/$asset")" || err "could not calculate SHA-256"
+elif command -v shasum >/dev/null 2>&1; then
+  sum="$(shasum -a 256 "$tmp/$asset")" || err "could not calculate SHA-256"
+else
+  err "need sha256sum or shasum to verify this release; nothing installed"
 fi
+sum="${sum%% *}"
+[ "$sum" = "$expected" ] || err "checksum mismatch or duplicate checksum for $asset"
+say "Checksum OK."
 
 tar -xzf "$tmp/$asset" -C "$tmp" || err "could not extract $asset"
 [ -f "$tmp/$BINARY" ] || err "archive did not contain a '$BINARY' binary"
