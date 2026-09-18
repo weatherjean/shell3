@@ -62,15 +62,16 @@ type Telegram struct {
 // ownership belongs to exactly one persistent shell3 process; the workflow
 // remains the sole place where executable work is declared.
 type Schedule struct {
-	Name     string
-	Cron     string
-	Timezone string
-	Wrkfile  string
-	Request  string
-	Output   string
-	Timeout  time.Duration
-	Overlap  string
-	Notify   string
+	Name          string
+	Cron          string
+	Timezone      string
+	Wrkfile       string
+	Request       string
+	Output        string
+	Timeout       time.Duration
+	Overlap       string
+	Notify        string
+	NotifyFailure string
 }
 
 type Runner struct {
@@ -327,6 +328,8 @@ func parseSchedule(node sexpr.Node, args []sexpr.Node) (Schedule, error) {
 			s.Overlap, err = oneOf(field, values, "skip", "allow")
 		case "notify":
 			s.Notify, err = oneLiteral(field, values)
+		case "notify-failure":
+			s.NotifyFailure, err = oneLiteral(field, values)
 		default:
 			err = at(field, "unknown schedule field %q", name)
 		}
@@ -373,6 +376,9 @@ func parseSchedule(node sexpr.Node, args []sexpr.Node) (Schedule, error) {
 	}
 	if strings.TrimSpace(s.Notify) == "" {
 		return Schedule{}, at(node, "schedule %q notify destination is empty", s.Name)
+	}
+	if seen["notify-failure"] && strings.TrimSpace(s.NotifyFailure) == "" {
+		return Schedule{}, at(node, "schedule %q notify-failure destination is empty", s.Name)
 	}
 	return s, nil
 }

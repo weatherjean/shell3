@@ -128,15 +128,16 @@ func newScheduleCommand() *cobra.Command {
 }
 
 type scheduleListRecord struct {
-	Name     string `json:"name"`
-	Cron     string `json:"cron"`
-	Timezone string `json:"timezone"`
-	Wrkfile  string `json:"wrkfile"`
-	Task     string `json:"task"`
-	Output   string `json:"output"`
-	Timeout  string `json:"timeout"`
-	Overlap  string `json:"overlap"`
-	Notify   string `json:"notify"`
+	Name          string `json:"name"`
+	Cron          string `json:"cron"`
+	Timezone      string `json:"timezone"`
+	Wrkfile       string `json:"wrkfile"`
+	Task          string `json:"task"`
+	Output        string `json:"output"`
+	Timeout       string `json:"timeout"`
+	Overlap       string `json:"overlap"`
+	Notify        string `json:"notify"`
+	NotifyFailure string `json:"notify_failure,omitempty"`
 }
 
 func newScheduleListCommand() *cobra.Command {
@@ -164,15 +165,16 @@ func newScheduleListCommand() *cobra.Command {
 			for _, job := range jobs {
 				declaration := job.Config
 				record := scheduleListRecord{
-					Name:     declaration.Name,
-					Cron:     declaration.Cron,
-					Timezone: declaration.Timezone,
-					Wrkfile:  job.Wrkfile,
-					Task:     job.Task,
-					Output:   declaration.Output,
-					Timeout:  declaration.Timeout.String(),
-					Overlap:  declaration.Overlap,
-					Notify:   declaration.Notify,
+					Name:          declaration.Name,
+					Cron:          declaration.Cron,
+					Timezone:      declaration.Timezone,
+					Wrkfile:       job.Wrkfile,
+					Task:          job.Task,
+					Output:        declaration.Output,
+					Timeout:       declaration.Timeout.String(),
+					Overlap:       declaration.Overlap,
+					Notify:        declaration.Notify,
+					NotifyFailure: declaration.NotifyFailure,
 				}
 				if err := enc.Encode(record); err != nil {
 					return err

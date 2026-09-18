@@ -159,6 +159,10 @@ session. `schedule list` emits resolved declarations as JSONL, `run` admits one
 manual fire through the normal durable path, and `history` emits the SQLite
 ledger newest first.
 
+Schedule declarations include `notify` and, when configured, `notify_failure`
+in JSONL. The latter overrides the terminal destination for failed or cancelled
+workflows. Changing either route requires restarting the schedule owner.
+
 Exactly one `service` or Telegram process may own a project's schedules.
 
 ## Completion and version

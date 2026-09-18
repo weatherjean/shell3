@@ -20,4 +20,13 @@
     (output "done")
     (timeout "30s")
     (overlap skip)
-    (notify "main")))
+    (notify "main"))
+
+  (schedule acceptance-failure
+    (cron "0 0 1 1 *")
+    (timezone "UTC")
+    (run (wrkfile "demo.wrk.lisp"))
+    (output "deliberately-missing")
+    (timeout "30s")
+    (notify "quiet")
+    (notify-failure "main")))

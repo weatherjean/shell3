@@ -197,6 +197,28 @@ relative to `shell3.lisp`; `output` is relative to the run's artifact directory.
 `overlap` is `skip` (default) or `allow`. `request` is optional and `notify`
 defaults to `main`.
 
+Use `(notify-failure "main")` to override the destination for a failed or
+cancelled workflow while retaining a quieter mailbox for successful runs:
+
+```lisp
+(notify "quiet")
+(notify-failure "main")
+```
+
+This sends one notice to the selected destination, not to both. The override is
+optional; omitting it preserves `notify` for every outcome. Routes are snapshotted
+at admission and survive restart or removal of the schedule. A failed notice
+write keeps the schedule row running until reconciliation persists it. As with
+other workflow notices, a crash between inbox persistence and receipt persistence
+can repeat delivery. Failures before a valid workflow snapshot exists are recorded
+in the schedule ledger and application log, not through this terminal route.
+`quiet` and `silent` are ordinary mailbox names, not discard policies. Only `main`
+is reviewed automatically by an attached host.
+
+Business outcomes such as “inserted” and “skipped” belong in the accepted report.
+Use an external check to verify database effects, current-run receipts, and a
+nonempty report. See the [verified-outcome example](../examples/verified-outcome/README.md).
+
 Every admitted fire is a durable wrk run indexed in SQLite as `running`, `done`,
 or `failed`; a skipped overlap creates no run. The timeout includes waiting.
 Success requires a symlink-free regular output file. See

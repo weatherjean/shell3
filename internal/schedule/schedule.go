@@ -139,7 +139,8 @@ func (e *Executor) Run(ctx context.Context, name, trigger string, scheduledAt ti
 	_, err = wrk.Start(e.ConfigPath, job.Wrkfile, wrk.StartOptions{
 		StateRoot: e.StateRoot, RunID: runID, Shell3Bin: e.Shell3Bin,
 		Request: job.Config.Request, NotifyTo: job.Config.Notify,
-		NotifyState: paths.NewLocal(e.WorkDir).Root, Timeout: job.Config.Timeout,
+		NotifyFailureTo: job.Config.NotifyFailure,
+		NotifyState:     paths.NewLocal(e.WorkDir).Root, Timeout: job.Config.Timeout,
 		RequiredOutput: job.Config.Output, ExpectedTask: job.Task,
 	})
 	if err != nil {

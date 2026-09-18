@@ -146,6 +146,50 @@ content. Review and redact them before sharing.
 There is no automatic retention for conversations, archived notices, workflow
 runs, artifacts, job logs, or Telegram media.
 
+For a read-only inventory, run the repository's standard-library Python helper:
+
+```sh
+python3 scripts/retention_inventory.py /absolute/project/.shell3_project
+```
+
+No age policy is assumed, and there is no deletion mode. Optional
+`--success-days 30 --failure-days 90` flags identify runs for review, not deletion.
+Active execution locks, nonterminal workflows, running schedule rows, pending
+notice references, missing notification receipts, and unreadable state block
+candidacy. The inventory does not follow artifact symlinks. It reports metadata
+and sizes, never conversation, credential, or report bodies.
+
+A live inventory is advisory. Before implementing deletion, agree retention ages,
+stop all owners, back up the consistent project state, and define how schedule
+history output references and workflow routes remain usable after removal.
+Pending notices must be handled explicitly; age alone does not acknowledge them.
+Do not feed inventory paths into `rm`. Conversation and media retention need their
+own policy; this helper only inventories workflow runs and notice counts.
+
+For quiet scheduled work, use `notify-failure` to route terminal failures to
+`main`. Keep monitoring `errors.jsonl` for startup, admission, and storage failures
+that prevent a valid workflow snapshot from being created.
+
+## Deploying operational changes
+
+Run `make build`, `go test ./...`, `go test -race ./...`, `make lint`, and
+`make acceptance` before deployment. The operational example tests require
+Python 3.9 or newer. Validate the target configuration and each changed wrkfile
+with the newly built binary, then exercise success, skip, failure, and retry
+against temporary application data without external network effects.
+
+Install a coherent binary/configuration/checker set during a quiet window. A
+schedule routing change requires restarting its persistent owner. Confirm the
+new host startup, schedule inventory, and a controlled failure reaching `main`.
+Observe real scheduled completions before claiming production validation.
+
+For rollback, retain the previous executable and exact installation files outside
+the repository. Stop the owner before restoring them together. Finish or cancel
+new runs using the new binary first: an older parser cannot resume configuration
+snapshots containing `notify-failure`. Do not restore an older database over
+messages or application work accepted since deployment. Use main history for
+source reverts; no backup branches are needed.
+
 Run the deterministic local acceptance path before a paid or authenticated
 test:
 

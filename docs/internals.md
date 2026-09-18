@@ -312,6 +312,13 @@ completed graph becomes failed if any required-output path component is a
 symlink or the final path is not a regular file. Only then is the schedule row
 finalized and its notice emitted.
 
+An optional `notify-failure` schedule destination is copied to the immutable
+workflow manifest as `notify_failure_to`. Failed and cancelled runs select that
+destination; successful runs retain `notify`. Older manifests without the field
+retain their existing routing. Notification retry and ledger finalization use
+the captured route, including when the schedule declaration has been removed.
+This does not change the SQLite schema or introduce a business-level skip state.
+
 ## Storage and diagnostics
 
 `internal/runs` owns one SQLite database per project. Its current schema stores:

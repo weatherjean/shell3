@@ -53,4 +53,19 @@ grep -q '"event": "wrk.completed"' "$state/schedule/.shell3_project/inbox"/*/new
 grep -q '"event":"schedule.started"' "$state/schedule/.shell3_project/errors.jsonl"
 grep -q '"event":"schedule.done"' "$state/schedule/.shell3_project/errors.jsonl"
 
+# A missing required artifact is a workflow failure, routed to main rather
+# than the success mailbox. Exercise the real CLI, immutable snapshot and ledger.
+if "$shell3_bin" schedule run --config "$config" --workdir "$state/failure" \
+  acceptance-failure > "$state/failure-run.json" 2> "$state/failure-error.log"; then
+  echo "expected required-output failure" >&2
+  exit 1
+fi
+grep -q '"status":"failed"' "$state/failure-run.json"
+"$shell3_bin" schedule history --workdir "$state/failure" --status failed \
+  acceptance-failure > "$state/failure-history.jsonl"
+grep -q '"schedule":"acceptance-failure"' "$state/failure-history.jsonl"
+test "$(find "$state/failure/.shell3_project/inbox" -type f -name '*.json' | wc -l | tr -d ' ')" = 1
+grep -q '"to": "main"' "$state/failure/.shell3_project/inbox"/*/new/*.json
+grep -q '"event": "wrk.failed"' "$state/failure/.shell3_project/inbox"/*/new/*.json
+
 echo "local acceptance: ok"

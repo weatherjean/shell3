@@ -34,12 +34,13 @@ const runVersion = 1
 var ErrBeatOwned = errors.New("wrk: another beat owns this run")
 
 type StartOptions struct {
-	StateRoot   string
-	RunID       string
-	Shell3Bin   string
-	Request     string
-	NotifyTo    string
-	NotifyState string
+	StateRoot       string
+	RunID           string
+	Shell3Bin       string
+	Request         string
+	NotifyTo        string
+	NotifyFailureTo string
+	NotifyState     string
 	// ExpectedTask pins a caller's pre-admission task identity. It prevents a
 	// changed wrkfile from creating a run somewhere other than its ledger path.
 	ExpectedTask string
@@ -54,19 +55,20 @@ type StartOptions struct {
 }
 
 type Manifest struct {
-	Version        int       `json:"version"`
-	Task           string    `json:"task"`
-	RunID          string    `json:"run_id"`
-	Created        time.Time `json:"created"`
-	Deadline       time.Time `json:"deadline,omitzero"`
-	WorkDir        string    `json:"workdir"`
-	Request        string    `json:"request"`
-	ConfigHash     string    `json:"config_sha256"`
-	DefinitionHash string    `json:"definition_sha256"`
-	Shell3Bin      string    `json:"shell3_bin"`
-	NotifyTo       string    `json:"notify_to,omitempty"`
-	NotifyState    string    `json:"notify_state,omitempty"`
-	RequiredOutput string    `json:"required_output,omitempty"`
+	Version         int       `json:"version"`
+	Task            string    `json:"task"`
+	RunID           string    `json:"run_id"`
+	Created         time.Time `json:"created"`
+	Deadline        time.Time `json:"deadline,omitzero"`
+	WorkDir         string    `json:"workdir"`
+	Request         string    `json:"request"`
+	ConfigHash      string    `json:"config_sha256"`
+	DefinitionHash  string    `json:"definition_sha256"`
+	Shell3Bin       string    `json:"shell3_bin"`
+	NotifyTo        string    `json:"notify_to,omitempty"`
+	NotifyFailureTo string    `json:"notify_failure_to,omitempty"`
+	NotifyState     string    `json:"notify_state,omitempty"`
+	RequiredOutput  string    `json:"required_output,omitempty"`
 }
 
 type BeatResult struct {
@@ -174,6 +176,7 @@ func Start(configPath, definitionPath string, opts StartOptions) (string, error)
 		WorkDir: workdir, Request: opts.Request, ConfigHash: hex.EncodeToString(configHash[:]),
 		DefinitionHash: hex.EncodeToString(definitionHash[:]), Shell3Bin: opts.Shell3Bin,
 		NotifyTo: opts.NotifyTo, NotifyState: opts.NotifyState, RequiredOutput: opts.RequiredOutput,
+		NotifyFailureTo: opts.NotifyFailureTo,
 	}
 	for path, data := range map[string][]byte{
 		filepath.Join(runDir, "shell3.lisp"):   configSource,
@@ -748,7 +751,8 @@ func loadRun(runDir string) (Manifest, *Definition, error) {
 }
 
 func notifyTerminal(runDir string, manifest Manifest, status string) error {
-	if manifest.NotifyTo == "" {
+	destination := manifest.notificationDestination(status)
+	if destination == "" {
 		return nil
 	}
 	path := filepath.Join(runDir, "notify.json")
@@ -766,12 +770,21 @@ func notifyTerminal(runDir string, manifest Manifest, status string) error {
 	case "cancelled":
 		event = "wrk.cancelled"
 	}
-	receipt, err := (inbox.Store{Root: root}).Notify(inbox.Request{To: manifest.NotifyTo, Source: "wrk:" + manifest.RunID,
+	receipt, err := (inbox.Store{Root: root}).Notify(inbox.Request{To: destination, Source: "wrk:" + manifest.RunID,
 		Event: event, Correlation: manifest.RunID, Body: fmt.Sprintf("workflow %s %s (run %s)", manifest.Task, status, manifest.RunID)})
 	if err != nil {
 		return err
 	}
 	return writeJSON(path, receipt)
+}
+
+// Failure routing is captured in the immutable manifest. Existing manifests
+// retain their original destination; configuration reloads cannot reroute a run.
+func (m Manifest) notificationDestination(status string) string {
+	if (status == "failed" || status == "cancelled") && m.NotifyFailureTo != "" {
+		return m.NotifyFailureTo
+	}
+	return m.NotifyTo
 }
 
 // TerminalNoticePersisted reports whether a terminal run has durably recorded
@@ -782,7 +795,14 @@ func TerminalNoticePersisted(runDir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if manifest.NotifyTo == "" {
+	status, err := readStatus(runDir)
+	if err != nil {
+		return false, err
+	}
+	if status != "completed" && status != "failed" && status != "cancelled" {
+		return false, nil
+	}
+	if manifest.notificationDestination(status) == "" {
 		return true, nil
 	}
 	if _, err := os.Stat(filepath.Join(runDir, "notify.json")); err != nil {

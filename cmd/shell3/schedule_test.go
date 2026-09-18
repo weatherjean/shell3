@@ -56,11 +56,38 @@ func TestScheduleListReportsDeclarationsNotRunDirectories(t *testing.T) {
 	if record.Name != "probe" || record.Task != "scheduled" || record.Cron != "0 8 * * *" || record.Timezone != "UTC" {
 		t.Fatalf("record = %+v", record)
 	}
-	if record.Wrkfile != filepath.Join(dir, "scheduled.wrk.lisp") || record.Output != "result.txt" || record.Timeout != "1m0s" || record.Overlap != "skip" || record.Notify != "main" {
+	if record.Wrkfile != filepath.Join(dir, "scheduled.wrk.lisp") || record.Output != "result.txt" || record.Timeout != "1m0s" || record.Overlap != "skip" || record.Notify != "main" || record.NotifyFailure != "" {
 		t.Fatalf("record = %+v", record)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".shell3_project")); !os.IsNotExist(err) {
 		t.Fatalf("schedule list created runtime state: %v", err)
+	}
+}
+
+func TestScheduleListIncludesFailureOverride(t *testing.T) {
+	dir := t.TempDir()
+	config := writeScheduleCLIConfig(t, dir)
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `(notify "main")`, `(notify "quiet") (notify-failure "main")`, 1))
+	if err := os.WriteFile(config, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := newScheduleListCommand()
+	var out bytes.Buffer
+	command.SetOut(&out)
+	command.SetArgs([]string{"--config", config, "--workdir", dir})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var record scheduleListRecord
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Notify != "quiet" || record.NotifyFailure != "main" {
+		t.Fatalf("record = %+v", record)
 	}
 }
 

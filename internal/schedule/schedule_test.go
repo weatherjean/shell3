@@ -134,6 +134,69 @@ func TestTerminalLedgerWaitsForDurableNotice(t *testing.T) {
 	}
 }
 
+func TestFailureRouteSurvivesRestartAndScheduleRemoval(t *testing.T) {
+	dir, configPath, cfg, store := scheduleFixture(t, `false`, "report.md", time.Minute)
+	cfg.Schedules[0].Notify = "quiet"
+	cfg.Schedules[0].NotifyFailure = "main"
+	executor, err := NewExecutor(configPath, dir, cfg, store, applog.Noop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".shell3_project", "inbox"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(dir, ".shell3_project", "inbox", "bWFpbg")
+	if err := os.WriteFile(blocked, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := executor.Run(t.Context(), "report", "manual", time.Now())
+	if err == nil || run.Status != "running" {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	// The restarted owner no longer declares this schedule. Its admitted run
+	// must retain both the failure route and the pending notification obligation.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := runs.Open(filepath.Join(dir, ".shell3_project"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	pending, err := reopened.RunningScheduleRuns()
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending after restart=%+v err=%v", pending, err)
+	}
+	cfg.Schedules = nil
+	restarted, err := NewExecutor(configPath, dir, cfg, reopened, applog.Noop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = restarted.Resume(t.Context(), pending[0])
+	if err == nil || run.Status != "failed" {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	for _, destination := range []string{"quiet", "main"} {
+		notices, total, err := (inbox.Store{Root: filepath.Join(dir, ".shell3_project")}).List(destination, inbox.StatusAll, 0, 10)
+		want := 0
+		if destination == "main" {
+			want = 1
+		}
+		if err != nil || total != want {
+			t.Fatalf("%s count=%d err=%v", destination, total, err)
+		}
+		if want == 1 && notices[0].Message.Event != "wrk.failed" {
+			t.Fatalf("notice=%+v", notices[0])
+		}
+	}
+	if _, err := restarted.Resume(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTerminalLedgerKeepsAcceptedCompletionAfterOutputRemoval(t *testing.T) {
 	dir, configPath, cfg, store := scheduleFixture(t,
 		`mkdir -p $TASK_ARTIFACTS; printf ok > $TASK_ARTIFACTS/report.md`, "report.md", time.Minute)
